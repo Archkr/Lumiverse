@@ -184,6 +184,8 @@ type ChatAppendMessageOptions =
       generation?: ChatAppendGenerationOptions;
     };
 
+type SpindleUserRole = "operator" | "admin" | "user";
+
 type RuntimeWorkerToHost =
   | WorkerToHost
   | {
@@ -218,6 +220,7 @@ type RuntimeWorkerToHost =
     }
   | { type: "user_storage_move"; requestId: string; from: string; to: string; userId?: string }
   | { type: "user_storage_stat"; requestId: string; path: string; userId?: string }
+  | { type: "user_get_role"; requestId: string; userId?: string }
   | {
       type: "tokens_count_text";
       requestId: string;
@@ -567,6 +570,9 @@ type RuntimeSpindleAPI = SpindleAPI & {
     ): string;
     read<T = unknown>(endpoint: string): Promise<T>;
     unregister(endpoint: string): void;
+  };
+  users: SpindleAPI["users"] & {
+    getRole(userId?: string): Promise<SpindleUserRole>;
   };
 };
 
@@ -2384,6 +2390,15 @@ const spindleApi: RuntimeSpindleAPI = {
         userId,
       } as any);
       return result as boolean;
+    },
+    async getRole(userId?: string): Promise<SpindleUserRole> {
+      const requestId = crypto.randomUUID();
+      const result = await request({
+        type: "user_get_role",
+        requestId,
+        userId,
+      } as any);
+      return result as SpindleUserRole;
     },
   },
 

@@ -280,6 +280,8 @@ type BackendProcessRuntimeInit = {
   userId?: string;
 };
 
+type SpindleUserRole = "operator" | "admin" | "user";
+
 type HostToBackendProcessRuntime =
   | { type: "init"; process: BackendProcessRuntimeInit }
   | { type: "stop"; reason?: string }
@@ -307,6 +309,7 @@ type RuntimeWorkerToHost =
     }
   | { type: "toast_show"; toastType: "success" | "warning" | "error" | "info"; message: string; title?: string; duration?: number; userId?: string }
   | { type: "user_storage_read_binary"; requestId: string; path: string; userId?: string }
+  | { type: "user_get_role"; requestId: string; userId?: string }
   | {
       type: "user_storage_write_binary";
       requestId: string;
@@ -2598,9 +2601,12 @@ export class WorkerHost {
       case "push_get_status":
         this.handlePushGetStatus(msg.requestId, msg.userId);
         break;
-      // ─── User Visibility (free tier — no permission needed) ─────────────
+      // ─── User Context (free tier — no permission needed) ────────────────
       case "user_is_visible":
         this.handleUserIsVisible(msg.requestId, msg.userId);
+        break;
+      case "user_get_role":
+        this.handleUserGetRole(msg.requestId, msg.userId);
         break;
       // ─── Text Editor (free tier — no permission needed) ─────────────────
       case "text_editor_open":
@@ -7752,7 +7758,7 @@ export class WorkerHost {
     }
   }
 
-  // ─── User Visibility (free tier) ────────────────────────────────────
+  // ─── User Context (free tier) ───────────────────────────────────────
 
   private handleUserIsVisible(requestId: string, userId?: string): void {
     try {
@@ -7763,6 +7769,25 @@ export class WorkerHost {
         requestId,
         result: eventBus.isUserVisible(resolvedUserId),
       });
+    } catch (err: any) {
+      this.postToWorker({ type: "response", requestId, error: err.message });
+    }
+  }
+
+  private handleUserGetRole(requestId: string, userId?: string): void {
+    try {
+      const resolvedUserId = this.resolveEffectiveUserId(userId);
+      if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+      this.enforceScopedUser(resolvedUserId);
+
+      const row = getDb()
+        .query('SELECT role FROM "user" WHERE id = ?')
+        .get(resolvedUserId) as { role: string | null } | null;
+      if (!row) throw new Error("User not found");
+
+      const result: SpindleUserRole =
+        row.role === "owner" ? "operator" : row.role === "admin" ? "admin" : "user";
+      this.postToWorker({ type: "response", requestId, result });
     } catch (err: any) {
       this.postToWorker({ type: "response", requestId, error: err.message });
     }
