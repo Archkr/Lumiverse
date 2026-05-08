@@ -823,6 +823,16 @@ function resolveConnection(userId: string, connectionId?: string) {
   return connection;
 }
 
+function resolveActivePresetId(userId: string): string | undefined {
+  const activePresetSetting = settingsSvc.getSetting(
+    userId,
+    "activeLoomPresetId",
+  );
+  return typeof activePresetSetting?.value === "string"
+    ? activePresetSetting.value
+    : undefined;
+}
+
 type ReasoningSettingsSnapshot = {
   apiReasoning?: boolean;
   reasoningEffort?: string;
@@ -1423,6 +1433,9 @@ export async function startGeneration(
 
   try {
     const connection = resolveConnection(input.userId, input.connection_id);
+    if (!input.preset_id) {
+      input.preset_id = resolveActivePresetId(input.userId);
+    }
     if (
       input.force_preset_id &&
       genType === "impersonate" &&
@@ -2385,6 +2398,10 @@ export async function dryRunGeneration(
   input: GenerateInput,
 ): Promise<DryRunResult> {
   const genType = input.generation_type || "normal";
+
+  if (!input.preset_id) {
+    input.preset_id = resolveActivePresetId(input.userId);
+  }
 
   // Resolve persona_id from settings if not provided (same as startGeneration)
   if (!input.persona_id) {

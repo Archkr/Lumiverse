@@ -18,6 +18,28 @@ const { id } = await spindle.chat.appendMessage(chatId, {
   metadata: { source: 'my_extension' },
 })
 
+// Append a user message and trigger a normal chat generation
+const { id: messageId, generationId } = await spindle.chat.appendMessage(
+  chatId,
+  {
+    role: 'user',
+    content: 'What happens next?',
+    metadata: { source: 'my_extension' },
+  },
+  true,
+)
+
+// Append and generate with explicit generation options
+await spindle.chat.appendMessage(chatId, { role: 'user', content: 'Your turn.' }, {
+  triggerGeneration: true,
+  generation: {
+    connection_id: 'connection-id',
+    persona_id: 'persona-id',
+    preset_id: 'preset-id',
+    target_character_id: 'character-id',
+  },
+})
+
 // Update an existing message's content (mirrors into swipes[swipe_id])
 await spindle.chat.updateMessage(chatId, messageId, {
   content: 'Updated content here.',
@@ -65,12 +87,47 @@ const isHidden = await spindle.chat.isMessageHidden(chatId, messageId)
 | Method | Returns | Description |
 |---|---|---|
 | `getMessages(chatId)` | `Promise<ChatMessage[]>` | Get all messages in a chat |
-| `appendMessage(chatId, message)` | `Promise<{ id: string }>` | Add a new message. Fields: `{ role, content, metadata? }` |
+| `appendMessage(chatId, message, options?)` | `Promise<{ id: string; generationId?: string }>` | Add a new message. Fields: `{ role, content, metadata? }`. Pass `true` or `{ triggerGeneration: true }` as `options` to start a normal reply. |
 | `updateMessage(chatId, messageId, patch)` | `Promise<void>` | Edit a message. See [Update Patch Shape](#update-patch-shape). |
 | `deleteMessage(chatId, messageId)` | `Promise<void>` | Remove a message |
 | `setMessageHidden(chatId, messageId, hidden)` | `Promise<void>` | Toggle the `hidden` flag on one message |
 | `setMessagesHidden(chatId, messageIds, hidden)` | `Promise<void>` | Bulk variant. Up to 500 IDs per call. |
 | `isMessageHidden(chatId, messageId)` | `Promise<boolean>` | Read the current hidden flag |
+
+## Append And Generate
+
+`appendMessage()` can start the same normal chat-generation pipeline used by the built-in chat input. This is useful when an extension wants to programmatically send a user turn and let Lumiverse stream the assistant response into the chat.
+
+```ts
+const result = await spindle.chat.appendMessage(
+  chatId,
+  { role: 'user', content: 'Continue the scene.' },
+  { triggerGeneration: true },
+)
+
+console.log(result.id)           // created user message id
+console.log(result.generationId) // generation id for the streamed reply
+```
+
+Generation options mirror the normal `/generate` request fields that are safe for this path:
+
+```ts
+type AppendGenerationOptions = {
+  connection_id?: string
+  persona_id?: string
+  persona_addon_states?: Record<string, boolean>
+  preset_id?: string
+  force_preset_id?: boolean
+  parameters?: Record<string, unknown>
+  target_character_id?: string
+  retain_council?: boolean
+}
+```
+
+!!! warning "Additional permission required: `generation`"
+    Appending a message only requires `chat_mutation`. Starting generation from `appendMessage()` also requires the `generation` permission. If generation cannot start, the call fails before writing the message.
+
+The generated assistant reply is delivered through the normal generation event stream (`GENERATION_STARTED`, token events, and `GENERATION_ENDED`). Use [`spindle.generate.observe(chatId)`](generation.md#spindlegenerateobservechatid) if your extension needs to watch the result.
 
 ## Update Patch Shape
 
