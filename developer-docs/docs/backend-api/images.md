@@ -43,6 +43,13 @@ const uploaded = await spindle.images.upload({
   owner_chat_id: 'chat-id',
 })
 
+// Batch upload — one IPC + host-side concurrency pool replaces N round-trips
+const results = await spindle.images.uploadMany([
+  { data: bytes1, filename: 'a.png', mime_type: 'image/png' },
+  { data: bytes2, filename: 'b.png', mime_type: 'image/png' },
+])
+// Returns Array<{ id?: string; error?: string }> — per-item failures don't throw the batch
+
 // Upload a data URL with ownership tags
 const generated = await spindle.images.uploadFromDataUrl(dataUrl, {
   originalFilename: 'generated.png',
@@ -61,6 +68,7 @@ await spindle.images.delete(uploaded.id)
 | `list(options?)` | `Promise<{ data: ImageDTO[], total: number }>` | List images. Options: `{ limit?, offset?, specificity?, onlyOwned?, characterId?, chatId? }`. Defaults: limit 50, max 200. |
 | `get(imageId, options?)` | `Promise<ImageDTO \| null>` | Get a single image DTO. Options: `{ specificity?, onlyOwned?, characterId?, chatId? }`. Returns `null` when the image is missing or excluded by the ownership filters. |
 | `upload(input)` | `Promise<ImageDTO>` | Upload raw image bytes. The host automatically tags the image with the current extension identifier. |
+| `uploadMany(items, options?)` | `Promise<Array<{ id?: string; error?: string }>>` | Batch upload multiple images in a single IPC call. Per-item failures captured as `{error}` rather than throwing. Options: `{ userId?, concurrency? }` (concurrency capped at 32, default 16). |
 | `uploadFromDataUrl(dataUrl, options?)` | `Promise<ImageDTO>` | Upload a base64 image data URL. The host automatically tags the image with the current extension identifier. |
 | `delete(imageId)` | `Promise<boolean>` | Delete an image by ID. Returns `true` when deleted. |
 
@@ -134,7 +142,7 @@ Same ownership and `specificity` fields as `ImageListOptionsDTO`, minus paginati
 ## Notes
 
 - `spindle.images.get()` returns metadata plus a URL, not the binary image bytes themselves.
-- Thumbnail generation is supported automatically. `has_thumbnail` tells you whether thumbnails are available or can be lazily generated.
+- Thumbnail generation is supported automatically. `has_thumbnail` tells you whether thumbnails are available or can be lazily generated. `uploadMany` defers thumbnail (and width/height) generation to a background job for throughput; the underlying row populates these fields asynchronously after the call returns.
 - Generated images persisted through `spindle.imageGen.generate()` also participate in this ownership model when `owner_character_id` or `owner_chat_id` are supplied.
 
 !!! note
