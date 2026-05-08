@@ -1737,6 +1737,21 @@ const spindleApi: RuntimeSpindleAPI = {
       const result = await request({ type: "images_upload", requestId, input, userId });
       return result as ImageDTO;
     },
+    async uploadMany(
+      items: ImageUploadDTO[],
+      options?: { userId?: string; concurrency?: number },
+    ): Promise<Array<{ id?: string; error?: string }>> {
+      assertMutationAllowed("spindle.images.uploadMany()");
+      const requestId = crypto.randomUUID();
+      const result = await request({
+        type: "images_upload_many",
+        requestId,
+        items,
+        userId: options?.userId,
+        concurrency: options?.concurrency,
+      });
+      return result as Array<{ id?: string; error?: string }>;
+    },
     async uploadFromDataUrl(
       dataUrl: string,
       originalFilenameOrOptions?: string | ImageUploadFromDataUrlOptionsDTO,

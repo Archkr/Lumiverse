@@ -405,6 +405,13 @@ type RuntimeWorkerToHost =
     }
   | { type: "images_upload"; requestId: string; input: ImageUploadDTO; userId?: string }
   | {
+      type: "images_upload_many";
+      requestId: string;
+      items: ImageUploadDTO[];
+      userId?: string;
+      concurrency?: number;
+    }
+  | {
       type: "images_upload_from_data_url";
       requestId: string;
       dataUrl: string;
@@ -2505,6 +2512,9 @@ export class WorkerHost {
         break;
       case "images_upload":
         this.handleImagesUpload(msg.requestId, msg.input, msg.userId);
+        break;
+      case "images_upload_many":
+        this.handleImagesUploadMany(msg.requestId, msg.items, msg.userId, msg.concurrency);
         break;
       case "images_upload_from_data_url":
         this.handleImagesUploadFromDataUrl(
@@ -6109,6 +6119,84 @@ export class WorkerHost {
         });
 
         this.postToWorker({ type: "response", requestId, result: this.toImageDTO(img) });
+      } catch (err: any) {
+        this.postToWorker({ type: "response", requestId, error: err.message });
+      }
+    })();
+  }
+
+  private handleImagesUploadMany(
+    requestId: string,
+    items: any[],
+    userId?: string,
+    concurrency?: number,
+  ): void {
+    (async () => {
+      try {
+        if (!managerSvc.hasPermission(this.manifest.identifier, "images")) {
+          throw new Error(`${PERMISSION_DENIED_PREFIX} images — Images permission not granted`);
+        }
+        const resolvedUserId = this.resolveEffectiveUserId(userId);
+        if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
+        this.enforceScopedUser(resolvedUserId);
+
+        if (!Array.isArray(items)) {
+          throw new Error("items must be an array of ImageUploadDTO");
+        }
+
+        const normalised: imagesSvc.UploadImagesItem[] = new Array(items.length);
+        const failures: Array<{ index: number; error: string }> = [];
+        for (let i = 0; i < items.length; i++) {
+          const input = items[i];
+          if (!input || typeof input !== "object") {
+            failures.push({ index: i, error: "item must be an object" });
+            continue;
+          }
+          if (!(input.data instanceof Uint8Array) || input.data.byteLength === 0) {
+            failures.push({ index: i, error: "Image data must be a non-empty Uint8Array" });
+            continue;
+          }
+          normalised[i] = {
+            data: input.data,
+            filename: typeof input.filename === "string" && input.filename.trim()
+              ? input.filename.trim()
+              : "image.png",
+            mime_type: typeof input.mime_type === "string" && input.mime_type.trim()
+              ? input.mime_type.trim()
+              : "image/png",
+            ...(typeof input.owner_character_id === "string" && input.owner_character_id.trim()
+              ? { owner_character_id: input.owner_character_id.trim() }
+              : {}),
+            ...(typeof input.owner_chat_id === "string" && input.owner_chat_id.trim()
+              ? { owner_chat_id: input.owner_chat_id.trim() }
+              : {}),
+          };
+        }
+
+        const validIndices: number[] = [];
+        const validItems: imagesSvc.UploadImagesItem[] = [];
+        for (let i = 0; i < normalised.length; i++) {
+          if (normalised[i] !== undefined) {
+            validIndices.push(i);
+            validItems.push(normalised[i]!);
+          }
+        }
+
+        const batchResults = await imagesSvc.uploadImages(resolvedUserId, validItems, {
+          owner_extension_identifier: this.manifest.identifier,
+          concurrency,
+        });
+
+        const results: Array<{ id?: string; error?: string }> = new Array(items.length);
+        for (const f of failures) results[f.index] = { error: f.error };
+        for (let k = 0; k < validIndices.length; k++) {
+          const out = batchResults[k]!;
+          results[validIndices[k]!] = out.id !== undefined
+            ? { id: out.id }
+            : { error: out.error ?? "unknown error" };
+        }
+
+        this.postToWorker({ type: "response", requestId, result: results });
       } catch (err: any) {
         this.postToWorker({ type: "response", requestId, error: err.message });
       }
