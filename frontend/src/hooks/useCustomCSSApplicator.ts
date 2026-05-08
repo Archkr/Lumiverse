@@ -18,7 +18,8 @@ function getOrCreateStyleElement(): HTMLStyleElement {
 
 /**
  * Flatten global CSS + all enabled per-component CSS overrides into a
- * single string, then inject via a <style> element in @layer lumiverse-user.
+ * single late-injected <style> element. Keep this unlayered so user CSS
+ * can override the app's unlayered CSS modules without requiring !important.
  */
 export function useCustomCSSApplicator() {
   const customCSS = useStore((s) => s.customCSS)
@@ -57,7 +58,7 @@ export function useCustomCSSApplicator() {
 
     const result = validateCSS(combined)
     if (result.valid) {
-      el.textContent = `@layer lumiverse-user {\n${combined}\n}`
+      el.textContent = combined
       lastHashRef.current = combined
     } else {
       toast.error(`Custom CSS error: ${result.error}`)
