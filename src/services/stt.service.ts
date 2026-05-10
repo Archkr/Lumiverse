@@ -20,6 +20,29 @@ export interface TranscribeResult {
   language?: string;
 }
 
+function normalizeWhisperLanguageCode(language?: string): string | undefined {
+  const raw = language?.trim().toLowerCase();
+  if (!raw) return undefined;
+
+  // The frontend stores browser/Web Speech locales (en-US, pt-BR, zh-CN),
+  // while Whisper/OpenAI-compatible transcription APIs expect ISO language IDs.
+  const aliases: Record<string, string> = {
+    "en-us": "en",
+    "en-gb": "en",
+    "ja-jp": "ja",
+    "zh-cn": "zh",
+    "es-es": "es",
+    "fr-fr": "fr",
+    "de-de": "de",
+    "it-it": "it",
+    "pt-br": "pt",
+    "ko-kr": "ko",
+    "ru-ru": "ru",
+  };
+
+  return aliases[raw] || raw.split("-")[0];
+}
+
 export async function transcribe(userId: string, input: TranscribeInput): Promise<TranscribeResult> {
   if (!input.connectionId) {
     throw new Error("No connection ID provided for STT — configure an STT connection in Voice settings");
@@ -45,8 +68,9 @@ export async function transcribe(userId: string, input: TranscribeInput): Promis
   const formData = new FormData();
   formData.append("file", new Blob([input.audioData]), input.fileName);
   formData.append("model", model);
-  if (input.language) {
-    formData.append("language", input.language);
+  const language = normalizeWhisperLanguageCode(input.language);
+  if (language) {
+    formData.append("language", language);
   }
 
   const res = await fetch(`${sttConnectionsSvc.resolveSttApiUrl(profile)}/audio/transcriptions`, {

@@ -333,6 +333,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     sttLanguage: 'en-US',
     sttContinuous: false,
     sttInterimResults: true,
+    sttAutoSubmitOnSilence: false,
     sttConnectionId: null,
     ttsEnabled: false,
     ttsConnectionId: null,

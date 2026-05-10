@@ -1590,6 +1590,7 @@ export default function InputArea({ chatId }: InputAreaProps) {
         language: voiceSettings.sttLanguage,
         continuous: voiceSettings.sttContinuous,
         interimResults: voiceSettings.sttInterimResults,
+        autoSubmitOnSilence: voiceSettings.sttAutoSubmitOnSilence,
         connectionId: voiceSettings.sttConnectionId,
       })
       sttEngineRef.current?.destroy()

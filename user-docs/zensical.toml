@@ -42,6 +42,7 @@ nav = [
     { "Branching" = "chatting/branching.md" },
     { "Author's Note" = "chatting/authors-note.md" },
     { "Attachments" = "chatting/attachments.md" },
+    { "Speech-to-Text" = "chatting/speech-to-text.md" },
     { "OOC Comments" = "chatting/ooc.md" },
     { "Loom Summary" = "chatting/loom-summary.md" },
     { "Long-Term Memory" = "chatting/memory.md" },

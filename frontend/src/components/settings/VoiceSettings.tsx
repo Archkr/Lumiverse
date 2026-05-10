@@ -303,7 +303,7 @@ export default function VoiceSettings() {
             checked={voiceSettings.sttContinuous}
             onChange={(v) => setVoiceSettings({ sttContinuous: v })}
             label="Continuous recognition"
-            hint="Keep listening after each result"
+            hint="Keep listening after each silence-delimited result"
           />
         </div>
 
@@ -313,6 +313,17 @@ export default function VoiceSettings() {
             onChange={(v) => setVoiceSettings({ sttInterimResults: v })}
             label="Show interim results"
             hint="Display partial transcriptions as you speak"
+          />
+        </div>
+
+        <div className={styles.toggleRow}>
+          <Toggle.Checkbox
+            checked={voiceSettings.sttAutoSubmitOnSilence}
+            onChange={(v) => setVoiceSettings({ sttAutoSubmitOnSilence: v })}
+            label="Auto-submit after silence"
+            hint={voiceSettings.sttProvider === 'webspeech'
+              ? 'Stop Web Speech recognition after a sustained pause'
+              : 'Wait for a sustained pause before transcribing and queueing'}
           />
         </div>
 

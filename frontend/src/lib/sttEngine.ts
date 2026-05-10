@@ -25,8 +25,18 @@ export interface STTConfig {
   language: string
   continuous: boolean
   interimResults: boolean
+  autoSubmitOnSilence?: boolean
   connectionId?: string | null
 }
+
+const STT_VAD_CHECK_MS = 50
+const STT_VAD_MIN_RECORDING_MS = 900
+const STT_VAD_MIN_SPEECH_MS = 140
+const STT_VAD_SILENCE_MS = 1600
+const STT_VAD_MIN_THRESHOLD = 0.012
+const STT_VAD_NOISE_MULTIPLIER = 3
+const WEB_SPEECH_SILENCE_MS = 1600
+const WEB_SPEECH_RESTART_MS = 80
 
 /**
  * Factory — returns the appropriate STT engine based on config.
@@ -73,27 +83,61 @@ class WebSpeechEngine implements STTEngine {
   private errorCb: ((e: Error) => void) | null = null
   private stopCb: (() => void) | null = null
   private listening = false
+  private active = false
+  private stopping = false
+  private stopNotified = false
+  private hasResult = false
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null
+  private restartTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private config: STTConfig) {
     if (!SpeechRecognitionClass) {
       throw new Error('Web Speech API is not available in this browser')
     }
     this.recognition = new SpeechRecognitionClass()
-    this.recognition.continuous = config.continuous
+    // Safari can end a recognition session at short pauses even when the user
+    // is still dictating. Keep the browser recognizer continuous and decide
+    // app-level stopping with our own silence timer below.
+    this.recognition.continuous = true
     this.recognition.interimResults = config.interimResults
     this.recognition.lang = config.language
+
+    this.recognition.onstart = () => {
+      this.active = true
+    }
+
+    this.recognition.onspeechstart = () => {
+      this.clearSilenceTimer()
+    }
+
+    this.recognition.onspeechend = () => {
+      this.scheduleSilenceStop()
+    }
+
+    this.recognition.onsoundend = () => {
+      this.scheduleSilenceStop()
+    }
 
     this.recognition.onresult = (event: any) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i]
+        this.hasResult = true
+        if (!result.isFinal) this.clearSilenceTimer()
         this.resultCb?.({
           text: result[0].transcript,
           isFinal: result.isFinal,
         })
+        if (result.isFinal) this.scheduleSilenceStop()
       }
     }
 
     this.recognition.onerror = (event: any) => {
+      if (event.error === 'no-speech' && this.listening && (this.config.continuous || this.hasResult)) {
+        this.scheduleSilenceStop()
+        return
+      }
+      if (event.error === 'aborted' && this.stopping) return
+
       const msg = event.error === 'not-allowed'
         ? 'Microphone permission denied'
         : event.error === 'no-speech'
@@ -103,24 +147,83 @@ class WebSpeechEngine implements STTEngine {
     }
 
     this.recognition.onend = () => {
-      if (this.listening && this.config.continuous) {
-        // Auto-restart in continuous mode
-        try { this.recognition.start() } catch { /* ignore */ }
-      } else {
+      this.active = false
+      if (this.listening && !this.stopping) {
+        this.scheduleRestart()
+        return
+      }
+
+      if (this.stopping || !this.listening) {
         this.listening = false
-        this.stopCb?.()
+        this.stopping = false
+        this.notifyStop()
       }
     }
   }
 
+  private shouldStopOnSilence(): boolean {
+    return this.config.autoSubmitOnSilence === true || !this.config.continuous
+  }
+
+  private clearSilenceTimer(): void {
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer)
+      this.silenceTimer = null
+    }
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer !== null) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+  }
+
+  private scheduleSilenceStop(): void {
+    if (!this.listening || !this.shouldStopOnSilence()) return
+    this.clearSilenceTimer()
+    this.silenceTimer = setTimeout(() => {
+      this.silenceTimer = null
+      if (!this.listening) return
+      this.stop()
+    }, WEB_SPEECH_SILENCE_MS)
+  }
+
+  private scheduleRestart(): void {
+    this.clearRestartTimer()
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (!this.listening || this.stopping || this.active) return
+      try { this.recognition.start() } catch { /* ignore duplicate starts */ }
+    }, WEB_SPEECH_RESTART_MS)
+  }
+
+  private notifyStop(): void {
+    if (this.stopNotified) return
+    this.stopNotified = true
+    this.stopCb?.()
+  }
+
   start(): void {
+    this.clearSilenceTimer()
+    this.clearRestartTimer()
     this.listening = true
+    this.stopping = false
+    this.stopNotified = false
+    this.hasResult = false
     this.recognition.start()
   }
 
   stop(): void {
+    this.clearSilenceTimer()
+    this.clearRestartTimer()
     this.listening = false
-    this.recognition.stop()
+    this.stopping = true
+    try { this.recognition.stop() } catch { /* ignore */ }
+    if (!this.active) {
+      this.stopping = false
+      this.notifyStop()
+    }
   }
 
   onResult(cb: (r: STTResult) => void): void {
@@ -140,7 +243,10 @@ class WebSpeechEngine implements STTEngine {
   }
 
   destroy(): void {
+    this.clearSilenceTimer()
+    this.clearRestartTimer()
     this.listening = false
+    this.stopping = true
     try { this.recognition.abort() } catch { /* ignore */ }
     this.resultCb = null
     this.errorCb = null
@@ -159,20 +265,115 @@ class OpenAISTTEngine implements STTEngine {
   private stream: MediaStream | null = null
   private chunks: Blob[] = []
   private audioFormat: STTAudioFormat | null = null
+  private audioContext: AudioContext | null = null
+  private analyser: AnalyserNode | null = null
+  private sourceNode: MediaStreamAudioSourceNode | null = null
+  private vadTimer: ReturnType<typeof setTimeout> | null = null
+  private recordingStartedAt = 0
+  private speechMs = 0
+  private lastSpeechAt = 0
+  private lastVadCheckAt = 0
+  private noiseFloor = 0.006
+  private speechConfirmed = false
 
   constructor(private config: STTConfig) {}
 
   private cleanupStream(): void {
+    this.stopSilenceMonitor()
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop())
       this.stream = null
     }
   }
 
+  private cleanupAudioContext(): void {
+    try { this.sourceNode?.disconnect() } catch { /* ignore */ }
+    try { this.analyser?.disconnect() } catch { /* ignore */ }
+    const audioContext = this.audioContext
+    if (audioContext && audioContext.state !== 'closed') {
+      void audioContext.close().catch(() => {})
+    }
+    this.sourceNode = null
+    this.analyser = null
+    this.audioContext = null
+  }
+
+  private stopSilenceMonitor(): void {
+    if (this.vadTimer !== null) {
+      clearTimeout(this.vadTimer)
+      this.vadTimer = null
+    }
+    this.cleanupAudioContext()
+  }
+
   private cleanupRecorder(): void {
     this.mediaRecorder = null
     this.chunks = []
     this.audioFormat = null
+    this.recordingStartedAt = 0
+    this.speechMs = 0
+    this.lastSpeechAt = 0
+    this.lastVadCheckAt = 0
+    this.noiseFloor = 0.006
+    this.speechConfirmed = false
+  }
+
+  private startSilenceMonitor(): void {
+    if (!this.stream || !this.config.autoSubmitOnSilence) return
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioContextClass) return
+
+    try {
+      this.audioContext = new AudioContextClass()
+      this.analyser = this.audioContext.createAnalyser()
+      this.analyser.fftSize = 2048
+      this.sourceNode = this.audioContext.createMediaStreamSource(this.stream)
+      this.sourceNode.connect(this.analyser)
+    } catch {
+      this.cleanupAudioContext()
+      return
+    }
+
+    const samples = new Float32Array(this.analyser.fftSize)
+    const check = () => {
+      if (!this.analyser || !this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+        this.vadTimer = null
+        return
+      }
+
+      const now = performance.now()
+      const deltaMs = this.lastVadCheckAt ? now - this.lastVadCheckAt : STT_VAD_CHECK_MS
+      this.lastVadCheckAt = now
+
+      this.analyser.getFloatTimeDomainData(samples)
+      let sum = 0
+      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i]
+      const rms = Math.sqrt(sum / samples.length)
+      const threshold = Math.max(STT_VAD_MIN_THRESHOLD, this.noiseFloor * STT_VAD_NOISE_MULTIPLIER)
+
+      if (rms >= threshold) {
+        this.speechMs += deltaMs
+        this.lastSpeechAt = now
+        if (this.speechMs >= STT_VAD_MIN_SPEECH_MS) this.speechConfirmed = true
+      } else if (!this.speechConfirmed) {
+        this.speechMs = Math.max(0, this.speechMs - deltaMs)
+        this.noiseFloor = (this.noiseFloor * 0.95) + (rms * 0.05)
+      }
+
+      const recordingMs = now - this.recordingStartedAt
+      const silentMs = this.lastSpeechAt ? now - this.lastSpeechAt : 0
+      if (this.speechConfirmed && recordingMs >= STT_VAD_MIN_RECORDING_MS && silentMs >= STT_VAD_SILENCE_MS) {
+        this.listening = false
+        this.mediaRecorder.stop()
+        this.stopSilenceMonitor()
+        return
+      }
+
+      this.vadTimer = setTimeout(check, STT_VAD_CHECK_MS)
+    }
+
+    this.vadTimer = setTimeout(check, STT_VAD_CHECK_MS)
   }
 
   async start(): Promise<void> {
@@ -240,11 +441,19 @@ class OpenAISTTEngine implements STTEngine {
   private startRecording(): void {
     if (!this.mediaRecorder || this.mediaRecorder.state === 'recording') return
     this.chunks = []
+    this.recordingStartedAt = performance.now()
+    this.speechMs = 0
+    this.lastSpeechAt = 0
+    this.lastVadCheckAt = 0
+    this.noiseFloor = 0.006
+    this.speechConfirmed = false
     this.mediaRecorder.start()
+    this.startSilenceMonitor()
   }
 
   stop(): void {
     this.listening = false
+    this.stopSilenceMonitor()
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       this.mediaRecorder.stop()
     }
@@ -268,6 +477,7 @@ class OpenAISTTEngine implements STTEngine {
 
   destroy(): void {
     this.listening = false
+    this.stopSilenceMonitor()
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       try { this.mediaRecorder.stop() } catch { /* ignore */ }
     }
