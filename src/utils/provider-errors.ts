@@ -43,6 +43,27 @@ function getErrorMessage(err: unknown): string {
   return "";
 }
 
+function getErrorCauseMessage(err: unknown): string {
+  if (!(err instanceof Error)) return "";
+  const cause = (err as Error & { cause?: unknown }).cause;
+  return getErrorMessage(cause);
+}
+
+export function describeTransportError(err: unknown, fallback = "Provider request failed"): string {
+  const message = getErrorMessage(err);
+  const causeMessage = getErrorCauseMessage(err);
+  const combined = [message, causeMessage].filter(Boolean).join(": ");
+  if (!combined) return fallback;
+
+  if (/socket connection was closed unexpectedly/i.test(combined)) {
+    return "The provider connection closed before Lumiverse received the full response. This usually means the upstream service, a local proxy, or the network dropped the stream. Retry the request; if it keeps happening, check the selected connection's provider or proxy logs.";
+  }
+
+  if (/^fetch failed$/i.test(message) && causeMessage) return causeMessage;
+
+  return message;
+}
+
 function normalizeText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -148,7 +169,7 @@ export function describeProviderError(err: unknown, fallback = "Provider request
     return `${err.provider} ${err.operation} failed${status}: ${detail}`;
   }
 
-  const message = getErrorMessage(err);
+  const message = describeTransportError(err, fallback);
   if (!message) return fallback;
 
   const cleaned = cleanProviderMessage(message);

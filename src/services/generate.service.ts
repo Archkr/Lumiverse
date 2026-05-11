@@ -118,6 +118,7 @@ import {
   assemblePromptInWorker,
   canUsePromptAssemblyWorker,
 } from "./prompt-assembly-worker-client";
+import { describeTransportError } from "../utils/provider-errors";
 
 interface GenerateInput {
   userId: string;
@@ -556,6 +557,8 @@ function wrapDelimitedReasoningForUser(
  * objects gracefully.
  */
 function errorMessage(err: unknown): string {
+  const transportMessage = describeTransportError(err, "");
+  if (transportMessage) return transportMessage;
   if (err == null) return "Unknown error";
   if (typeof err === "string") return err;
   if (
