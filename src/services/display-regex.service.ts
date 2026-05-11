@@ -194,8 +194,14 @@ export async function applyDisplayRegex(input: ApplyDisplayRegexInput): Promise<
   }
 
   const env = buildEnvFromContext(input.userId, input.context);
-  if (env && input.dynamicMacros) {
-    mergeDynamicMacros(env, input.dynamicMacros);
+  if (env) {
+    const dyn: Record<string, string> = { ...(input.dynamicMacros ?? {}) };
+    if (input.context.role && dyn.role === undefined) {
+      dyn.role = input.context.role;
+    }
+    if (Object.keys(dyn).length > 0) {
+      mergeDynamicMacros(env, dyn);
+    }
   }
   const fingerprint = { touchedVars: new Set<string>(), cacheable: true };
   const result = await applyRegexScripts(
