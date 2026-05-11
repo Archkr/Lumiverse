@@ -1184,7 +1184,12 @@ export async function assemblePrompt(
     messages,
     ctx.chatId,
   );
-  let vectorActivated = ctx.precomputedVectorEntries ?? null;
+  const currentWorldInfoEntryIds = new Set(wiEntries.map((entry) => entry.id));
+  let vectorActivated = ctx.precomputedVectorEntries
+    ? ctx.precomputedVectorEntries.filter((item) =>
+        currentWorldInfoEntryIds.has(item.entry.id),
+      )
+    : null;
   let vectorRetrievalDetails: VectorWorldInfoRetrievalResult | null = null;
   if (!vectorActivated) {
     try {
