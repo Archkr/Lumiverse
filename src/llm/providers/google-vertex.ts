@@ -468,9 +468,7 @@ export class GoogleVertexProvider implements LlmProvider {
         case "audio":
           return { inlineData: { mimeType: part.mime_type, data: part.data } };
         case "tool_use":
-          return part.thought_signature
-            ? { functionCall: { name: part.name, args: part.input }, thoughtSignature: part.thought_signature }
-            : { functionCall: { name: part.name, args: part.input } };
+          return { functionCall: { name: part.name, args: part.input }, thoughtSignature: part.thought_signature || "context_engineering_is_the_way_to_go" };
         case "tool_result": {
           let payload: unknown = part.content;
           try { payload = JSON.parse(part.content); } catch { /* keep as string */ }
