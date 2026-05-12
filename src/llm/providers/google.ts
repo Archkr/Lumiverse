@@ -4,6 +4,17 @@ import { createCooperativeYielder, fetchWithPreflightAbort, readWithAbort } from
 import { getTextContent, type GenerationRequest, type GenerationResponse, type StreamChunk, type ToolCallResult, type LlmMessage, type LlmMessagePart } from "../types";
 import { fetchProviderJson, ProviderRequestError, throwProviderResponseError } from "../../utils/provider-errors";
 
+export function sanitizeGeminiSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(sanitizeGeminiSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (k === "additionalProperties" || k === "$schema") continue;
+    out[k] = sanitizeGeminiSchema(v);
+  }
+  return out;
+}
+
 export class GoogleProvider implements LlmProvider {
   readonly name = "google";
   readonly displayName = "Google Gemini";
@@ -320,7 +331,7 @@ export class GoogleProvider implements LlmProvider {
         functionDeclarations: request.tools.map((t) => ({
           name: t.name,
           description: t.description,
-          parameters: t.parameters,
+          parameters: sanitizeGeminiSchema(t.parameters),
         })),
       }];
     } else {
