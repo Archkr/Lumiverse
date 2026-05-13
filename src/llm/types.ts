@@ -28,6 +28,7 @@ export interface LlmToolUsePart {
   name: string;
   input: Record<string, unknown>;
   cache_control?: Record<string, unknown>;
+  thought_signature?: string;
 }
 
 export interface LlmToolResultPart {
@@ -104,6 +105,7 @@ export interface ToolCallResult {
   args: Record<string, unknown>;
   /** Provider call ID (e.g. Anthropic `id`, OpenAI `id`). Synthetic UUID for providers that don't supply one. */
   call_id: string;
+  thought_signature?: string;
 }
 
 export interface GenerationResponse {

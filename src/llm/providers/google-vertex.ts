@@ -3,6 +3,7 @@ import { COMMON_PARAMS, type ProviderCapabilities } from "../param-schema";
 import { createCooperativeYielder, fetchWithPreflightAbort, readWithAbort } from "../stream-utils";
 import { getTextContent, type GenerationRequest, type GenerationResponse, type StreamChunk, type ToolCallResult, type LlmMessage, type LlmMessagePart } from "../types";
 import { fetchProviderJson, throwProviderResponseError } from "../../utils/provider-errors";
+import { sanitizeGeminiSchema } from "./google";
 
 // ── Service account JWT → OAuth2 access token ──────────────────────────────
 
@@ -287,7 +288,7 @@ export class GoogleVertexProvider implements LlmProvider {
       if (p.thought) {
         reasoning += p.text || "";
       } else if (p.functionCall) {
-        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
       } else {
         content += p.text || "";
       }
@@ -368,7 +369,7 @@ export class GoogleVertexProvider implements LlmProvider {
               if (p.thought) {
                 reasoning += p.text || "";
               } else if (p.functionCall) {
-                fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+                fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
               } else {
                 text += p.text || "";
               }
@@ -467,7 +468,7 @@ export class GoogleVertexProvider implements LlmProvider {
         case "audio":
           return { inlineData: { mimeType: part.mime_type, data: part.data } };
         case "tool_use":
-          return { functionCall: { name: part.name, args: part.input } };
+          return { functionCall: { name: part.name, args: part.input }, thoughtSignature: part.thought_signature || "context_engineering_is_the_way_to_go" };
         case "tool_result": {
           let payload: unknown = part.content;
           try { payload = JSON.parse(part.content); } catch { /* keep as string */ }
@@ -568,7 +569,7 @@ export class GoogleVertexProvider implements LlmProvider {
         functionDeclarations: request.tools.map((t) => ({
           name: t.name,
           description: t.description,
-          parameters: t.parameters,
+          parameters: sanitizeGeminiSchema(t.parameters),
         })),
       }];
     }

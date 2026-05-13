@@ -4,6 +4,24 @@ import { createCooperativeYielder, fetchWithPreflightAbort, readWithAbort } from
 import { getTextContent, type GenerationRequest, type GenerationResponse, type StreamChunk, type ToolCallResult, type LlmMessage, type LlmMessagePart } from "../types";
 import { fetchProviderJson, ProviderRequestError, throwProviderResponseError } from "../../utils/provider-errors";
 
+const GEMINI_SCHEMA_FIELDS = new Set(["type","format","title","description","nullable","enum","maxItems","minItems","properties","required","minProperties","maxProperties","minLength","maxLength","pattern","example","anyOf","propertyOrdering","default","items","minimum","maximum"]);
+
+export function sanitizeGeminiSchema(schema: unknown): unknown {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+    if (!GEMINI_SCHEMA_FIELDS.has(k)) continue;
+    if (k === "items") out[k] = sanitizeGeminiSchema(v);
+    else if (k === "anyOf" && Array.isArray(v)) out[k] = v.map(sanitizeGeminiSchema);
+    else if (k === "properties" && v && typeof v === "object" && !Array.isArray(v)) {
+      const p: Record<string, unknown> = {};
+      for (const [pn, ps] of Object.entries(v as Record<string, unknown>)) p[pn] = sanitizeGeminiSchema(ps);
+      out[k] = p;
+    } else out[k] = v;
+  }
+  return out;
+}
+
 export class GoogleProvider implements LlmProvider {
   readonly name = "google";
   readonly displayName = "Google Gemini";
@@ -60,7 +78,7 @@ export class GoogleProvider implements LlmProvider {
       if (p.thought) {
         reasoning += p.text || "";
       } else if (p.functionCall) {
-        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+        fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
       } else {
         content += p.text || "";
       }
@@ -135,7 +153,7 @@ export class GoogleProvider implements LlmProvider {
             if (p.thought) {
               reasoning += p.text || "";
             } else if (p.functionCall) {
-              fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID() });
+              fnCalls.push({ name: p.functionCall.name, args: p.functionCall.args ?? {}, call_id: crypto.randomUUID(), thought_signature: p.thoughtSignature });
             } else {
               text += p.text || "";
             }
@@ -210,7 +228,7 @@ export class GoogleProvider implements LlmProvider {
         case "audio":
           return { inlineData: { mimeType: part.mime_type, data: part.data } };
         case "tool_use":
-          return { functionCall: { name: part.name, args: part.input } };
+          return { functionCall: { name: part.name, args: part.input }, thoughtSignature: part.thought_signature || "context_engineering_is_the_way_to_go" };
         case "tool_result": {
           let payload: unknown = part.content;
           try { payload = JSON.parse(part.content); } catch { /* keep as string */ }
@@ -320,7 +338,7 @@ export class GoogleProvider implements LlmProvider {
         functionDeclarations: request.tools.map((t) => ({
           name: t.name,
           description: t.description,
-          parameters: t.parameters,
+          parameters: sanitizeGeminiSchema(t.parameters),
         })),
       }];
     } else {
