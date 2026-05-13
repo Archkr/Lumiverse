@@ -4,6 +4,7 @@ import {
 } from "./shared-rpc";
 
 type SharedRpcRequestHandler = (requesterExtensionId: string) => Promise<unknown>;
+type SharedRpcPermissionResolver = (extensionIdentifier: string) => readonly string[];
 
 type SharedRpcEndpointRecord =
   | {
@@ -95,7 +96,8 @@ export function unregisterSharedRpcEndpointsByOwner(ownerExtensionId: string): v
 
 export async function readSharedRpcEndpoint(
   endpoint: string,
-  requesterExtensionId: string
+  requesterExtensionId: string,
+  getGrantedPermissions?: SharedRpcPermissionResolver
 ): Promise<unknown> {
   const normalized = assertValidSharedRpcEndpoint(endpoint);
   const record = sharedRpcEndpoints.get(normalized);
@@ -104,11 +106,38 @@ export async function readSharedRpcEndpoint(
     throw new Error(`Shared RPC endpoint "${normalized}" is not registered`);
   }
 
+  if (getGrantedPermissions) {
+    assertRequesterInheritsOwnerPermissions(
+      normalized,
+      requesterExtensionId,
+      record.ownerExtensionId,
+      getGrantedPermissions,
+    );
+  }
+
   if (record.mode === "sync") {
     return record.value;
   }
 
   return await record.handler(requesterExtensionId);
+}
+
+function assertRequesterInheritsOwnerPermissions(
+  endpoint: string,
+  requesterExtensionId: string,
+  ownerExtensionId: string,
+  getGrantedPermissions: SharedRpcPermissionResolver
+): void {
+  const ownerPermissions = new Set(getGrantedPermissions(ownerExtensionId));
+  if (ownerPermissions.size === 0) return;
+
+  const requesterPermissions = new Set(getGrantedPermissions(requesterExtensionId));
+  const missing = [...ownerPermissions].filter((permission) => !requesterPermissions.has(permission)).sort();
+  if (missing.length === 0) return;
+
+  throw new Error(
+    `Shared RPC endpoint "${endpoint}" requires requester "${requesterExtensionId}" to inherit owner "${ownerExtensionId}" permissions: ${missing.join(", ")}`
+  );
 }
 
 export function resetSharedRpcPoolForTests(): void {

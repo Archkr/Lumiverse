@@ -66,6 +66,64 @@ describe("shared RPC pool", () => {
     );
   });
 
+  test("allows reads when requester inherits owner permissions", async () => {
+    syncSharedRpcEndpoint("weather_ext", "status.current", { ok: true });
+
+    const permissions = new Map([
+      ["weather_ext", ["chats", "images"]],
+      ["reader_ext", ["chats", "images", "tools"]],
+    ]);
+
+    await expect(
+      readSharedRpcEndpoint(
+        "weather_ext.status.current",
+        "reader_ext",
+        (extensionIdentifier) => permissions.get(extensionIdentifier) || []
+      )
+    ).resolves.toEqual({ ok: true });
+  });
+
+  test("rejects reads when requester lacks owner permissions", async () => {
+    syncSharedRpcEndpoint("weather_ext", "status.current", { ok: true });
+
+    const permissions = new Map([
+      ["weather_ext", ["chats", "images"]],
+      ["reader_ext", ["chats"]],
+    ]);
+
+    await expect(
+      readSharedRpcEndpoint(
+        "weather_ext.status.current",
+        "reader_ext",
+        (extensionIdentifier) => permissions.get(extensionIdentifier) || []
+      )
+    ).rejects.toThrow(
+      'Shared RPC endpoint "weather_ext.status.current" requires requester "reader_ext" to inherit owner "weather_ext" permissions: images'
+    );
+  });
+
+  test("applies permission inheritance before invoking on-request endpoints", async () => {
+    let invoked = false;
+    registerSharedRpcRequestEndpoint("weather_ext", "status.live", async () => {
+      invoked = true;
+      return { ok: true };
+    });
+
+    const permissions = new Map([
+      ["weather_ext", ["generation"]],
+      ["reader_ext", []],
+    ]);
+
+    await expect(
+      readSharedRpcEndpoint(
+        "weather_ext.status.live",
+        "reader_ext",
+        (extensionIdentifier) => permissions.get(extensionIdentifier) || []
+      )
+    ).rejects.toThrow("requires requester");
+    expect(invoked).toBe(false);
+  });
+
   test("removes endpoints on unregister and owner cleanup", async () => {
     syncSharedRpcEndpoint("weather_ext", "status.current", { ok: true });
     registerSharedRpcRequestEndpoint("weather_ext", "status.live", async () => ({ ok: true }));

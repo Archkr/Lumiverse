@@ -1937,7 +1937,11 @@ export class WorkerHost {
 
   private async handleRpcPoolRead(requestId: string, endpoint: string): Promise<void> {
     try {
-      const result = await readSharedRpcEndpoint(endpoint, this.manifest.identifier);
+      const result = await readSharedRpcEndpoint(
+        endpoint,
+        this.manifest.identifier,
+        managerSvc.getGrantedPermissions,
+      );
       this.postToWorker({ type: "response", requestId, result });
     } catch (err: any) {
       this.postToWorker({ type: "response", requestId, error: err?.message || String(err) });
