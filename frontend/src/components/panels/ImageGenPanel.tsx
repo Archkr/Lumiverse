@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { Image as ImageIcon, Settings2, Trash2, Plus, X } from 'lucide-react'
+import { Image as ImageIcon, Settings2, Trash2, Plus, X, Workflow } from 'lucide-react'
 import { IconBrush } from '@tabler/icons-react'
 import { useStore } from '@/store'
-import { imageGenApi, type SceneData } from '@/api/image-gen'
+import { imageGenApi, type ComfyUICapabilities, type SceneData } from '@/api/image-gen'
 import { imageGenConnectionsApi } from '@/api/image-gen-connections'
 import { connectionsApi } from '@/api/connections'
 import { Toggle } from '@/components/shared/Toggle'
 import { Button, FormField, Select, TextInput, EditorSection, TextArea } from '@/components/shared/FormComponents'
 import ImageLightbox from '@/components/shared/ImageLightbox'
+import { WorkflowEditorModal } from '@/components/dream-weaver/visual-studio/comfyui/WorkflowEditorModal'
+import type { ComfyUIFieldMapping, ComfyUIWorkflowConfig } from '@/api/dream-weaver'
 import type { ConnectionProfile, ImageGenProviderInfo, ImageGenParameterSchema } from '@/types/api'
 import type { ImageGenPromptPreset } from '@/types/store'
 import styles from './ImageGenPanel.module.css'
@@ -287,6 +289,11 @@ export default function ImageGenPanel() {
   const [llmConnections, setLlmConnections] = useState<ConnectionProfile[]>([])
   const [parserModels, setParserModels] = useState<Array<{ id: string; label: string }>>([])
   const [presetName, setPresetName] = useState('')
+  const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false)
+  const [workflowConfig, setWorkflowConfig] = useState<ComfyUIWorkflowConfig | null>(null)
+  const [workflowCapabilities, setWorkflowCapabilities] = useState<ComfyUICapabilities | null>(null)
+  const [workflowLoading, setWorkflowLoading] = useState(false)
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
   const refInputRef = useRef<HTMLInputElement | null>(null)
 
   // Load profiles and providers on mount
@@ -328,6 +335,63 @@ export default function ImageGenPanel() {
 
   const capabilities = providerInfo?.capabilities
   const providerName = activeConnection?.provider || ''
+  const isComfyUI = providerName === 'comfyui'
+
+  const refreshActiveComfyWorkflow = useCallback(async (forceRefresh = false) => {
+    if (!activeConnection || activeConnection.provider !== 'comfyui') {
+      setWorkflowConfig(null)
+      setWorkflowCapabilities(null)
+      setWorkflowError(null)
+      return
+    }
+
+    setWorkflowLoading(true)
+    setWorkflowError(null)
+    try {
+      const [configResponse, comfyCapabilities] = await Promise.all([
+        imageGenConnectionsApi.getComfyUIWorkflowConfig(activeConnection.id),
+        imageGenConnectionsApi.getComfyUICapabilities(activeConnection.id, forceRefresh),
+      ])
+      setWorkflowConfig(configResponse.config)
+      setWorkflowCapabilities(comfyCapabilities)
+    } catch (err: any) {
+      setWorkflowConfig(null)
+      setWorkflowCapabilities(null)
+      setWorkflowError(err?.message || 'Failed to load ComfyUI workflow')
+    } finally {
+      setWorkflowLoading(false)
+    }
+  }, [activeConnection])
+
+  useEffect(() => {
+    void refreshActiveComfyWorkflow()
+  }, [refreshActiveComfyWorkflow])
+
+  const refreshActiveImageGenConnection = useCallback(async () => {
+    if (!activeConnection) return
+    try {
+      const updated = await imageGenConnectionsApi.get(activeConnection.id)
+      setImageGenProfiles(imageGenProfiles.map((profile) => (profile.id === updated.id ? updated : profile)))
+    } catch {
+      // The workflow update already succeeded; stale metadata in the list is non-fatal.
+    }
+  }, [activeConnection, imageGenProfiles, setImageGenProfiles])
+
+  const importComfyWorkflow = useCallback(async (workflow: unknown) => {
+    if (!activeConnection) return null
+    const response = await imageGenConnectionsApi.importComfyUIWorkflow(activeConnection.id, workflow)
+    setWorkflowConfig(response.config)
+    await refreshActiveImageGenConnection()
+    return response.config
+  }, [activeConnection, refreshActiveImageGenConnection])
+
+  const updateComfyMappings = useCallback(async (mappings: ComfyUIFieldMapping[]) => {
+    if (!activeConnection) return null
+    const response = await imageGenConnectionsApi.updateComfyUIWorkflowMappings(activeConnection.id, mappings)
+    setWorkflowConfig(response.config)
+    await refreshActiveImageGenConnection()
+    return response.config
+  }, [activeConnection, refreshActiveImageGenConnection])
 
   // Group parameters by their group field
   const paramGroups = useMemo(() => {
@@ -649,6 +713,38 @@ export default function ImageGenPanel() {
           {/* Dynamic Generation Parameters from Provider Schema */}
           {activeConnection && capabilities && (
             <>
+              {isComfyUI && (
+                <EditorSection title="ComfyUI Workflow" Icon={Workflow} defaultExpanded={!workflowConfig}>
+                  <div className={styles.workflowCard}>
+                    <div className={styles.workflowInfo}>
+                      <span className={styles.workflowTitle}>
+                        {workflowConfig ? 'Workflow imported' : 'No workflow selected'}
+                      </span>
+                      <span className={styles.workflowMeta}>
+                        {workflowConfig
+                          ? `${workflowConfig.field_mappings.length} mapped fields · ${workflowConfig.workflow_format === 'ui_workflow' ? 'UI workflow' : 'API prompt'}`
+                          : 'Import a ComfyUI workflow JSON and map prompt, seed, sampler, size, and model fields for generation.'}
+                      </span>
+                    </div>
+                    <div className={styles.workflowActions}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Workflow size={14} />}
+                        onClick={() => {
+                          setWorkflowEditorOpen(true)
+                          void refreshActiveComfyWorkflow(true)
+                        }}
+                        disabled={workflowLoading}
+                      >
+                        {workflowConfig ? 'Edit Workflow' : 'Import Workflow'}
+                      </Button>
+                    </div>
+                  </div>
+                  {workflowError && <div className={styles.error}>{workflowError}</div>}
+                </EditorSection>
+              )}
+
               {/* Main parameters */}
               {paramGroups.main.map(([key, schema]) => (
                 <ParamField key={key} paramKey={key} schema={schema} value={genParams[key]} onChange={updateParam} connectionId={activeImageGenConnectionId} />
@@ -794,6 +890,16 @@ export default function ImageGenPanel() {
       )}
 
       {lightboxOpen && previewSrc && <ImageLightbox src={previewSrc} onClose={() => setLightboxOpen(false)} />}
+      {workflowEditorOpen && (
+        <WorkflowEditorModal
+          config={workflowConfig}
+          capabilities={workflowCapabilities}
+          error={workflowError}
+          onImportWorkflow={importComfyWorkflow}
+          onUpdateMappings={updateComfyMappings}
+          onClose={() => setWorkflowEditorOpen(false)}
+        />
+      )}
     </div>
   )
 }

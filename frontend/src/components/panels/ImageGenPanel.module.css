@@ -70,6 +70,42 @@
   font-size: calc(12px * var(--lumiverse-font-scale, 1));
 }
 
+.workflowCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 10px;
+  background: var(--lumiverse-fill-subtle);
+}
+
+.workflowInfo {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workflowTitle {
+  color: var(--lumiverse-text);
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  font-weight: 700;
+}
+
+.workflowMeta {
+  color: var(--lumiverse-text-muted);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  line-height: 1.35;
+}
+
+.workflowActions {
+  display: flex;
+  flex-shrink: 0;
+}
+
 .refGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -108,4 +144,3 @@
   justify-content: center;
   cursor: pointer;
 }
-
