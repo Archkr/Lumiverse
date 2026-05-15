@@ -12,6 +12,20 @@ import type { PaginationParams, PaginatedResult } from "../types/pagination";
 import { paginatedQuery } from "./pagination";
 import * as embeddingsSvc from "./embeddings.service";
 import * as vectorizationQueue from "./vectorization-queue.service";
+import { eventBus } from "../ws/bus";
+import { EventType } from "../ws/events";
+
+function emitWorldBookChanged(userId: string, id: string): void {
+  const worldBook = getWorldBook(userId, id);
+  if (!worldBook) return;
+  eventBus.emit(EventType.WORLD_BOOK_CHANGED, { id, worldBook }, userId);
+}
+
+function emitWorldBookEntryChanged(userId: string, id: string): void {
+  const entry = getEntry(userId, id);
+  if (!entry) return;
+  eventBus.emit(EventType.WORLD_BOOK_ENTRY_CHANGED, { id, worldBookId: entry.world_book_id, entry }, userId);
+}
 
 const ENTRY_OUTLET_NAME_KEYS = ["outlet_name", "outletName"] as const;
 
@@ -409,6 +423,7 @@ export function createWorldBook(userId: string, input: CreateWorldBookInput): Wo
   getDb()
     .query("INSERT INTO world_books (id, user_id, name, description, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(id, userId, input.name, input.description || "", JSON.stringify(input.metadata || {}), now, now);
+  emitWorldBookChanged(userId, id);
   return getWorldBook(userId, id)!;
 }
 
@@ -431,11 +446,14 @@ export function updateWorldBook(userId: string, id: string, input: UpdateWorldBo
   values.push(userId);
 
   getDb().query(`UPDATE world_books SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
+  emitWorldBookChanged(userId, id);
   return getWorldBook(userId, id)!;
 }
 
 export function deleteWorldBook(userId: string, id: string): boolean {
-  return getDb().query("DELETE FROM world_books WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
+  const deleted = getDb().query("DELETE FROM world_books WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
+  if (deleted) eventBus.emit(EventType.WORLD_BOOK_DELETED, { id }, userId);
+  return deleted;
 }
 
 export function deleteAutoManagedCharacterWorldBooks(userId: string, characterId: string): number {
@@ -520,6 +538,7 @@ export function setWorldBookSemanticActivation(
 
   if (updatedEntries > 0) {
     db.query("UPDATE world_books SET updated_at = ? WHERE id = ?").run(now, worldBookId);
+    emitWorldBookChanged(userId, worldBookId);
   }
 
   if (!enabled) {
@@ -738,7 +757,12 @@ export function getEntry(userId: string, id: string): WorldBookEntry | null {
   return row ? rowToEntry(row) : null;
 }
 
-export function createEntry(userId: string, worldBookId: string, input: CreateWorldBookEntryInput): WorldBookEntry | null {
+export function createEntry(
+  userId: string,
+  worldBookId: string,
+  input: CreateWorldBookEntryInput,
+  opts?: { emitEvent?: boolean },
+): WorldBookEntry | null {
   const book = getWorldBook(userId, worldBookId);
   if (!book) return null;
 
@@ -806,6 +830,7 @@ export function createEntry(userId: string, worldBookId: string, input: CreateWo
   if (created.vectorized) {
     vectorizationQueue.queueWorldBookEntryVectorization(userId, created.id);
   }
+  if (opts?.emitEvent !== false) emitWorldBookEntryChanged(userId, id);
   return created;
 }
 
@@ -873,6 +898,7 @@ export function updateEntry(userId: string, id: string, input: UpdateWorldBookEn
       console.warn("[embeddings] Failed to remove world book entry vectors:", err);
     });
   }
+  emitWorldBookEntryChanged(userId, id);
   return updated;
 }
 
@@ -887,6 +913,7 @@ export function deleteEntry(userId: string, id: string): boolean {
     void embeddingsSvc.deleteWorldBookEntryEmbeddings(userId, id).catch((err: unknown) => {
       console.warn("[embeddings] Failed to remove world book entry vectors:", err);
     });
+    eventBus.emit(EventType.WORLD_BOOK_ENTRY_DELETED, { id, worldBookId: entry.world_book_id }, userId);
   }
   return deleted;
 }
@@ -966,6 +993,7 @@ export function reorderEntries(userId: string, worldBookId: string, orderedIds: 
     touchWorldBook(worldBookId, now);
   })();
 
+  emitWorldBookChanged(userId, worldBookId);
   return true;
 }
 
@@ -1002,6 +1030,7 @@ export function bulkOperateEntries(
         console.warn("[embeddings] Failed to remove world book entry vectors:", err);
       });
     }
+    emitWorldBookChanged(userId, worldBookId);
     return { action: input.action, affected: uniqueIds.length };
   }
 
@@ -1031,6 +1060,8 @@ export function bulkOperateEntries(
     })();
 
     queueReindexForEntries(userId, orderedEntries);
+    emitWorldBookChanged(userId, worldBookId);
+    emitWorldBookChanged(userId, targetBook.id);
     return { action: input.action, affected: uniqueIds.length, target_book_id: targetBook.id };
   }
 
@@ -1047,6 +1078,7 @@ export function bulkOperateEntries(
       });
       touchWorldBook(worldBookId, now);
     })();
+    emitWorldBookChanged(userId, worldBookId);
     return { action: input.action, affected: uniqueIds.length };
   }
 
@@ -1079,6 +1111,7 @@ export function bulkOperateEntries(
     for (const entry of affectedVectorized) {
       vectorizationQueue.queueWorldBookEntryVectorization(userId, entry.id);
     }
+    emitWorldBookChanged(userId, worldBookId);
     return { action: input.action, affected: uniqueIds.length };
   }
 
@@ -1136,10 +1169,11 @@ export function importWorldBook(
 
   let entryCount = 0;
   for (let i = 0; i < rawEntries.length; i++) {
-    createEntry(userId, worldBook.id, normalizeImportedEntryInput(rawEntries[i], i));
+    createEntry(userId, worldBook.id, normalizeImportedEntryInput(rawEntries[i], i), { emitEvent: false });
     entryCount++;
   }
 
+  emitWorldBookChanged(userId, worldBook.id);
   return { worldBook, entryCount };
 }
 
@@ -1236,6 +1270,7 @@ export function importWorldBookBulk(
     db.query("UPDATE world_books SET updated_at = ? WHERE id = ?").run(now, worldBook.id);
   }
 
+  emitWorldBookChanged(userId, worldBook.id);
   return { worldBook, entryCount };
 }
 
@@ -1265,10 +1300,11 @@ export function importCharacterBook(
   let entryCount = 0;
 
   for (let i = 0; i < entries.length; i++) {
-    createEntry(userId, worldBook.id, normalizeImportedEntryInput(entries[i], i));
+    createEntry(userId, worldBook.id, normalizeImportedEntryInput(entries[i], i), { emitEvent: false });
     entryCount++;
   }
 
+  emitWorldBookChanged(userId, worldBook.id);
   return { worldBook, entryCount };
 }
 
@@ -1326,10 +1362,11 @@ export function importLumiverseWorldBook(
       delay: raw.delay ?? 0,
       vectorized: raw.vectorized ?? false,
       extensions: raw.extensions || {},
-    });
+    }, { emitEvent: false });
     entryCount++;
   }
 
+  emitWorldBookChanged(userId, worldBook.id);
   return { worldBook, entryCount };
 }
 
