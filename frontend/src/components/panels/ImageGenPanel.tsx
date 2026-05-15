@@ -858,6 +858,26 @@ export default function ImageGenPanel() {
             <ToggleRow checked={!!imageGeneration.includeCharacters} onChange={(checked) => updateTop({ includeCharacters: checked })} label="Include Characters" />
             <ToggleRow checked={imageGeneration.autoGenerate !== false} onChange={(checked) => updateTop({ autoGenerate: checked })} label="Auto-Generate On Reply" />
             <ToggleRow checked={!!imageGeneration.forceGeneration} onChange={(checked) => updateTop({ forceGeneration: checked })} label="Ignore Scene Change Detection" />
+            <ToggleRow
+              checked={!!imageGeneration.recycleGeneratedImages}
+              onChange={(checked) => updateTop({ recycleGeneratedImages: checked })}
+              label="Recycle Generated Images Into Context"
+              hint="When off, ImageGen chat attachments stay visible in chat but are not re-sent to the LLM."
+            />
+            {imageGeneration.recycleGeneratedImages && (
+              <FormField label="Generated Images To Re-Send" hint="Only the most recent generated images are included in multimodal context.">
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={String(imageGeneration.recycledImageLimit ?? 1)}
+                  onChange={(value) => {
+                    const parsed = Number(value)
+                    updateTop({ recycledImageLimit: Math.max(1, Math.min(20, Number.isFinite(parsed) ? Math.floor(parsed) : 1)) })
+                  }}
+                />
+              </FormField>
+            )}
             <FormField label={`Scene Change Sensitivity (${imageGeneration.sceneChangeThreshold || 2})`}>
               <input className={styles.slider} type="range" min={1} max={5} step={1} value={imageGeneration.sceneChangeThreshold || 2} onChange={(e) => updateTop({ sceneChangeThreshold: Number(e.target.value) })} />
             </FormField>

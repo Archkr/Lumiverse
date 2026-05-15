@@ -41,6 +41,10 @@ interface ImageGenSettings {
   sceneChangeThreshold: number;
   autoGenerate: boolean;
   forceGeneration: boolean;
+  /** When true, generated chat attachment images may be re-sent to multimodal LLM context. */
+  recycleGeneratedImages: boolean;
+  /** Maximum generated images to re-send when recycling is enabled. */
+  recycledImageLimit: number;
   backgroundOpacity: number;
   fadeTransitionMs: number;
   /** Per-session parameter overrides set via the Image Gen panel — merged on top of connection.default_parameters at generation time. */
@@ -73,6 +77,8 @@ const DEFAULT_IMAGE_SETTINGS: ImageGenSettings = {
   sceneChangeThreshold: 2,
   autoGenerate: true,
   forceGeneration: false,
+  recycleGeneratedImages: false,
+  recycledImageLimit: 1,
   backgroundOpacity: 0.35,
   fadeTransitionMs: 800,
 };

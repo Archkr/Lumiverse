@@ -20,6 +20,8 @@ export const createGenerationSlice: StateCreator<GenerationSlice> = (set) => ({
     sceneChangeThreshold: 2,
     autoGenerate: true,
     forceGeneration: false,
+    recycleGeneratedImages: false,
+    recycledImageLimit: 1,
     backgroundOpacity: 0.35,
     fadeTransitionMs: 800,
   },

@@ -616,6 +616,8 @@ export interface ImageGenSettings {
   sceneChangeThreshold: number
   autoGenerate: boolean
   forceGeneration: boolean
+  recycleGeneratedImages: boolean
+  recycledImageLimit: number
   backgroundOpacity: number
   fadeTransitionMs: number
   /** @deprecated Legacy per-provider blocks — kept for auto-migration */

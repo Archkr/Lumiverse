@@ -29,7 +29,7 @@ import type { Character } from "../types/character";
 import { getEffectiveCharacterName } from "../types/character";
 import type { Persona } from "../types/persona";
 import type { Chat } from "../types/chat";
-import type { Message } from "../types/message";
+import type { Message, MessageAttachment } from "../types/message";
 import type { Preset } from "../types/preset";
 import type { ConnectionProfile } from "../types/connection-profile";
 import {
@@ -413,6 +413,51 @@ async function resolveAttachmentBase64(
   } catch {
     return null;
   }
+}
+
+interface GeneratedImageContextPolicy {
+  recycleGeneratedImages: boolean;
+  recycledImageLimit: number;
+  allowedGeneratedImageIds: Set<string>;
+}
+
+function resolveGeneratedImageContextPolicy(
+  settings: any,
+  messages: Message[],
+): GeneratedImageContextPolicy {
+  const recycleGeneratedImages = settings?.recycleGeneratedImages === true;
+  const rawLimit = Number(settings?.recycledImageLimit ?? 1);
+  const recycledImageLimit = Math.max(
+    1,
+    Math.min(20, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 1),
+  );
+  const allowedGeneratedImageIds = new Set<string>();
+
+  if (!recycleGeneratedImages) {
+    return { recycleGeneratedImages, recycledImageLimit, allowedGeneratedImageIds };
+  }
+
+  for (let i = messages.length - 1; i >= 0 && allowedGeneratedImageIds.size < recycledImageLimit; i--) {
+    const msg = messages[i];
+    if (msg.extra?.hidden === true || !msg.extra?.image_gen) continue;
+    const attachments = Array.isArray(msg.extra?.attachments) ? msg.extra.attachments : [];
+    for (let j = attachments.length - 1; j >= 0 && allowedGeneratedImageIds.size < recycledImageLimit; j--) {
+      const att = attachments[j];
+      if (att?.type === "image" && att.image_id) allowedGeneratedImageIds.add(att.image_id);
+    }
+  }
+
+  return { recycleGeneratedImages, recycledImageLimit, allowedGeneratedImageIds };
+}
+
+function attachmentsForContext(msg: Message, policy: GeneratedImageContextPolicy): MessageAttachment[] {
+  const attachments = Array.isArray(msg.extra?.attachments)
+    ? (msg.extra.attachments as MessageAttachment[])
+    : [];
+  if (!msg.extra?.image_gen) return attachments;
+  return attachments.filter(
+    (att) => att?.type !== "image" || policy.allowedGeneratedImageIds.has(att.image_id),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1439,6 +1484,7 @@ export async function assemblePrompt(
       "theme",
       "contextFilters",
       "summarization",
+      "imageGeneration",
       "chatMemorySettings",
       "databankSettings",
       "council_settings",
@@ -1846,6 +1892,10 @@ export async function assemblePrompt(
           -summarizationSettings.messageLimitCount,
         );
       }
+      const generatedImageContextPolicy = resolveGeneratedImageContextPolicy(
+        settingsMap.get("imageGeneration"),
+        effectiveMessages,
+      );
 
       // Insert chat messages — evaluate macros in each message's content
       // Skip messages marked as hidden drafts (extra.hidden === true)
@@ -1855,9 +1905,7 @@ export async function assemblePrompt(
       const attachmentImageIds = new Set<string>();
       for (const msg of effectiveMessages) {
         if (msg.extra?.hidden === true) continue;
-        const atts = Array.isArray(msg.extra?.attachments)
-          ? msg.extra.attachments
-          : [];
+        const atts = attachmentsForContext(msg, generatedImageContextPolicy);
         for (const att of atts) {
           if (att.image_id) attachmentImageIds.add(att.image_id);
         }
@@ -1907,9 +1955,7 @@ export async function assemblePrompt(
             )
           : rawContent;
         historyParts.push(resolvedContent);
-        const attachments = Array.isArray(msg.extra?.attachments)
-          ? msg.extra.attachments
-          : [];
+        const attachments = attachmentsForContext(msg, generatedImageContextPolicy);
         if (attachments.length > 0) {
           // Build multipart content: text + attachment parts. Skip the text part
           // when it's blank so strict providers (Anthropic et al) don't reject
@@ -5589,10 +5635,14 @@ async function legacyAssembly(
   // Chat history — evaluate macros in each message
   // Skip messages marked as hidden drafts (extra.hidden === true)
   // Pre-resolve all attachment files in parallel (same pattern as main assembly)
+  const legacyGeneratedImageContextPolicy = resolveGeneratedImageContextPolicy(
+    userId ? settingsSvc.getSetting(userId, "imageGeneration")?.value : null,
+    messages,
+  );
   const legacyAttachmentIds = new Set<string>();
   for (const m of messages) {
     if (m.extra?.hidden === true) continue;
-    const atts = Array.isArray(m.extra?.attachments) ? m.extra.attachments : [];
+    const atts = attachmentsForContext(m, legacyGeneratedImageContextPolicy);
     for (const att of atts) {
       if (att.image_id) legacyAttachmentIds.add(att.image_id as string);
     }
@@ -5620,9 +5670,7 @@ async function legacyAssembly(
     }
     const resolved = healFormattingArtifacts(await resolveMacros(m.content));
     legacyHistoryParts.push(resolved);
-    const attachments = Array.isArray(m.extra?.attachments)
-      ? m.extra.attachments
-      : [];
+    const attachments = attachmentsForContext(m, legacyGeneratedImageContextPolicy);
     if (attachments.length > 0) {
       const parts: import("../llm/types").LlmMessagePart[] = [];
       if (resolved.trim().length > 0) {

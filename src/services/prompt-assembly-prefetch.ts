@@ -48,6 +48,7 @@ const ALL_SETTINGS_KEYS = [
   "theme",
   "contextFilters",
   "summarization",
+  "imageGeneration",
   // Sidecar settings (used by council)
   "sidecarSettings",
 ];
