@@ -4,6 +4,7 @@
   color: var(--lumiverse-text);
   word-wrap: break-word;
   overflow-wrap: break-word;
+  display: flow-root;
 }
 
 .contentUser {
@@ -12,6 +13,10 @@
 .contentChar {}
 
 /* Prevent browser-generated quote marks on <q> wrappers */
+.prose {
+  display: flow-root;
+}
+
 .prose q {
   quotes: none;
 }
@@ -473,7 +478,7 @@
 
 /* ── HTML Islands (Shadow DOM isolated content) ── */
 .htmlIsland {
-  display: block;
+  display: flow-root;
   margin: 8px 0;
   border-radius: var(--lcs-radius-sm);
   overflow: hidden;

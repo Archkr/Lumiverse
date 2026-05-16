@@ -344,7 +344,7 @@ const VOID_HTML_TAGS = new Set([
 
 const ISLAND_BASE_CSS = `
   :host {
-    display: block;
+    display: flow-root;
     font-size: calc(14px * var(--lumiverse-font-scale, 1));
     line-height: 1.65;
     color: var(--lumiverse-text);
@@ -1426,6 +1426,44 @@ export default function MessageContent({
     if (!container) return
     return attachCodeCopyHandler(container)
   }, [])
+
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    let cancelled = false
+    let pendingRaf = 0
+    const settleTimers: number[] = []
+
+    const scheduleLayoutNotify = () => {
+      if (cancelled || pendingRaf) return
+      pendingRaf = window.requestAnimationFrame(() => {
+        pendingRaf = 0
+        if (!cancelled) notifyMessageContentLayout(container)
+      })
+    }
+
+    const observer = new ResizeObserver(scheduleLayoutNotify)
+    observer.observe(container)
+
+    container.addEventListener('load', scheduleLayoutNotify, true)
+    container.addEventListener('error', scheduleLayoutNotify, true)
+
+    scheduleLayoutNotify()
+    for (const delay of [80, 180, 420, 900]) {
+      settleTimers.push(window.setTimeout(scheduleLayoutNotify, delay))
+    }
+    document.fonts?.ready.then(scheduleLayoutNotify).catch(() => {})
+
+    return () => {
+      cancelled = true
+      observer.disconnect()
+      container.removeEventListener('load', scheduleLayoutNotify, true)
+      container.removeEventListener('error', scheduleLayoutNotify, true)
+      if (pendingRaf) window.cancelAnimationFrame(pendingRaf)
+      for (const timer of settleTimers) window.clearTimeout(timer)
+    }
+  }, [renderContent])
 
   useLayoutEffect(() => {
     if (!isStreaming || !lockStreamingHeight) {
