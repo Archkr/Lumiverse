@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useCallback, useState, useSyncExternalStore, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
 import { useVirtualizer, defaultRangeExtractor, type Range } from '@tanstack/react-virtual'
 import { useChunkedMessages } from '@/hooks/useChunkedMessages'
 import {
@@ -26,6 +26,15 @@ const MAX_ESTIMATED_ROW_HEIGHT = 900
 const MOBILE_MOMENTUM_SETTLE_MS = 260
 const MOBILE_RANGE_WARM_MS = 1200
 
+type VirtualListItem =
+  | { type: 'groupBar'; key: string }
+  | { type: 'loadingOlder'; key: string }
+  | { type: 'message'; key: string; measureKey: string; message: Message; messageIndex: number }
+  | { type: 'progressBar'; key: string }
+  | { type: 'error'; key: string; error: string }
+  | { type: 'messageFooter'; key: string }
+  | { type: 'bottom'; key: string }
+
 function getTopLoadThreshold(clientHeight: number, isCoarsePointer: boolean) {
   if (!isCoarsePointer) return TOP_LOAD_THRESHOLD
   return Math.max(TOP_LOAD_THRESHOLD, Math.round(clientHeight * 1.15), 420)
@@ -38,6 +47,32 @@ function clampEstimate(value: number) {
 function clampMeasuredRowHeight(value: number) {
   if (!Number.isFinite(value)) return MIN_MEASURED_ROW_HEIGHT
   return Math.max(MIN_MEASURED_ROW_HEIGHT, value)
+}
+
+function getUiScale() {
+  if (typeof window === 'undefined') return 1
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--lumiverse-ui-scale')
+  const parsed = Number.parseFloat(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+}
+
+function getElementLayoutHeight(element: Element) {
+  if (element instanceof HTMLElement && element.offsetHeight > 0) {
+    return element.offsetHeight
+  }
+
+  // getBoundingClientRect() is affected by body-level CSS zoom; virtualizer
+  // coordinates are not, so normalize the rare rect fallback to layout pixels.
+  return element.getBoundingClientRect().height / getUiScale()
+}
+
+function hashString(value: string) {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0
+  }
+  return hash.toString(16)
 }
 
 export default function MessageList({ messages, chatId, isStreaming }: MessageListProps) {
@@ -131,6 +166,56 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
   const isBubble = displayMode === 'bubble'
   const estimateSize = isBubble ? 260 : 180
 
+  const virtualListItems = useMemo<VirtualListItem[]>(() => {
+    const items: VirtualListItem[] = []
+
+    if (isGroupChat) {
+      items.push({ type: 'groupBar', key: 'group-bar' })
+    }
+
+    if (loadingOlder && !isCoarsePointer) {
+      items.push({ type: 'loadingOlder', key: 'loading-older' })
+    }
+
+    for (let index = 0; index < visibleMessages.length; index += 1) {
+      const message = visibleMessages[index]
+      const content = message.swipes?.[message.swipe_id] ?? message.content ?? ''
+      const attachmentCount = message.extra?.attachments?.length ?? 0
+      const measureKey = [
+        'message',
+        message.id,
+        displayMode,
+        message.swipe_id,
+        message.swipes?.length ?? 0,
+        hashString(content),
+        attachmentCount,
+        message.extra?.reasoning ? 'reasoning' : 'no-reasoning',
+        message.extra?.hidden ? 'hidden' : 'visible',
+      ].join(':')
+
+      items.push({
+        type: 'message',
+        key: measureKey,
+        measureKey,
+        message,
+        messageIndex: index,
+      })
+    }
+
+    if (isGroupChat && isNudgeLoopActive) {
+      items.push({ type: 'progressBar', key: 'group-progress' })
+    }
+
+    if (streamingError) {
+      items.push({ type: 'error', key: `streaming-error:${hashString(streamingError)}`, error: streamingError })
+    }
+
+    items.push({ type: 'messageFooter', key: 'message-footer' })
+    items.push({ type: 'bottom', key: 'bottom' })
+
+    return items
+  }, [displayMode, isCoarsePointer, isGroupChat, isNudgeLoopActive, loadingOlder, streamingError, visibleMessages])
+
   useEffect(() => {
     measuredRowHeightsRef.current = new Map()
     averageMeasuredHeightRef.current = null
@@ -156,8 +241,8 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     }
   }, [])
 
-  const estimateMessageSize = useCallback((message: Message) => {
-    const measured = measuredRowHeightsRef.current.get(message.id)
+  const estimateMessageSize = useCallback((message: Message, measureKey: string) => {
+    const measured = measuredRowHeightsRef.current.get(measureKey)
     if (measured) return measured
 
     const el = scrollRef.current
@@ -227,18 +312,33 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
   const getItemKey = useCallback(
     (index: number) => {
-      const message = visibleMessages[index]
-      return message ? message.id : index
+      const item = virtualListItems[index]
+      return item ? item.key : index
     },
-    [visibleMessages]
+    [virtualListItems]
   )
 
   const rowVirtualizer = useVirtualizer({
-    count: visibleMessages.length,
+    count: virtualListItems.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => {
-      const message = visibleMessages[index]
-      return message ? estimateMessageSize(message) : estimateSize
+      const item = virtualListItems[index]
+      if (!item) return estimateSize
+      switch (item.type) {
+        case 'message':
+          return estimateMessageSize(item.message, item.measureKey)
+        case 'groupBar':
+          return 48
+        case 'loadingOlder':
+          return 44
+        case 'progressBar':
+          return 48
+        case 'error':
+          return 72
+        case 'messageFooter':
+        case 'bottom':
+          return 1
+      }
     },
     overscan: isCoarsePointer ? 12 : 8,
     getItemKey,
@@ -246,10 +346,13 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     useAnimationFrameWithResizeObserver: true,
     measureElement: (element, entry) => {
       const size = entry?.borderBoxSize?.[0]?.blockSize
-      const measured = clampMeasuredRowHeight(size ?? element.getBoundingClientRect().height)
-      const messageId = element.getAttribute('data-message-id')
-      if (messageId && measured >= MIN_MEASURED_ROW_HEIGHT) {
-        measuredRowHeightsRef.current.set(messageId, measured)
+      const rawMeasured = size ?? getElementLayoutHeight(element)
+      const measured = element.getAttribute('data-item-type') === 'message'
+        ? clampMeasuredRowHeight(rawMeasured)
+        : Math.max(1, Number.isFinite(rawMeasured) ? rawMeasured : 1)
+      const measureKey = element.getAttribute('data-measure-key')
+      if (measureKey && measured >= MIN_MEASURED_ROW_HEIGHT) {
+        measuredRowHeightsRef.current.set(measureKey, measured)
         const values = Array.from(measuredRowHeightsRef.current.values())
         const sample = values.slice(-80)
         averageMeasuredHeightRef.current = sample.reduce((sum, value) => sum + value, 0) / sample.length
@@ -257,6 +360,26 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       return measured
     },
   })
+
+  useEffect(() => {
+    let pendingRaf = 0
+
+    const handleResize = () => {
+      if (pendingRaf) return
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = 0
+        measuredRowHeightsRef.current = new Map()
+        averageMeasuredHeightRef.current = null
+        rowVirtualizer.measure()
+      })
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (pendingRaf) cancelAnimationFrame(pendingRaf)
+    }
+  }, [rowVirtualizer])
 
   useLayoutEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
@@ -280,12 +403,12 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
 
   const scrollToHistoryBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const el = scrollRef.current
-    if (!el || visibleMessages.length === 0) return
+    if (!el || virtualListItems.length === 0) return
 
     isPinnedRef.current = true
     isProgrammaticScrollRef.current = true
     setPrependVisualOffset(0)
-    rowVirtualizer.scrollToIndex(visibleMessages.length - 1, { align: 'end', behavior })
+    rowVirtualizer.scrollToIndex(virtualListItems.length - 1, { align: 'end', behavior })
 
     requestAnimationFrame(() => {
       const latest = scrollRef.current
@@ -294,25 +417,25 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       latest.scrollTop = latest.scrollHeight - latest.clientHeight
       lastScrollTopRef.current = latest.scrollTop
     })
-  }, [rowVirtualizer, setPrependVisualOffset, visibleMessages.length])
+  }, [rowVirtualizer, setPrependVisualOffset, virtualListItems.length])
 
   const BOTTOM_REPIN_EPSILON = 6
 
   const recoverTailVoid = useCallback(() => {
     const el = scrollRef.current
-    if (!el || visibleMessages.length === 0) return false
+    if (!el || virtualListItems.length === 0) return false
 
     const items = rowVirtualizer.getVirtualItems()
     const lastItem = items[items.length - 1]
-    const lastIndex = visibleMessages.length - 1
+    const lastIndex = virtualListItems.length - 1
     if (!lastItem || lastItem.index !== lastIndex) return false
 
-    const lastRow = el.querySelector<HTMLElement>(`[data-index="${lastIndex}"]`)
+    const lastRow = el.querySelector<HTMLElement>(`[data-virtual-index="${lastIndex}"]`)
     if (!lastRow) return false
 
     const rowRect = lastRow.getBoundingClientRect()
     const scrollRect = el.getBoundingClientRect()
-    const actualContentBottom = el.scrollTop + (rowRect.bottom - scrollRect.top)
+    const actualContentBottom = el.scrollTop + ((rowRect.bottom - scrollRect.top) / getUiScale())
     const viewportBottom = el.scrollTop + el.clientHeight
     const voidThreshold = Math.max(180, el.clientHeight * 0.55)
 
@@ -327,7 +450,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     lastScrollHeightRef.current = el.scrollHeight
     isPinnedRef.current = true
     return true
-  }, [rowVirtualizer, visibleMessages.length])
+  }, [rowVirtualizer, virtualListItems.length])
 
   const updatePinState = (scrollTop: number, scrollHeight: number, clientHeight: number) => {
     const distance = scrollHeight - scrollTop - clientHeight
@@ -589,24 +712,24 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     if (!el) return
 
     let pendingRaf = 0
-    const pendingRows = new Set<Element>()
+    let settleRaf = 0
 
-    const handleMessageContentLayout = (event: Event) => {
-      const target = event.target
-      if (target instanceof Element) {
-        const row = target.closest('[data-index][data-message-id]')
-        if (row) pendingRows.add(row)
-      }
-
+    const handleMessageContentLayout = () => {
       if (pendingRaf) return
       pendingRaf = requestAnimationFrame(() => {
         pendingRaf = 0
-        for (const row of pendingRows) {
+        const visibleRows = el.querySelectorAll('[data-index][data-message-id]')
+        for (const row of visibleRows) {
           rowVirtualizer.measureElement(row)
         }
-        pendingRows.clear()
 
         if (recoverTailVoid()) return
+        if (!settleRaf) {
+          settleRaf = requestAnimationFrame(() => {
+            settleRaf = 0
+            recoverTailVoid()
+          })
+        }
 
         const latest = scrollRef.current
         if (!latest || !isPinnedRef.current) return
@@ -621,7 +744,7 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
     return () => {
       el.removeEventListener(MESSAGE_CONTENT_LAYOUT_EVENT, handleMessageContentLayout)
       if (pendingRaf) cancelAnimationFrame(pendingRaf)
-      pendingRows.clear()
+      if (settleRaf) cancelAnimationFrame(settleRaf)
     }
   }, [recoverTailVoid, rowVirtualizer])
 
@@ -638,63 +761,90 @@ export default function MessageList({ messages, chatId, isStreaming }: MessageLi
       onTouchCancel={releaseTouchMomentumHold}
       data-chat-scroll="true"
     >
-      {isGroupChat && <GroupChatMemberBar chatId={chatId} />}
-      {loadingOlder && !isCoarsePointer && (
-        <div className={styles.loadingOlder}>Loading older messages...</div>
-      )}
       <div
         className={styles.virtualSpace}
         style={{ height: rowVirtualizer.getTotalSize() }}
       >
         {virtualItems.map((virtualRow) => {
-          const message = visibleMessages[virtualRow.index]
-          if (!message) return null
+          const item = virtualListItems[virtualRow.index]
+          if (!item) return null
+
+          let content: ReactNode = null
+          let messageId: string | undefined
+          let messageIndex: number | undefined
+          let measureKey: string | undefined
+
+          switch (item.type) {
+            case 'groupBar':
+              content = <GroupChatMemberBar chatId={chatId} />
+              break
+            case 'loadingOlder':
+              content = <div className={styles.loadingOlder}>Loading older messages...</div>
+              break
+            case 'message':
+              messageId = item.message.id
+              messageIndex = item.messageIndex
+              measureKey = item.measureKey
+              content = (
+                <MessageCard
+                  message={item.message}
+                  chatId={chatId}
+                  depth={visibleMessages.length - 1 - item.messageIndex}
+                />
+              )
+              break
+            case 'progressBar':
+              content = <GroupChatProgressBar />
+              break
+            case 'error':
+              content = (
+                <div className={styles.errorBubble}>
+                  <span className={styles.errorLabel}>Generation failed:</span> {item.error}
+                </div>
+              )
+              break
+            case 'messageFooter':
+              content = <div data-spindle-mount="message_footer" />
+              break
+            case 'bottom':
+              content = <div ref={bottomRef} />
+              break
+          }
 
           return (
             <VirtualRow
               key={virtualRow.key}
-              index={virtualRow.index}
-              messageId={message.id}
+              virtualIndex={virtualRow.index}
+              itemType={item.type}
+              messageIndex={messageIndex}
+              messageId={messageId}
+              measureKey={measureKey}
               start={virtualRow.start}
               visualOffset={prependVisualOffset}
               measureElement={rowVirtualizer.measureElement}
             >
-              <MessageCard
-                message={message}
-                chatId={chatId}
-                depth={visibleMessages.length - 1 - virtualRow.index}
-              />
+              {content}
             </VirtualRow>
           )
         })}
       </div>
-
-      {/* Group chat progress bar during nudge loop */}
-      {isGroupChat && isNudgeLoopActive && <GroupChatProgressBar />}
-
-      {/* Generation error display */}
-      {streamingError && (
-        <div className={styles.errorBubble}>
-          <span className={styles.errorLabel}>Generation failed:</span> {streamingError}
-        </div>
-      )}
-
-      <div data-spindle-mount="message_footer" />
-      <div ref={bottomRef} />
     </div>
   )
 }
 
 interface VirtualRowProps {
-  index: number
-  messageId: string
+  virtualIndex: number
+  itemType: VirtualListItem['type']
+  messageIndex?: number
+  messageId?: string
+  measureKey?: string
   start: number
   visualOffset: number
   measureElement: (el: Element | null) => void
   children: ReactNode
 }
 
-function VirtualRow({ index, messageId, start, visualOffset, measureElement, children }: VirtualRowProps) {
+function VirtualRow({ virtualIndex, itemType, messageIndex, messageId, measureKey, start, visualOffset, measureElement, children }: VirtualRowProps) {
   const elRef = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
@@ -750,8 +900,11 @@ function VirtualRow({ index, messageId, start, visualOffset, measureElement, chi
   return (
     <div
       ref={elRef}
-      data-index={index}
+      data-virtual-index={virtualIndex}
+      data-item-type={itemType}
+      data-index={messageIndex}
       data-message-id={messageId}
+      data-measure-key={measureKey}
       className={styles.virtualRow}
       style={{ transform: `translateY(${start - visualOffset}px)` }}
     >
