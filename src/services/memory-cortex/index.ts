@@ -976,6 +976,11 @@ export async function processChunk(
              emotional_tags = excluded.emotional_tags,
              status_changes = excluded.status_changes,
              narrative_flags = excluded.narrative_flags,
+             has_dialogue = excluded.has_dialogue,
+             has_action = excluded.has_action,
+             has_internal_thought = excluded.has_internal_thought,
+             word_count = excluded.word_count,
+             scored_by = excluded.scored_by,
              scored_at = excluded.scored_at`,
         ).run(
           crypto.randomUUID(), data.chunkId, data.chatId,

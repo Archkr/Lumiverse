@@ -131,6 +131,8 @@ interface WarmupResponse {
   cortex: WarmupComponentResult;
 }
 
+const passiveWarmups = new Set<string>();
+
 function getChunkFreshnessSnapshot(chatId: string): Pick<CortexFreshnessSnapshot, "sourceChunkCount" | "sourceChunkUpdatedAt"> {
   const row = getDb()
     .query("SELECT COUNT(*) as chunkCount, MAX(updated_at) as maxUpdatedAt FROM chat_chunks WHERE chat_id = ?")
@@ -314,6 +316,141 @@ async function warmLongTermChatMemory(options: {
   }
 
   return { status: "skipped", reason: "chat_memory_already_fresh" };
+}
+
+async function performChatWarmup(userId: string, chatId: string, force: boolean): Promise<WarmupResponse> {
+  const chat = getChat(userId, chatId);
+  if (!chat) {
+    return {
+      status: "skipped",
+      reason: "chat_not_found",
+      chatId,
+      chatMemory: { status: "skipped", reason: "chat_not_found" },
+      cortex: { status: "skipped", reason: "chat_not_found" },
+    };
+  }
+
+  const embeddings = await embeddingsSvc.getEmbeddingConfig(userId);
+  const config = memoryCortex.getCortexConfig(userId);
+  const allowPassiveChunkRebuild = !config.enabled || config.autoWarmup;
+
+  const chatMemory = await warmLongTermChatMemory({
+    userId,
+    chatId,
+    force,
+    // Chat chunk rebuilds delete and recreate chunk IDs, which cascades chunk-
+    // scoped Cortex rows. During passive chat-open warmups, only do that when
+    // Cortex is also allowed to rebuild its derived state in the same flow.
+    allowRebuild: force || allowPassiveChunkRebuild,
+    embeddings,
+  });
+
+  const freshChat = getChat(userId, chatId);
+  if (!freshChat) {
+    return {
+      status: "skipped",
+      reason: "chat_not_found",
+      chatId,
+      chatMemory,
+      cortex: { status: "skipped", reason: "chat_not_found" },
+    };
+  }
+
+  const currentChatMemoryHash = await chatsSvc.getCurrentChatMemoryHash(userId);
+  const storedChatMemoryHash = getStoredChatMemoryHash(freshChat);
+  const chatMemoryFresh = !!currentChatMemoryHash && storedChatMemoryHash === currentChatMemoryHash;
+
+  let cortex: WarmupComponentResult;
+  if (!config.enabled) {
+    cortex = { status: "skipped", reason: "cortex_disabled" };
+  } else if (!force && !config.autoWarmup) {
+    cortex = { status: "skipped", reason: "cortex_auto_warmup_disabled" };
+  } else if (!embeddings.enabled || !embeddings.vectorize_chat_messages) {
+    cortex = { status: "skipped", reason: "chat_vectorization_disabled" };
+  } else if (chatsSvc.isChatChunkRebuildInProgress(chatId)) {
+    cortex = { status: "skipped", reason: "chunk_rebuild_in_progress" };
+  } else if (!force && !chatMemoryFresh) {
+    cortex = { status: "skipped", reason: "chat_memory_stale" };
+  } else {
+    const sidecar = resolveCortexSidecarAdapter(userId, config);
+    if (sidecar.unavailableReason) {
+      cortex = { status: "skipped", reason: sidecar.unavailableReason };
+    } else {
+      const stats = memoryCortex.getCortexUsageStats(chatId);
+      const rebuild = memoryCortex.getRebuildStatus(chatId);
+      const ingestion = memoryCortex.getIngestionStatus(chatId);
+
+      if (rebuild?.status === "processing") {
+        cortex = { status: "skipped", reason: "rebuild_in_progress" };
+      } else if (ingestion?.status === "processing") {
+        cortex = { status: "skipped", reason: "ingestion_in_progress" };
+      } else if (stats.chunkCount === 0) {
+        cortex = { status: "skipped", reason: "no_chunks" };
+      } else if (!force && stats.chunkCount <= 2 && Math.floor(Date.now() / 1000) - freshChat.updated_at < 20) {
+        cortex = { status: "skipped", reason: "recent_chat" };
+      } else {
+        const snapshot = await buildCortexFreshnessSnapshot(userId, chatId, config);
+        if (!force && isCortexFresh(freshChat, snapshot)) {
+          cortex = { status: "skipped", reason: "already_ready" };
+        } else {
+          const coverage = memoryCortex.getCortexWarmupCoverage(chatId, snapshot.rebuildSignature);
+          if (!force && coverage.pendingChunks === 0 && !coverage.requiresFullRebuild) {
+            stampCortexFreshnessSnapshot(userId, chatId, snapshot);
+            cortex = { status: "skipped", reason: "already_ready" };
+          } else {
+            const { characterNames, descriptionAliases } = await resolveCortexParticipants(userId, freshChat);
+            startTrackedCortexRebuild({
+              userId,
+              chatId,
+              characterNames,
+              descriptionAliases,
+              generateRawFn: sidecar.generateRawFn,
+              sidecarConnectionId: sidecar.sidecarConnectionId,
+              snapshot,
+              ...(force ? {} : { source: "warmup" as const }),
+            });
+            cortex = { status: "started", reason: force ? "rebuild_started" : "warmup_started" };
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    status: cortex.status === "started"
+      ? "started"
+      : chatMemory.status === "complete"
+        ? "complete"
+        : "skipped",
+    reason: cortex.status === "started"
+      ? cortex.reason
+      : chatMemory.status === "complete"
+        ? chatMemory.reason
+        : cortex.reason !== "cortex_disabled" || chatMemory.reason === "chat_vectorization_disabled"
+          ? cortex.reason
+          : chatMemory.reason,
+    chatId,
+    chatMemory,
+    cortex,
+  };
+}
+
+function startPassiveChatWarmup(userId: string, chatId: string): boolean {
+  const key = `${userId}:${chatId}`;
+  if (passiveWarmups.has(key)) return false;
+  passiveWarmups.add(key);
+
+  setTimeout(() => {
+    void performChatWarmup(userId, chatId, false)
+      .catch((err) => {
+        console.warn("[memory-cortex] Passive chat warmup failed:", err);
+      })
+      .finally(() => {
+        passiveWarmups.delete(key);
+      });
+  }, 0);
+
+  return true;
 }
 
 function resolveCortexSidecarAdapter(
@@ -1211,103 +1348,18 @@ app.post("/chats/:chatId/warm", async (c) => {
   const chat = getChat(userId, chatId);
   if (!chat) return c.json({ error: "Chat not found" }, 404);
 
-  const embeddings = await embeddingsSvc.getEmbeddingConfig(userId);
-  const config = memoryCortex.getCortexConfig(userId);
-  const allowPassiveChunkRebuild = !config.enabled || config.autoWarmup;
-
-  const chatMemory = await warmLongTermChatMemory({
-    userId,
-    chatId,
-    force,
-    // Chat chunk rebuilds delete and recreate chunk IDs, which cascades chunk-
-    // scoped Cortex rows. During passive chat-open warmups, only do that when
-    // Cortex is also allowed to rebuild its derived state in the same flow.
-    allowRebuild: force || allowPassiveChunkRebuild,
-    embeddings,
-  });
-
-  const freshChat = getChat(userId, chatId);
-  if (!freshChat) return c.json({ error: "Chat not found" }, 404);
-
-  const currentChatMemoryHash = await chatsSvc.getCurrentChatMemoryHash(userId);
-  const storedChatMemoryHash = getStoredChatMemoryHash(freshChat);
-  const chatMemoryFresh = !!currentChatMemoryHash && storedChatMemoryHash === currentChatMemoryHash;
-
-  let cortex: WarmupComponentResult;
-  if (!config.enabled) {
-    cortex = { status: "skipped", reason: "cortex_disabled" };
-  } else if (!force && !config.autoWarmup) {
-    cortex = { status: "skipped", reason: "cortex_auto_warmup_disabled" };
-  } else if (!embeddings.enabled || !embeddings.vectorize_chat_messages) {
-    cortex = { status: "skipped", reason: "chat_vectorization_disabled" };
-  } else if (chatsSvc.isChatChunkRebuildInProgress(chatId)) {
-    cortex = { status: "skipped", reason: "chunk_rebuild_in_progress" };
-  } else if (!force && !chatMemoryFresh) {
-    cortex = { status: "skipped", reason: "chat_memory_stale" };
-  } else {
-    const sidecar = resolveCortexSidecarAdapter(userId, config);
-    if (sidecar.unavailableReason) {
-      cortex = { status: "skipped", reason: sidecar.unavailableReason };
-    } else {
-      const stats = memoryCortex.getCortexUsageStats(chatId);
-      const rebuild = memoryCortex.getRebuildStatus(chatId);
-      const ingestion = memoryCortex.getIngestionStatus(chatId);
-
-      if (rebuild?.status === "processing") {
-        cortex = { status: "skipped", reason: "rebuild_in_progress" };
-      } else if (ingestion?.status === "processing") {
-        cortex = { status: "skipped", reason: "ingestion_in_progress" };
-      } else if (stats.chunkCount === 0) {
-        cortex = { status: "skipped", reason: "no_chunks" };
-      } else if (!force && stats.chunkCount <= 2 && Math.floor(Date.now() / 1000) - freshChat.updated_at < 20) {
-        cortex = { status: "skipped", reason: "recent_chat" };
-      } else {
-        const snapshot = await buildCortexFreshnessSnapshot(userId, chatId, config);
-        if (!force && isCortexFresh(freshChat, snapshot)) {
-          cortex = { status: "skipped", reason: "already_ready" };
-        } else {
-          const coverage = memoryCortex.getCortexWarmupCoverage(chatId, snapshot.rebuildSignature);
-          if (!force && coverage.pendingChunks === 0 && !coverage.requiresFullRebuild) {
-            stampCortexFreshnessSnapshot(userId, chatId, snapshot);
-            cortex = { status: "skipped", reason: "already_ready" };
-          } else {
-            const { characterNames, descriptionAliases } = await resolveCortexParticipants(userId, freshChat);
-            startTrackedCortexRebuild({
-              userId,
-              chatId,
-              characterNames,
-              descriptionAliases,
-              generateRawFn: sidecar.generateRawFn,
-              sidecarConnectionId: sidecar.sidecarConnectionId,
-              snapshot,
-              ...(force ? {} : { source: "warmup" as const }),
-            });
-            cortex = { status: "started", reason: force ? "rebuild_started" : "warmup_started" };
-          }
-        }
-      }
-    }
+  if (!force) {
+    const started = startPassiveChatWarmup(userId, chatId);
+    return c.json({
+      status: started ? "started" : "skipped",
+      reason: started ? "warmup_started" : "warmup_in_progress",
+      chatId,
+      chatMemory: { status: started ? "started" : "skipped", reason: started ? "warmup_started" : "warmup_in_progress" },
+      cortex: { status: started ? "started" : "skipped", reason: started ? "warmup_started" : "warmup_in_progress" },
+    } satisfies WarmupResponse);
   }
 
-  const response: WarmupResponse = {
-    status: cortex.status === "started"
-      ? "started"
-      : chatMemory.status === "complete"
-        ? "complete"
-        : "skipped",
-    reason: cortex.status === "started"
-      ? cortex.reason
-      : chatMemory.status === "complete"
-        ? chatMemory.reason
-        : cortex.reason !== "cortex_disabled" || chatMemory.reason === "chat_vectorization_disabled"
-          ? cortex.reason
-          : chatMemory.reason,
-    chatId,
-    chatMemory,
-    cortex,
-  };
-
-  return c.json(response);
+  return c.json(await performChatWarmup(userId, chatId, true));
 });
 
 // ─── Heuristics Engine Migration ──────────────────────────────
