@@ -694,19 +694,48 @@ function VirtualRow({ index, messageId, start, visualOffset, measureElement, chi
     const el = elRef.current
     if (!el) return
 
+    let pendingRaf = 0
+    const settleTimers: number[] = []
+
+    const measure = () => {
+      measureElement(el)
+    }
+
+    const scheduleMeasure = () => {
+      if (pendingRaf) return
+      pendingRaf = requestAnimationFrame(() => {
+        pendingRaf = 0
+        measure()
+      })
+    }
+
     // Initial measure during commit, before paint
-    measureElement(el)
+    measure()
+    for (const delay of [80, 180, 420, 900]) {
+      settleTimers.push(window.setTimeout(scheduleMeasure, delay))
+    }
 
     // Own immediate ResizeObserver bypasses the virtualizer's rAF-batched
     // observer so dynamic content (extension interceptor injections, lazy
     // images, etc.) updates row heights without a one-frame delay.
     const ro = new ResizeObserver(() => {
-      measureElement(el)
+      measure()
     })
     ro.observe(el)
 
+    const mo = new MutationObserver(scheduleMeasure)
+    mo.observe(el, { childList: true, subtree: true, attributes: true, characterData: true })
+
+    el.addEventListener('load', scheduleMeasure, true)
+    el.addEventListener('error', scheduleMeasure, true)
+
     return () => {
+      if (pendingRaf) cancelAnimationFrame(pendingRaf)
+      for (const timer of settleTimers) window.clearTimeout(timer)
       ro.disconnect()
+      mo.disconnect()
+      el.removeEventListener('load', scheduleMeasure, true)
+      el.removeEventListener('error', scheduleMeasure, true)
       measureElement(null)
     }
   }, [measureElement])
