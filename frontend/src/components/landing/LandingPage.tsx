@@ -39,6 +39,7 @@ function getRecentChatSubtitle(item: GroupedRecentChat): string {
     return item.latest_chat_name
   }
 
+  if (item.is_group && item.chat_count > 1) return 'Choose from group threads'
   if (item.is_group) return 'Resume the latest group thread'
   if (item.chat_count > 1) return 'Choose from recent conversations'
   return 'Resume conversation'
@@ -426,8 +427,22 @@ export default function LandingPage() {
 
   const handleChatClick = useCallback(
     (item: GroupedRecentChat) => {
-      // Group chats are always individual entries — navigate directly
-      if (item.is_group || item.chat_count === 1) {
+      if (item.is_group) {
+        const groupCharacterIds = item.group_character_ids ?? []
+        if (item.chat_count > 1 && groupCharacterIds.length > 1) {
+          openModal('manageChats', {
+            characterId: item.character_id,
+            characterName: getRecentChatDisplayName(item),
+            isGroupChat: true,
+            groupCharacterIds,
+          })
+          return
+        }
+        navigate(`/chat/${item.latest_chat_id}`)
+        return
+      }
+
+      if (item.chat_count === 1) {
         navigate(`/chat/${item.latest_chat_id}`)
         return
       }
@@ -593,14 +608,14 @@ export default function LandingPage() {
                       key={getRecentChatKey(item)}
                       item={item}
                       onClick={() => handleChatClick(item)}
-                      onDelete={item.is_group || item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
+                      onDelete={item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
                     />
                   ) : (
                     <ChatCard
                       key={getRecentChatKey(item)}
                       item={item}
                       onClick={() => handleChatClick(item)}
-                      onDelete={item.is_group || item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
+                      onDelete={item.chat_count === 1 ? () => handleDeleteChat(item) : undefined}
                     />
                   )
                 ))}

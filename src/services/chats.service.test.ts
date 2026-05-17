@@ -158,6 +158,25 @@ describe("recent chats", () => {
     expect(result.data[2].group_character_ids).toEqual(["c1", "c2"]);
   });
 
+  test("groups recent group chat forks by member set", () => {
+    seedChat("group-root", "c1", "Group", JSON.stringify({ group: true, character_ids: ["c1", "c2"] }), 100);
+    seedChat("group-branch", "c1", "Group — Branch at #2", JSON.stringify({
+      group: true,
+      character_ids: ["c2", "c1"],
+      branched_from: "group-root",
+      branch_at_message: "msg-2",
+    }), 200);
+    seedChat("other-group", "c1", "Other Group", JSON.stringify({ group: true, character_ids: ["c1"] }), 150);
+
+    const result = listRecentChatsGrouped("u1", { limit: 10, offset: 0 });
+
+    expect(result.total).toBe(2);
+    expect(result.data.map((chat) => chat.latest_chat_id)).toEqual(["group-branch", "other-group"]);
+    expect(result.data[0].chat_count).toBe(2);
+    expect(result.data[0].is_group).toBe(true);
+    expect(result.data[0].group_character_ids).toEqual(["c2", "c1"]);
+  });
+
   test("keeps reasoning scoped to the swipe it belongs to", () => {
     seedChat("chat-1", "c1", "Swipe chat", "{}", 100);
     seedMessage("msg-1", "chat-1", "first swipe", {

@@ -34,6 +34,17 @@ function isGroupMetadata(metadata: Record<string, any>): boolean {
   return metadata.group === true || metadata.group === 1;
 }
 
+function getGroupMemberIds(metadata: Record<string, any>): string[] {
+  return Array.isArray(metadata.character_ids)
+    ? metadata.character_ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+}
+
+function getGroupMemberKey(metadata: Record<string, any>): string | null {
+  const ids = getGroupMemberIds(metadata);
+  return ids.length > 0 ? [...ids].sort().join("\0") : null;
+}
+
 function isSqliteCorruptionError(err: any): boolean {
   return err?.errno === 11
     || (typeof err?.code === "string" && err.code.startsWith("SQLITE_CORRUPT"))
@@ -460,16 +471,25 @@ export function listRecentChatsGrouped(userId: string, pagination: PaginationPar
   );
 
   const soloCounts = new Map<string, number>();
+  const groupCounts = new Map<string, number>();
   const parsedRows = rows.map((row) => {
     const metadata = parseMetadataObject(row.metadata);
     const isGroup = isGroupMetadata(metadata);
+    const groupKey = isGroup ? getGroupMemberKey(metadata) : null;
     if (!isGroup) soloCounts.set(row.character_id, (soloCounts.get(row.character_id) ?? 0) + 1);
-    return { ...row, metadata, isGroup };
+    else if (groupKey) groupCounts.set(groupKey, (groupCounts.get(groupKey) ?? 0) + 1);
+    return { ...row, metadata, isGroup, groupKey };
   });
 
   const seenSoloCharacterIds = new Set<string>();
+  const seenGroupKeys = new Set<string>();
   const groupedRows = parsedRows.filter((row) => {
-    if (row.isGroup) return true;
+    if (row.isGroup) {
+      if (!row.groupKey) return true;
+      if (seenGroupKeys.has(row.groupKey)) return false;
+      seenGroupKeys.add(row.groupKey);
+      return true;
+    }
     if (seenSoloCharacterIds.has(row.character_id)) return false;
     seenSoloCharacterIds.add(row.character_id);
     return true;
@@ -487,10 +507,10 @@ export function listRecentChatsGrouped(userId: string, pagination: PaginationPar
         latest_chat_id: row.id,
         latest_chat_name: row.name || '',
         updated_at: row.updated_at,
-        chat_count: isGroup ? 1 : (soloCounts.get(row.character_id) ?? 1),
+        chat_count: isGroup ? (row.groupKey ? groupCounts.get(row.groupKey) ?? 1 : 1) : (soloCounts.get(row.character_id) ?? 1),
         is_group: isGroup,
-        ...(isGroup && Array.isArray(metadata.character_ids) ? {
-          group_character_ids: metadata.character_ids,
+        ...(isGroup && getGroupMemberIds(metadata).length > 0 ? {
+          group_character_ids: getGroupMemberIds(metadata),
           group_name: row.name || undefined,
         } : {}),
       };
