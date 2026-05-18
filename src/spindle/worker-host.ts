@@ -30,7 +30,7 @@ import type {
   ImageUploadDTO,
 } from "lumiverse-spindle-types";
 import { PERMISSION_DENIED_PREFIX } from "lumiverse-spindle-types";
-import { validateHost, SSRFError } from "../utils/safe-fetch";
+import { safeFetch, SSRFError } from "../utils/safe-fetch";
 import { createOAuthState } from "./oauth-state";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
@@ -124,8 +124,6 @@ import {
   renameSync,
   rmSync,
 } from "fs";
-import http from "node:http";
-import https from "node:https";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "crypto";
 import { join, resolve, relative, sep } from "path";
@@ -772,56 +770,6 @@ function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
     offset += c.byteLength;
   }
   return out;
-}
-
-function requestWithAddressFamily(
-  url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string },
-  family: 4 | 6
-): Promise<{
-  status: number;
-  statusText: string;
-  headers: Record<string, string>;
-  body: string;
-}> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const request = (parsed.protocol === "https:" ? https : http).request(
-      parsed,
-      {
-        method: options.method || "GET",
-        headers: options.headers,
-        family,
-        timeout: CORS_PROXY_TIMEOUT_MS,
-      },
-      (response) => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        response.on("end", () => {
-          resolve({
-            status: response.statusCode || 0,
-            statusText: response.statusMessage || "",
-            headers: Object.fromEntries(
-              Object.entries(response.headers).map(([key, value]) => [
-                key,
-                Array.isArray(value) ? value.join(", ") : String(value ?? ""),
-              ])
-            ),
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      }
-    );
-
-    request.on("timeout", () => {
-      request.destroy(new Error(`CORS proxy request timed out after ${CORS_PROXY_TIMEOUT_MS}ms`));
-    });
-    request.on("error", reject);
-    if (options.body) request.write(options.body);
-    request.end();
-  });
 }
 
 export class WorkerHost {
@@ -5365,108 +5313,76 @@ export class WorkerHost {
       : "image";
 
     try {
-      // Validate URL against SSRF before making the request
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-        throw new SSRFError(`Only http and https URLs are allowed`);
-      }
-      await validateHost(parsed.hostname);
+      const response = await safeFetch(url, {
+        method: options.method || "GET",
+        headers: options.headers,
+        body: options.body,
+        timeoutMs: CORS_PROXY_TIMEOUT_MS,
+        maxBytes: CORS_PROXY_MAX_BODY_BYTES,
+      });
 
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), CORS_PROXY_TIMEOUT_MS);
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            method: options.method || "GET",
-            headers: options.headers,
-            body: options.body,
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-        // Reject obvious oversize responses up-front; for unknown lengths we
-        // still cap the buffered body below.
-        const declared = response.headers.get("content-length");
-        if (declared && parseInt(declared, 10) > CORS_PROXY_MAX_BODY_BYTES) {
+      // Reject obvious oversize responses up-front; for unknown lengths we
+      // still cap the buffered body below.
+      const declared = response.headers.get("content-length");
+      if (declared && parseInt(declared, 10) > CORS_PROXY_MAX_BODY_BYTES) {
+        throw new Error(
+          `CORS proxy response too large (declared ${declared} bytes, max ${CORS_PROXY_MAX_BODY_BYTES})`,
+        );
+      }
+
+      if (isBinary) {
+        // Transparent proxy for sandboxed widgets: only serve approved media data.
+        const contentType = (response.headers.get("content-type") || "").toLowerCase();
+        const isAllowedContentType =
+          binaryMediaType === "audio"
+            ? contentType.startsWith("audio/") || contentType.startsWith("application/ogg")
+            : binaryMediaType === "font"
+              ? contentType.startsWith("font/") ||
+                contentType === "application/font-woff" ||
+                contentType === "application/font-woff2" ||
+                contentType === "application/x-font-ttf" ||
+                contentType === "application/x-font-otf" ||
+                contentType === "application/vnd.ms-fontobject"
+              : contentType.startsWith("image/");
+        if (!isAllowedContentType) {
           throw new Error(
-            `CORS proxy response too large (declared ${declared} bytes, max ${CORS_PROXY_MAX_BODY_BYTES})`,
+            `CORS proxy transparent proxy only serves ${binaryMediaType} data (received Content-Type: ${contentType || "unknown"})`
           );
         }
 
-        if (isBinary) {
-          // Transparent proxy for sandboxed widgets: only serve approved media data.
-          const contentType = (response.headers.get("content-type") || "").toLowerCase();
-          const isAllowedContentType =
-            binaryMediaType === "audio"
-              ? contentType.startsWith("audio/") || contentType.startsWith("application/ogg")
-              : binaryMediaType === "font"
-                ? contentType.startsWith("font/") ||
-                  contentType === "application/font-woff" ||
-                  contentType === "application/font-woff2" ||
-                  contentType === "application/x-font-ttf" ||
-                  contentType === "application/x-font-otf" ||
-                  contentType === "application/vnd.ms-fontobject"
-                : contentType.startsWith("image/");
-          if (!isAllowedContentType) {
-            throw new Error(
-              `CORS proxy transparent proxy only serves ${binaryMediaType} data (received Content-Type: ${contentType || "unknown"})`
-            );
-          }
-
-          const binary = await readResponseBodyBinaryCapped(response, CORS_PROXY_MAX_BODY_BYTES);
-          const hasValidMagic =
-            binaryMediaType === "audio"
-              ? validateAudioMagicBytes(binary, contentType)
-              : binaryMediaType === "font"
-                ? validateFontMagicBytes(binary, contentType)
-                : contentType.includes("svg") || validateImageMagicBytes(binary, contentType);
-          if (!hasValidMagic) {
-            throw new Error(`CORS proxy transparent proxy rejected: downloaded content does not match a known ${binaryMediaType} format`);
-          }
-
-          this.postToWorker({
-            type: "response",
-            requestId,
-            result: {
-              status: response.status,
-              statusText: response.statusText,
-              headers: Object.fromEntries(response.headers.entries()),
-              body: Buffer.from(binary).toString("base64"),
-              encoding: "base64",
-            },
-          });
-        } else {
-          const text = await readResponseBodyCapped(response, CORS_PROXY_MAX_BODY_BYTES);
-          this.postToWorker({
-            type: "response",
-            requestId,
-            result: {
-              status: response.status,
-              statusText: response.statusText,
-              headers: Object.fromEntries(response.headers.entries()),
-              body: text,
-            },
-          });
-        }
-      } catch (fetchErr: any) {
-        if (isBinary) {
-          throw fetchErr;
-        }
-        if (/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname)) {
-          throw fetchErr;
+        const binary = await readResponseBodyBinaryCapped(response, CORS_PROXY_MAX_BODY_BYTES);
+        const hasValidMagic =
+          binaryMediaType === "audio"
+            ? validateAudioMagicBytes(binary, contentType)
+            : binaryMediaType === "font"
+              ? validateFontMagicBytes(binary, contentType)
+              : contentType.includes("svg") || validateImageMagicBytes(binary, contentType);
+        if (!hasValidMagic) {
+          throw new Error(`CORS proxy transparent proxy rejected: downloaded content does not match a known ${binaryMediaType} format`);
         }
 
-        const retried = await requestWithAddressFamily(url, {
-          method: options.method || "GET",
-          headers: options.headers,
-          body: options.body,
-        }, 4);
         this.postToWorker({
           type: "response",
           requestId,
-          result: retried,
+          result: {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            body: Buffer.from(binary).toString("base64"),
+            encoding: "base64",
+          },
+        });
+      } else {
+        const text = await readResponseBodyCapped(response, CORS_PROXY_MAX_BODY_BYTES);
+        this.postToWorker({
+          type: "response",
+          requestId,
+          result: {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            body: text,
+          },
         });
       }
     } catch (err: any) {

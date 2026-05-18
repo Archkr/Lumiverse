@@ -189,21 +189,16 @@ export async function validateHost(hostname: string, options?: ValidateHostOptio
   }
 }
 
-export interface SafeFetchOptions {
-  maxBytes?: number;
-  timeoutMs?: number;
-  headers?: Record<string, string>;
-  allowLoopback?: boolean;
-  allowPrivate?: boolean;
-}
-
 // ─── safeFetch ────────────────────────────────────────────────────────────
 
 export interface SafeFetchOptions {
+  method?: string;
+  body?: BodyInit | null;
   maxBytes?: number;
   timeoutMs?: number;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   allowLoopback?: boolean;
+  allowPrivate?: boolean;
 }
 
 export async function safeFetch(
@@ -214,6 +209,8 @@ export async function safeFetch(
   const timeoutMs = options?.timeoutMs ?? 30_000;
 
   let currentUrl = url;
+  let method = options?.method ?? "GET";
+  let body = options?.body ?? null;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
     let parsed: URL;
@@ -247,6 +244,8 @@ export async function safeFetch(
     let response: Response;
     try {
       response = await fetch(currentUrl, {
+        method,
+        body,
         redirect: "manual",
         signal: controller.signal,
         headers: options?.headers,
@@ -268,7 +267,20 @@ export async function safeFetch(
         throw new SSRFError(`Redirect with no Location header (status ${response.status})`);
       }
       // Resolve relative redirects
+      const previousUrl = currentUrl;
       currentUrl = new URL(location, currentUrl).toString();
+      const upperMethod = method.toUpperCase();
+      if (response.status === 303 || ((response.status === 301 || response.status === 302) && upperMethod === "POST")) {
+        method = "GET";
+        body = null;
+      }
+      if (new URL(previousUrl).origin !== new URL(currentUrl).origin && options?.headers) {
+        const redirectedHeaders = new Headers(options.headers);
+        redirectedHeaders.delete("authorization");
+        redirectedHeaders.delete("cookie");
+        redirectedHeaders.delete("proxy-authorization");
+        options = { ...options, headers: redirectedHeaders };
+      }
       continue;
     }
 

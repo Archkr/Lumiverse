@@ -64,6 +64,26 @@ describe("detectDangerousBackendCapabilities", () => {
 
     expect(detectDangerousBackendCapabilities(code)).toEqual([]);
   });
+
+  test("flags common evasions for native backend capabilities", () => {
+    const samples: Array<[string, string]> = [
+      [`Bun["file"]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`Bun["fil" + "e"]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`Bun[\`fil\${""}e\`]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`const B = Bun; B.file("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`const { file } = Bun; file("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`await import("f" + "s")`, "filesystem module access"],
+      [`await import(String.fromCharCode(102, 115))`, "filesystem module access"],
+      [`process["e" + "nv"].SECRET`, "dangerous process API usage"],
+      [`Object.getOwnPropertyDescriptor(process, "env")?.value`, "dangerous process API usage"],
+      [`\u0070rocess.env.SECRET`, "dangerous process API usage"],
+      [`eval(Buffer.from("Zm9v", "base64").toString())`, "dynamic code execution"],
+    ];
+
+    for (const [code, label] of samples) {
+      expect(detectDangerousBackendCapabilities(code)).toContain(label);
+    }
+  });
 });
 
 describe("PRIVILEGED_PERMISSIONS", () => {
