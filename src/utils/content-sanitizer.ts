@@ -57,7 +57,7 @@ export function stripDetailsBlocks(content: string): string {
   do {
     if (++iter > MAX_FILTER_ITERATIONS) break;
     prev = result;
-    result = result.replace(/<details(?:\s[^>]*)?>([\s\S]*?)<\/details>/gi, "");
+    result = result.replace(/\s*<details(?:\s[^>]*)?>([\s\S]*?)<\/details>\s*/gi, " ");
   } while (result !== prev);
   return result;
 }
@@ -123,26 +123,13 @@ export function collapseExcessiveNewlines(content: string): string {
 // Composed sanitization for vectorization
 // ---------------------------------------------------------------------------
 
-/** 
- * Remove ANY HTML-like tags and their inner contents.
- * Iteratively removes <tag>...</tag> blocks and then drops self-closing/unclosed tags.
- */
-export function stripAllHtmlTagsAndContent(content: string): string {
-  let result = content;
-  let prev: string;
-  let iter = 0;
-  
-  do {
-    if (++iter > MAX_FILTER_ITERATIONS) break;
-    prev = result;
-    // Strip <tag...> ... </tag>
-    result = result.replace(/<([a-zA-Z][\w-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi, "");
-  } while (result !== prev);
-  
-  // Also strip any remaining self-closing or unclosed tags
-  result = result.replace(/<[a-zA-Z][\w-]*(?:\s[^>]*)?\/?>/gi, "");
-  
-  return result;
+/** Strip HTML/XML-like markup while preserving the authored text inside it. */
+export function stripAllHtmlTagsPreserveContent(content: string): string {
+  return content
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/?\s*(?:p|div|li|ul|ol|blockquote|pre|section|article|header|footer|table|thead|tbody|tfoot|tr|h[1-6])(?:\s[^>]*)?>/gi, "\n")
+    .replace(/<\s*\/?\s*(?:td|th)(?:\s[^>]*)?>/gi, " ")
+    .replace(/<\/?[a-zA-Z][\w:-]*(?:\s[^<>]*)?\/?>/g, "");
 }
 
 export interface SanitizeOptions {
@@ -181,7 +168,7 @@ function stripCustomReasoningBlocks(content: string, prefix: string, suffix: str
   const escapedSuffix = escapeRegex(rawSuffix);
   let result = content.replace(
     new RegExp(`\\s*${escapedPrefix}[\\s\\S]*?${escapedSuffix}\\s*`, "g"),
-    "",
+    " ",
   );
   // Strip trailing unclosed custom reasoning blocks (interrupted generation)
   result = result.replace(
@@ -194,10 +181,9 @@ function stripCustomReasoningBlocks(content: string, prefix: string, suffix: str
 /**
  * Apply full content sanitization for embedding/vectorization.
  *
- * Strips reasoning tags, custom reasoning blocks, and ALL HTML-like
- * structural tags along with their inner contents. This prevents the
- * vector embeddings from being polluted with meta-content, system tags,
- * or UI formatting wrappers.
+ * Strips reasoning tags, custom reasoning blocks, known non-narrative
+ * structural blocks, and HTML/XML-like markup. Formatting wrappers keep
+ * their inner text so authored narrative content remains vectorizable.
  *
  * Pass `options.reasoningPrefix` / `options.reasoningSuffix` to also strip
  * blocks wrapped in the user's custom reasoning delimiters.
@@ -212,7 +198,7 @@ export function sanitizeForVectorization(content: string, options?: SanitizeOpti
   // Strip default reasoning tags (complete blocks only)
   result = result.replace(
     /\s*<(think|thinking|reasoning)>[\s\S]*?<\/\1>\s*/gi,
-    "",
+    " ",
   );
   // Also strip trailing open reasoning blocks
   result = result.replace(
@@ -220,8 +206,9 @@ export function sanitizeForVectorization(content: string, options?: SanitizeOpti
     "",
   );
 
-  // Strip ALL HTML-like tags and their inner contents
-  result = stripAllHtmlTagsAndContent(result);
+  result = stripDetailsBlocks(result);
+  result = stripLoomTags(result);
+  result = stripAllHtmlTagsPreserveContent(result);
 
   result = collapseExcessiveNewlines(result);
   return result.trim();

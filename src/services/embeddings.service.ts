@@ -38,7 +38,7 @@ const LANCEDB_TERMUX_LIKE = Boolean(process.env.TERMUX_VERSION)
   || process.env.PREFIX?.startsWith(TERMUX_PATH_PREFIX) === true
   || process.env.HOME?.startsWith(`${TERMUX_PATH_PREFIX}files/home`) === true
   || LANCEDB_PATH.startsWith(TERMUX_PATH_PREFIX);
-const WORLD_BOOK_VECTOR_VERSION = 3;
+const WORLD_BOOK_VECTOR_VERSION = 4;
 const WORLD_BOOK_VECTOR_VERSION_KEY = "worldBookVectorVersion";
 /** Default safety timeout for embedding API requests. Prevents a hanging
  *  upstream server from stalling the entire generation pipeline.
@@ -280,7 +280,7 @@ function clampFloat(v: unknown, min: number, max: number, fallback: number): num
  * Any chat whose stored hash doesn't match the current hash will get
  * its chunks rebuilt on the next generation.
  */
-export const LTCM_FORMAT_VERSION = 3;
+export const LTCM_FORMAT_VERSION = 4;
 
 /**
  * Compute a deterministic hash from the settings that affect how chunks
