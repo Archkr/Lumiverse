@@ -73,6 +73,9 @@ function migratePreset(preset: LoomPreset): LoomPreset {
   preset.advancedSettings = { ...DEFAULT_ADVANCED_SETTINGS, ...(preset.advancedSettings || {}) }
   if (!preset.modelProfiles) preset.modelProfiles = {}
   if (!preset.lastProfileKey) preset.lastProfileKey = null
+  preset.coverUrl = typeof preset.coverUrl === 'string' && preset.coverUrl.trim()
+    ? preset.coverUrl.trim()
+    : null
   if (Array.isArray(preset.blocks)) {
     for (const block of preset.blocks) {
       if (!Array.isArray(block.injectionTrigger)) {
@@ -119,7 +122,7 @@ export function looksLikeLoomPresetData(data: unknown): data is LoomPreset {
 }
 
 export function detectImportedPresetKind(data: unknown): 'loom' | 'legacy' | null {
-  if (looksLikeLoomPresetData(data) || looksLikeBackendLoomPresetData(data)) {
+  if (looksLikeWrappedLumiHubPresetData(data) || looksLikeLoomPresetData(data) || looksLikeBackendLoomPresetData(data)) {
     return 'loom'
   }
 
@@ -131,6 +134,14 @@ export function detectImportedPresetKind(data: unknown): 'loom' | 'legacy' | nul
 }
 
 export function coerceImportedLoomPreset(data: unknown, fallbackName: string): LoomPreset {
+  if (looksLikeWrappedLumiHubPresetData(data)) {
+    return migratePreset({
+      ...data.preset,
+      name: data.preset.name || fallbackName,
+      coverUrl: typeof data.cover_url === 'string' ? data.cover_url : null,
+    } as LoomPreset)
+  }
+
   if (looksLikeLoomPresetData(data)) {
     return migratePreset({
       ...data,
@@ -147,6 +158,13 @@ export function coerceImportedLoomPreset(data: unknown, fallbackName: string): L
   }
 
   throw new Error('Unrecognized preset JSON format')
+}
+
+function looksLikeWrappedLumiHubPresetData(data: unknown): data is { preset: LoomPreset; cover_url?: unknown } {
+  return isRecord(data)
+    && data.type === 'lumiverse_preset'
+    && isRecord(data.preset)
+    && Array.isArray(data.preset.blocks)
 }
 
 function coerceCategoryMode(mode: unknown): PromptBlock['categoryMode'] {
@@ -238,6 +256,7 @@ export function marshalPreset(loom: LoomPreset): CreatePresetInput {
       modelProfiles: loom.modelProfiles,
       schemaVersion: loom.schemaVersion,
       description: loom.description,
+      coverUrl: loom.coverUrl ?? null,
       isDefault: loom.isDefault,
       lastProfileKey: loom.lastProfileKey,
       promptVariables: pruneOrphanPromptVariables(loom.promptVariables, blocks),
@@ -254,6 +273,7 @@ export function unmarshalPreset(preset: Preset): LoomPreset {
     id: preset.id,
     name: preset.name,
     description: meta.description || '',
+    coverUrl: typeof meta.coverUrl === 'string' ? meta.coverUrl : (typeof meta.cover_url === 'string' ? meta.cover_url : null),
     schemaVersion: meta.schemaVersion || 1,
     createdAt: preset.created_at,
     updatedAt: preset.updated_at,
@@ -294,6 +314,7 @@ export function marshalUpdate(loom: LoomPreset): UpdatePresetInput {
       modelProfiles: loom.modelProfiles,
       schemaVersion: loom.schemaVersion,
       description: loom.description,
+      coverUrl: loom.coverUrl ?? null,
       isDefault: loom.isDefault,
       lastProfileKey: loom.lastProfileKey,
       promptVariables: pruneOrphanPromptVariables(loom.promptVariables, blocks),
@@ -671,6 +692,7 @@ export function importFromSTPreset(stPresetData: STPresetData, name: string): Lo
     id: generateUUID(),
     name,
     description: `Imported from legacy preset "${stPresetData.name || name}"`,
+    coverUrl: null,
     schemaVersion: 1,
     createdAt: now,
     updatedAt: now,
@@ -836,6 +858,7 @@ export function createNewLoomPreset(name: string, description = ''): LoomPreset 
     id: generateUUID(),
     name,
     description,
+    coverUrl: null,
     schemaVersion: 1,
     createdAt: now,
     updatedAt: now,

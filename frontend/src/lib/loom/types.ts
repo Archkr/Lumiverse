@@ -122,6 +122,7 @@ export interface LoomPreset {
   id: string
   name: string
   description: string
+  coverUrl: string | null
   schemaVersion: number
   createdAt: number
   updatedAt: number

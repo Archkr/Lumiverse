@@ -363,6 +363,7 @@ export function useLoomBuilder() {
       copy.modelProfiles = { ...loom.modelProfiles }
       copy.promptVariables = JSON.parse(JSON.stringify(loom.promptVariables || {}))
       copy.source = loom.source ? { ...loom.source } : null
+      copy.coverUrl = loom.coverUrl
 
       const created = await presetsApi.create(marshalPreset(copy))
       const newLoom = unmarshalPreset(created)

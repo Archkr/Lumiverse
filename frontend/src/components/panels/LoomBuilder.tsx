@@ -73,7 +73,7 @@ import {
   DEFAULT_COMPLETION_SETTINGS,
   DEFAULT_ADVANCED_SETTINGS,
 } from '@/lib/loom/constants'
-import type { PromptBlock, PromptVariableDef, LoomConnectionProfile, SamplerParam, MacroGroup, CategoryGroup } from '@/lib/loom/types'
+import type { PromptBlock, PromptVariableDef, LoomConnectionProfile, SamplerParam, MacroGroup, CategoryGroup, LoomPreset } from '@/lib/loom/types'
 import { PromptVariablesModal } from '@/components/shared/PromptVariablesModal'
 import { VariablesEditor } from './PromptVariablesEditor'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
@@ -638,6 +638,27 @@ function PresetSelector({ registry, activePresetId, activePresetName, onSelect, 
         </div>
       </ModalShell>
     </div>
+  )
+}
+
+function PresetCoverHeader({ preset }: { preset: LoomPreset }) {
+  const coverUrl = preset.coverUrl?.trim()
+  if (!coverUrl) return null
+
+  const description = preset.description?.trim()
+
+  return (
+    <section className={s.presetCoverHeader} aria-label={`Cover image for ${preset.name}`}>
+      <img className={s.presetCoverImage} src={coverUrl} alt="" aria-hidden="true" />
+      <div className={s.presetCoverContent}>
+        <div className={s.presetCoverBadgeRow}>
+          <span className={s.presetCoverBadge}>LumiHub preset</span>
+          <span className={s.presetCoverBadge}>{preset.blocks.length} block{preset.blocks.length === 1 ? '' : 's'}</span>
+        </div>
+        <h2 className={s.presetCoverTitle}>{preset.name}</h2>
+        {description && <p className={s.presetCoverDescription}>{description}</p>}
+      </div>
+    </section>
   )
 }
 
@@ -1705,7 +1726,9 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
               </div>
             </div>
           )}
-       </div>
+        </div>
+
+      {activePreset && <PresetCoverHeader preset={activePreset} />}
 
       {/* Connection profile */}
       {activePreset && connectionProfile && (() => {

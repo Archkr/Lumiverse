@@ -9,6 +9,7 @@ import { messagesApi } from '@/api/chats'
 import { imageGenApi } from '@/api/image-gen'
 import { generateApi } from '@/api/generate'
 import { operatorApi } from '@/api/operator'
+import { presetsApi } from '@/api/presets'
 import { toast } from '@/lib/toast'
 import {
   invalidateDisplayRegexCache,
@@ -85,6 +86,21 @@ function summarizeVarChanges(changedFields: readonly string[]): VarChangeSummary
 function fetchLatestMessages(chatId: string) {
   const pageSize = useStore.getState().messagesPerPage || 50
   return messagesApi.list(chatId, { limit: pageSize, tail: true })
+}
+
+async function refreshLoomRegistry() {
+  const result = await presetsApi.listRegistry({ provider: 'loom', limit: 200 })
+  useStore.getState().setLoomRegistry(Object.fromEntries(
+    result.data.map((preset) => [
+      preset.id,
+      {
+        name: preset.name,
+        blockCount: preset.block_count,
+        updatedAt: preset.updated_at,
+        isDefault: false,
+      },
+    ]),
+  ))
 }
 
 export function useWebSocket() {
@@ -1000,8 +1016,29 @@ export function useWebSocket() {
       wsClient.on(EventType.LUMIHUB_INSTALL_STARTED, (payload: { characterName: string; source: string }) => {
         toast.info(`Installing "${payload.characterName}" from LumiHub...`, { title: 'LumiHub' })
       }),
-      wsClient.on(EventType.LUMIHUB_INSTALL_COMPLETED, (payload: { characterId: string; characterName: string }) => {
+      wsClient.on(EventType.LUMIHUB_INSTALL_COMPLETED, (payload: { characterId: string; characterName: string; type?: string }) => {
         toast.success(`"${payload.characterName}" installed successfully`, { title: 'LumiHub' })
+        if (payload.type === 'preset') {
+          const state = store.getState()
+          state.setLoomRegistry({
+            ...state.loomRegistry,
+            [payload.characterId]: {
+              name: payload.characterName,
+              blockCount: 0,
+              updatedAt: Math.floor(Date.now() / 1000),
+              isDefault: false,
+            },
+          })
+          refreshLoomRegistry().catch((err) => {
+            console.warn('[LumiHub] Failed to refresh Loom preset registry:', err)
+          })
+        } else if (payload.type === 'theme') {
+          if (!hasUnsavedSettings()) {
+            store.getState().loadSettings().catch((err) => {
+              console.warn('[LumiHub] Failed to refresh theme settings:', err)
+            })
+          }
+        }
       }),
       wsClient.on(EventType.LUMIHUB_INSTALL_FAILED, (payload: { characterName: string; error: string }) => {
         toast.error(`Failed to install "${payload.characterName}": ${payload.error}`, { title: 'LumiHub' })
