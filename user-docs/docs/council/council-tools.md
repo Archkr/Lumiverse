@@ -82,6 +82,34 @@ A member can have multiple tools. During deliberation, all assigned tools are ru
 
 ---
 
+## Historical Deliberations
+
+Each assigned member/tool pair can retain a small number of prior successful deliberations for the same chat. This lets a council member build on threads it previously planted, such as long-term plot plans, relationship beats, unresolved warnings, or recurring worldbuilding ideas.
+
+To enable it:
+
+1. Open the **Council** panel
+2. Expand a council member
+3. Assign one or more tools
+4. Under the assigned tool list, set **Historical deliberations retained** above `0`
+
+The number is per member and per tool:
+
+| Value | Behavior |
+|-------|----------|
+| `0` | Do not retain history for this member/tool assignment |
+| `1` | Include only the last successful deliberation from this member/tool |
+| `2-10` | Include up to that many prior successful deliberations |
+
+Historical deliberations are chat-scoped. They do not carry across different chats, and they are matched to the exact council member plus tool assignment.
+
+When history is enabled, Lumiverse sends it as a clearly labeled **historical baseline only** block. The prompt explicitly tells the model that prior deliberations are not a template, not binding instructions, and do not override current chat history, active world info, or the latest user message.
+
+!!! note "Successful tool outputs only"
+    Failed tool runs are not stored. If a tool is removed from a member or its retention is set back to `0`, old retained entries for that assignment are pruned the next time council history is updated.
+
+---
+
 ## Tool Results
 
 Tool results are available in the prompt through macros:

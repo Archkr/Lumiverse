@@ -41,13 +41,14 @@ import {
 import { contextHandlerChain } from "../spindle/context-handler";
 import {
   executeCouncil,
+  appendCouncilDeliberationHistory,
   collectWorldInfoForCouncil,
   formatDeliberation,
   type CouncilEnrichment,
+  type CouncilExecutionResultWithHistory,
 } from "./council/council-execution.service";
 import { activateWorldInfo } from "./world-info-activation.service";
 import type {
-  CouncilExecutionResult,
   CachedCouncilResult,
   CouncilMember,
 } from "lumiverse-spindle-types";
@@ -845,6 +846,7 @@ type ReasoningSettingsSnapshot = {
 
 type CouncilResultCache = CachedCouncilResult & {
   fingerprint?: string;
+  historicalDeliberationBlock?: string;
 };
 
 function stableJson(value: unknown): string {
@@ -874,6 +876,7 @@ function buildCouncilCacheFingerprint(
       role: member.role,
       chance: member.chance,
       tools: member.tools,
+      toolHistoryRetention: (member as any).toolHistoryRetention ?? {},
     })),
     toolsSettings: {
       mode: councilSettings.toolsSettings.mode,
@@ -999,6 +1002,7 @@ async function runPromptPipeline(opts: {
   targetCharacterId?: string;
   councilToolResults?: any[];
   councilNamedResults?: Record<string, string>;
+  councilHistoricalDeliberationBlock?: string;
   precomputedVectorEntries?: VectorActivatedEntry[];
   regenFeedback?: string;
   regenFeedbackPosition?: "system" | "user";
@@ -1065,6 +1069,7 @@ async function runPromptPipeline(opts: {
       targetCharacterId: opts.targetCharacterId,
       councilToolResults: opts.councilToolResults,
       councilNamedResults: opts.councilNamedResults,
+      councilHistoricalDeliberationBlock: opts.councilHistoricalDeliberationBlock,
       precomputedVectorEntries: opts.precomputedVectorEntries,
       regenFeedback: opts.regenFeedback,
       regenFeedbackPosition: opts.regenFeedbackPosition,
@@ -1709,7 +1714,7 @@ export async function startGeneration(
           { isGroup: chat?.metadata?.group === true },
         );
         const councilSettings = resolvedCouncilProfile.council_settings;
-        let councilResult: CouncilExecutionResult | null = null;
+        let councilResult: CouncilExecutionResultWithHistory | null = null;
         let inlineTools: ToolDefinition[] | undefined;
         let inlineToolDefsByName:
           | Map<string, RuntimeCouncilToolDefinition>
@@ -1814,6 +1819,9 @@ export async function startGeneration(
               councilResult = {
                 results: cached.results,
                 deliberationBlock: cached.deliberationBlock,
+                ...(cached.historicalDeliberationBlock
+                  ? { historicalDeliberationBlock: cached.historicalDeliberationBlock }
+                  : {}),
                 totalDurationMs: 0,
               };
             } else {
@@ -2073,6 +2081,9 @@ export async function startGeneration(
                           mergedResults,
                           toolsMap,
                         ),
+                        ...(councilResult.historicalDeliberationBlock
+                          ? { historicalDeliberationBlock: councilResult.historicalDeliberationBlock }
+                          : {}),
                         totalDurationMs:
                           councilResult.totalDurationMs +
                           retryResult.totalDurationMs,
@@ -2163,6 +2174,22 @@ export async function startGeneration(
             }
           }
 
+          if (councilResult.totalDurationMs > 0) {
+            try {
+              appendCouncilDeliberationHistory({
+                userId: input.userId,
+                chatId: input.chat_id,
+                settings: councilSettings,
+                results: councilResult.results,
+              });
+            } catch (err) {
+              console.warn(
+                "[council] Failed to append deliberation history:",
+                err,
+              );
+            }
+          }
+
           // Persist fully successful council results for potential reuse on regens/swipes.
           // Only cache when results were freshly executed (totalDurationMs > 0 distinguishes
           // a live execution from a cache hit which sets totalDurationMs to 0). Failed
@@ -2175,6 +2202,9 @@ export async function startGeneration(
             const cachedResult: CouncilResultCache = {
               results: councilResult.results,
               deliberationBlock: councilResult.deliberationBlock,
+              ...(councilResult.historicalDeliberationBlock
+                ? { historicalDeliberationBlock: councilResult.historicalDeliberationBlock }
+                : {}),
               namedResults: councilNamedResults,
               cachedAt: Date.now(),
               fingerprint: buildCouncilCacheFingerprint(
@@ -2228,6 +2258,8 @@ export async function startGeneration(
             targetCharacterId: pipelineTargetCharId,
             councilToolResults,
             councilNamedResults,
+            councilHistoricalDeliberationBlock:
+              councilResult?.historicalDeliberationBlock,
             precomputedVectorEntries,
             regenFeedback: input.regen_feedback,
             regenFeedbackPosition: input.regen_feedback_position,
@@ -2283,9 +2315,13 @@ export async function startGeneration(
         // that don't use {{lumiaCouncilDeliberation}} macro)
         if (councilResult?.deliberationBlock && !deliberationHandledByMacro) {
           const insertIdx = Math.max(0, messages.length - 4);
+          const deliberationContent = [
+            councilResult.historicalDeliberationBlock,
+            councilResult.deliberationBlock,
+          ].filter(Boolean).join("\n\n");
           messages.splice(insertIdx, 0, {
             role: "system",
-            content: councilResult.deliberationBlock,
+            content: deliberationContent,
           });
         }
 

@@ -157,6 +157,8 @@ export interface AssemblyContext {
   councilToolResults?: CouncilToolResultSummary[];
   /** Named council tool results (variable_name → content). */
   councilNamedResults?: Record<string, string>;
+  /** Prior retained council deliberations formatted as a historical baseline block. */
+  councilHistoricalDeliberationBlock?: string;
   /** Pre-computed vector-activated world info entries from the generation pipeline.
    *  When provided, assembly reuses these instead of re-running vector retrieval. */
   precomputedVectorEntries?: import("../services/prompt-assembly.service").VectorActivatedEntry[];

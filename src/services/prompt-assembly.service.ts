@@ -3059,6 +3059,7 @@ export function populateLumiaLoomContext(
     // Council tool results — injected from AssemblyContext if available
     toolResults: ctx?.councilToolResults ?? [],
     namedResults: ctx?.councilNamedResults ?? {},
+    historicalDeliberationBlock: ctx?.councilHistoricalDeliberationBlock ?? "",
   };
 
   macroEnv.extra.ooc = {

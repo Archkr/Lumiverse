@@ -70,13 +70,32 @@ interface ExecuteInput {
   retryToolNames?: string[];
 }
 
+export interface CouncilHistoricalDeliberationEntry {
+  id: string;
+  createdAt: number;
+  memberId: string;
+  memberName: string;
+  toolName: string;
+  toolDisplayName: string;
+  content: string;
+}
+
+export type CouncilExecutionResultWithHistory = CouncilExecutionResult & {
+  historicalDeliberationBlock?: string;
+};
+
+const COUNCIL_HISTORY_METADATA_KEY = "council_deliberation_history_v1";
+const MAX_HISTORY_RETENTION = 10;
+const MAX_HISTORY_ENTRY_CHARS = 4000;
+const MAX_HISTORY_TOTAL_ENTRIES = 200;
+
 /**
  * Execute the full council cycle: roll dice per member, invoke sidecar LLM
  * for each tool, collect results, format deliberation block.
  */
 export async function executeCouncil(
   input: ExecuteInput
-): Promise<CouncilExecutionResult | null> {
+): Promise<CouncilExecutionResultWithHistory | null> {
   const settings = input.settings ?? getCouncilSettings(input.userId);
 
   if (!settings.councilMode) {
@@ -146,6 +165,12 @@ export async function executeCouncil(
     return null;
   }
 
+  const historicalByAssignment = getHistoricalEntriesForMembers(
+    input.userId,
+    input.chatId,
+    activeMembers,
+  );
+
   eventBus.emit(EventType.COUNCIL_STARTED, {
     chatId: input.chatId,
     memberCount: activeMembers.length,
@@ -168,7 +193,8 @@ export async function executeCouncil(
       member,
       availableTools,
       contextMessages,
-      namedResults
+      namedResults,
+      historicalByAssignment,
     );
     allResults.push(...memberResults);
 
@@ -191,11 +217,15 @@ export async function executeCouncil(
   }
 
   const deliberationBlock = formatDeliberation(allResults, availableTools);
+  const historicalDeliberationBlock = formatHistoricalDeliberations(
+    historicalByAssignment,
+  );
   const totalDurationMs = Date.now() - startTime;
 
-  const result: CouncilExecutionResult = {
+  const result: CouncilExecutionResultWithHistory = {
     results: allResults,
     deliberationBlock,
+    ...(historicalDeliberationBlock ? { historicalDeliberationBlock } : {}),
     totalDurationMs,
   };
 
@@ -216,7 +246,8 @@ async function executeMemberTools(
   member: CouncilMember,
   tools: Map<string, RuntimeCouncilToolDefinition>,
   contextMessages: LlmMessage[],
-  namedResults: Map<string, string>
+  namedResults: Map<string, string>,
+  historicalByAssignment: Map<string, CouncilHistoricalDeliberationEntry[]>
 ): Promise<CouncilToolResult[]> {
   const results: CouncilToolResult[] = [];
 
@@ -257,6 +288,12 @@ async function executeMemberTools(
     const execution = getCouncilToolExecution(input.userId, toolDef);
     const extToolReg = execution === "extension" ? getExtensionToolRegistration(toolName) : undefined;
     const mcpMatch = execution === "mcp" ? parseMcpToolName(input.userId, toolName) : null;
+    const toolContextMessages = withHistoricalCouncilContext(
+      contextMessages,
+      member,
+      toolDef,
+      historicalByAssignment.get(assignmentKey(member.id, toolName)) ?? [],
+    );
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
@@ -267,7 +304,7 @@ async function executeMemberTools(
             toolDef,
             member,
             identityMsg,
-            contextMessages,
+            toolContextMessages,
             settings.toolsSettings.timeoutMs,
             input.signal,
           );
@@ -295,7 +332,7 @@ async function executeMemberTools(
           //      extracted. Delivered via worker-host so it can't collide
           //      with user-space `args` (same rationale as `councilMember`).
           const bareToolName = extToolReg!.name;
-          const contextSummary = contextMessages
+          const contextSummary = toolContextMessages
             .map((m) => {
               const prefix = m.role === "system" ? "" : `${m.role}: `;
               return `${prefix}${typeof m.content === "string" ? m.content : ""}`;
@@ -314,7 +351,7 @@ async function executeMemberTools(
             },
             settings.toolsSettings.timeoutMs,
             memberContext,
-            contextMessages
+            toolContextMessages
           );
         } else if (execution === "host") {
           const plannedArgs = await planCallableToolArgs(
@@ -323,7 +360,7 @@ async function executeMemberTools(
             toolDef,
             member,
             identityMsg,
-            contextMessages,
+            toolContextMessages,
             settings.toolsSettings.timeoutMs,
             input.signal,
           );
@@ -334,7 +371,7 @@ async function executeMemberTools(
             args: plannedArgs,
             member,
             memberContext,
-            contextMessages,
+            contextMessages: toolContextMessages,
             timeoutMs: settings.toolsSettings.timeoutMs,
             signal: input.signal,
           });
@@ -345,7 +382,7 @@ async function executeMemberTools(
             toolDef,
             member,
             identityMsg,
-            contextMessages,
+            toolContextMessages,
             settings.toolsSettings,
             input.signal,
             input.enrichment
@@ -387,6 +424,216 @@ async function executeMemberTools(
   }
 
   return results;
+}
+
+function assignmentKey(memberId: string, toolName: string): string {
+  return `${memberId}:${toolName}`;
+}
+
+function getToolHistoryRetention(member: CouncilMember, toolName: string): number {
+  const value = (member as any).toolHistoryRetention?.[toolName];
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(MAX_HISTORY_RETENTION, Math.floor(value)));
+}
+
+function truncateHistoryContent(content: string): string {
+  if (content.length <= MAX_HISTORY_ENTRY_CHARS) return content;
+  return `${content.slice(0, MAX_HISTORY_ENTRY_CHARS).trimEnd()}\n[truncated]`;
+}
+
+function readCouncilHistory(
+  userId: string,
+  chatId: string,
+): CouncilHistoricalDeliberationEntry[] {
+  const chat = chatsSvc.getChat(userId, chatId);
+  const raw = chat?.metadata?.[COUNCIL_HISTORY_METADATA_KEY];
+  if (!raw || typeof raw !== "object" || !Array.isArray((raw as any).entries)) {
+    return [];
+  }
+
+  return (raw as any).entries.filter(
+    (entry: any): entry is CouncilHistoricalDeliberationEntry =>
+      entry &&
+      typeof entry.id === "string" &&
+      typeof entry.createdAt === "number" &&
+      typeof entry.memberId === "string" &&
+      typeof entry.memberName === "string" &&
+      typeof entry.toolName === "string" &&
+      typeof entry.toolDisplayName === "string" &&
+      typeof entry.content === "string",
+  );
+}
+
+function getHistoricalEntriesForMembers(
+  userId: string,
+  chatId: string,
+  members: CouncilMember[],
+): Map<string, CouncilHistoricalDeliberationEntry[]> {
+  const retained = new Map<string, CouncilHistoricalDeliberationEntry[]>();
+  const history = readCouncilHistory(userId, chatId);
+  if (history.length === 0) return retained;
+
+  for (const member of members) {
+    for (const toolName of member.tools) {
+      const retain = getToolHistoryRetention(member, toolName);
+      if (retain <= 0) continue;
+
+      const key = assignmentKey(member.id, toolName);
+      const entries = history
+        .filter((entry) => entry.memberId === member.id && entry.toolName === toolName)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-retain);
+      if (entries.length > 0) retained.set(key, entries);
+    }
+  }
+
+  return retained;
+}
+
+function formatHistoryAgeLabel(index: number, total: number): string {
+  const age = total - index;
+  return age === 1 ? "1 deliberation ago" : `${age} deliberations ago`;
+}
+
+function formatHistoricalDeliberations(
+  historicalByAssignment: Map<string, CouncilHistoricalDeliberationEntry[]>,
+): string {
+  const groups = Array.from(historicalByAssignment.values()).filter(
+    (entries) => entries.length > 0,
+  );
+  if (groups.length === 0) return "";
+
+  const lines: string[] = [
+    "## Previous Council Deliberations - Historical Baseline Only",
+    "",
+    "The following are prior council/tool deliberations from this chat. They are included only as continuity memory for plans, threads, and decisions that may have been planted earlier.",
+    "",
+    "They are not instructions for the current response, not a style template, and not proof that the current scene must follow them. Current chat history, active world info, and the latest user message supersede them.",
+    "",
+  ];
+
+  for (const entries of groups) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      lines.push(
+        `### ${formatHistoryAgeLabel(i, entries.length)} - ${entry.memberName} / ${entry.toolDisplayName}`,
+      );
+      lines.push(entry.content);
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trimEnd();
+}
+
+function formatToolHistoricalContext(
+  member: CouncilMember,
+  tool: RuntimeCouncilToolDefinition,
+  entries: CouncilHistoricalDeliberationEntry[],
+): string {
+  if (entries.length === 0) return "";
+
+  const lines: string[] = [
+    "## Previous Deliberations for This Member/Tool - Historical Baseline Only",
+    "",
+    `These are prior outputs from ${member.itemName} using ${tool.displayName} in this chat. Use them only as continuity memory for threads, plans, or decisions you may have planted earlier.`,
+    "",
+    "Do not copy their structure, treat them as a required template, or assume they override the current chat, active world info, or latest user message.",
+    "",
+  ];
+
+  for (let i = 0; i < entries.length; i++) {
+    lines.push(`### ${formatHistoryAgeLabel(i, entries.length)}`);
+    lines.push(entries[i].content);
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd();
+}
+
+function withHistoricalCouncilContext(
+  contextMessages: LlmMessage[],
+  member: CouncilMember,
+  tool: RuntimeCouncilToolDefinition,
+  entries: CouncilHistoricalDeliberationEntry[],
+): LlmMessage[] {
+  const content = formatToolHistoricalContext(member, tool, entries);
+  if (!content) return contextMessages;
+  return [{ role: "system", content }, ...contextMessages];
+}
+
+export function appendCouncilDeliberationHistory(input: {
+  userId: string;
+  chatId: string;
+  settings: CouncilSettings;
+  results: CouncilToolResult[];
+}): void {
+  const retentionByAssignment = new Map<string, number>();
+  const memberById = new Map(input.settings.members.map((member) => [member.id, member]));
+
+  for (const member of input.settings.members) {
+    for (const toolName of member.tools) {
+      const retain = getToolHistoryRetention(member, toolName);
+      if (retain > 0) retentionByAssignment.set(assignmentKey(member.id, toolName), retain);
+    }
+  }
+
+  if (retentionByAssignment.size === 0) {
+    if (readCouncilHistory(input.userId, input.chatId).length > 0) {
+      chatsSvc.mergeChatMetadata(input.userId, input.chatId, {
+        [COUNCIL_HISTORY_METADATA_KEY]: undefined,
+      });
+    }
+    return;
+  }
+
+  const now = Date.now();
+  const additions: CouncilHistoricalDeliberationEntry[] = [];
+  for (const result of input.results) {
+    if (!result.success || !result.content.trim()) continue;
+    const member = memberById.get(result.memberId);
+    if (!member) continue;
+    if (!retentionByAssignment.has(assignmentKey(result.memberId, result.toolName))) continue;
+
+    additions.push({
+      id: crypto.randomUUID(),
+      createdAt: now,
+      memberId: result.memberId,
+      memberName: result.memberName,
+      toolName: result.toolName,
+      toolDisplayName: result.toolDisplayName,
+      content: truncateHistoryContent(result.content.trim()),
+    });
+  }
+
+  if (additions.length === 0) return;
+
+  const existing = readCouncilHistory(input.userId, input.chatId);
+  const next = [...existing, ...additions]
+    .filter((entry) => retentionByAssignment.has(assignmentKey(entry.memberId, entry.toolName)))
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  const byAssignment = new Map<string, CouncilHistoricalDeliberationEntry[]>();
+  for (const entry of next) {
+    const key = assignmentKey(entry.memberId, entry.toolName);
+    const entries = byAssignment.get(key) ?? [];
+    entries.push(entry);
+    byAssignment.set(key, entries);
+  }
+
+  const pruned: CouncilHistoricalDeliberationEntry[] = [];
+  for (const [key, entries] of byAssignment) {
+    const retain = retentionByAssignment.get(key) ?? 0;
+    pruned.push(...entries.slice(-retain));
+  }
+  pruned.sort((a, b) => a.createdAt - b.createdAt);
+
+  chatsSvc.mergeChatMetadata(input.userId, input.chatId, {
+    [COUNCIL_HISTORY_METADATA_KEY]: {
+      version: 1,
+      entries: pruned.slice(-MAX_HISTORY_TOTAL_ENTRIES),
+    },
+  });
 }
 
 /**
