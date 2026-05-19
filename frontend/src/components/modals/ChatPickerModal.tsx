@@ -304,32 +304,34 @@ export default function ChatPickerModal({
                 whileTap={{ scale: isMenuOpen ? 1 : 0.99 }}
               >
                 <div className={styles.cardHeader}>
-                  {isRenaming ? (
-                    <input
-                      ref={renameInputRef}
-                      type="text"
-                      className={styles.editInput}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleConfirmRename(item.id)
-                        if (e.key === 'Escape') setRenamingId(null)
-                      }}
-                      onBlur={() => handleConfirmRename(item.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className={styles.cardLabel}>
-                      {formatChatName(item)}
-                    </span>
-                  )}
+                  <div className={styles.cardTitleRow}>
+                    {isRenaming ? (
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        className={styles.editInput}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleConfirmRename(item.id)
+                          if (e.key === 'Escape') setRenamingId(null)
+                        }}
+                        onBlur={() => handleConfirmRename(item.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className={styles.cardLabel}>
+                        {formatChatName(item)}
+                      </span>
+                    )}
 
-                  {isActive && !isRenaming && (
-                    <span className={styles.activeBadge}>
-                      <Check size={10} />
-                      Most Recent
-                    </span>
-                  )}
+                    {isActive && !isRenaming && (
+                      <span className={styles.activeBadge}>
+                        <Check size={10} />
+                        Most Recent
+                      </span>
+                    )}
+                  </div>
 
                   <button
                     type="button"

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Check } from 'lucide-react'
+import { Check, Image as ImageIcon } from 'lucide-react'
 import { CloseButton } from '@/components/shared/CloseButton'
 import { ModalShell } from '@/components/shared/ModalShell'
 import type { Character } from '@/types/api'
@@ -11,6 +11,10 @@ interface GreetingPickerModalProps {
   activeContent?: string
   onSelect: (greetingIndex: number) => void
   onCancel: () => void
+}
+
+function containsImageMarkup(content: string): boolean {
+  return /<img\b/i.test(content) || /!\[[^\]]*]\([^)]*\)/.test(content)
 }
 
 export default function GreetingPickerModal({
@@ -47,7 +51,7 @@ export default function GreetingPickerModal({
 
   return (
     <ModalShell isOpen onClose={onCancel} maxWidth={620} maxHeight="80vh" className={styles.modal}>
-      <CloseButton onClick={onCancel} variant="solid" position="absolute" />
+      <CloseButton onClick={onCancel} variant="solid" position="absolute" className={styles.closeBtnPos} />
 
       <div className={styles.header}>
         <h3 className={styles.title}>Choose a Greeting</h3>
@@ -57,6 +61,7 @@ export default function GreetingPickerModal({
       <div ref={listRef} className={styles.list}>
         {greetings.map((g, i) => {
           const isActive = i === activeIndex
+          const hasImage = containsImageMarkup(g.content)
           return (
             <button
               key={i}
@@ -68,10 +73,20 @@ export default function GreetingPickerModal({
             >
               <div className={styles.cardHeader}>
                 <span className={styles.cardLabel}>{g.label}</span>
-                {isActive && (
-                  <span className={styles.activeBadge}>
-                    <Check size={10} />
-                    Active
+                {(hasImage || isActive) && (
+                  <span className={styles.badgeRow}>
+                    {hasImage && (
+                      <span className={styles.mediaBadge}>
+                        <ImageIcon size={10} />
+                        Image
+                      </span>
+                    )}
+                    {isActive && (
+                      <span className={styles.activeBadge}>
+                        <Check size={10} />
+                        Active
+                      </span>
+                    )}
                   </span>
                 )}
               </div>

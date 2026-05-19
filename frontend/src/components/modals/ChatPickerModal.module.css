@@ -243,6 +243,15 @@
   justify-content: space-between;
   gap: 8px;
   flex: 1;
+  min-width: 0;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .cardLabel {
@@ -250,6 +259,10 @@
   font-weight: 600;
   color: var(--lumiverse-text);
   letter-spacing: 0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .activeBadge {
@@ -263,6 +276,7 @@
   font-size: calc(10.5px * var(--lumiverse-font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
 .cardPreview {
