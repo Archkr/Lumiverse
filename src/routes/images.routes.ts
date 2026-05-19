@@ -87,9 +87,15 @@ app.post("/rebuild-thumbnails", async (c) => {
 
 app.delete("/:id", (c) => {
   const userId = c.get("userId");
-  const deleted = svc.deleteImage(userId, c.req.param("id"));
+  const id = c.req.param("id");
+  const deleted = c.req.query("unused") === "true"
+    ? svc.deleteImageIfUnreferenced(userId, id)
+    : svc.deleteImage(userId, id);
+  if (!deleted && c.req.query("unused") === "true") {
+    return c.json({ success: true, deleted: false });
+  }
   if (!deleted) return c.json({ error: "Not found" }, 404);
-  return c.json({ success: true });
+  return c.json({ success: true, deleted: true });
 });
 
 export { app as imagesRoutes };

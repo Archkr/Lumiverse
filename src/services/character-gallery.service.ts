@@ -1,5 +1,5 @@
 import { getDb } from "../db/connection";
-import { uploadImage } from "./images.service";
+import { deleteImageIfUnreferenced, uploadImage } from "./images.service";
 import { getCharacter } from "./characters.service";
 import type { CharacterGalleryItem } from "../types/character-gallery";
 import { safeFetch } from "../utils/safe-fetch";
@@ -62,7 +62,7 @@ export async function uploadToGallery(
   file: File,
   caption?: string
 ): Promise<CharacterGalleryItem> {
-  const image = await uploadImage(userId, file);
+  const image = await uploadImage(userId, file, { owner_character_id: characterId });
   return addToGallery(userId, characterId, image.id, caption);
 }
 
@@ -96,9 +96,12 @@ export async function uploadBulkToGallery(
 }
 
 export function removeFromGallery(userId: string, itemId: string): boolean {
+  const item = getGalleryItem(userId, itemId);
+  if (!item) return false;
   const result = getDb()
     .query("DELETE FROM character_gallery WHERE id = ? AND user_id = ?")
     .run(itemId, userId);
+  if (result.changes > 0) deleteImageIfUnreferenced(userId, item.image_id);
   return result.changes > 0;
 }
 

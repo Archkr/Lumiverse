@@ -669,3 +669,60 @@ export function deleteImage(userId: string, id: string): boolean {
   }
   return result.changes > 0;
 }
+
+function hasImageReference(sql: string, params: any[]): boolean {
+  try {
+    const row = getDb().query(sql).get(...params) as { found?: number } | undefined;
+    return !!row?.found;
+  } catch {
+    // Some focused tests construct partial schemas; missing tables/columns mean
+    // there cannot be a reference in that test database.
+    return false;
+  }
+}
+
+export function isImageReferenced(userId: string, id: string): boolean {
+  const needle = `%${id}%`;
+  return (
+    hasImageReference(
+      "SELECT 1 AS found FROM character_gallery WHERE user_id = ? AND image_id = ? LIMIT 1",
+      [userId, id],
+    ) ||
+    hasImageReference(
+      `SELECT 1 AS found FROM characters
+       WHERE user_id = ? AND (
+         image_id = ? OR extensions LIKE ? OR description LIKE ? OR personality LIKE ? OR scenario LIKE ?
+         OR first_mes LIKE ? OR mes_example LIKE ? OR creator_notes LIKE ? OR system_prompt LIKE ?
+         OR post_history_instructions LIKE ? OR alternate_greetings LIKE ?
+       ) LIMIT 1`,
+      [userId, id, needle, needle, needle, needle, needle, needle, needle, needle, needle, needle],
+    ) ||
+    hasImageReference(
+      "SELECT 1 AS found FROM personas WHERE user_id = ? AND (image_id = ? OR metadata LIKE ?) LIMIT 1",
+      [userId, id, needle],
+    ) ||
+    hasImageReference(
+      "SELECT 1 AS found FROM theme_assets WHERE user_id = ? AND image_id = ? LIMIT 1",
+      [userId, id],
+    ) ||
+    hasImageReference(
+      "SELECT 1 AS found FROM chats WHERE user_id = ? AND metadata LIKE ? LIMIT 1",
+      [userId, needle],
+    ) ||
+    hasImageReference(
+      `SELECT 1 AS found FROM messages m
+       JOIN chats c ON c.id = m.chat_id
+       WHERE c.user_id = ? AND (m.extra LIKE ? OR m.swipes LIKE ? OR m.content LIKE ?) LIMIT 1`,
+      [userId, needle, needle, needle],
+    ) ||
+    hasImageReference(
+      "SELECT 1 AS found FROM settings WHERE user_id = ? AND value LIKE ? LIMIT 1",
+      [userId, needle],
+    )
+  );
+}
+
+export function deleteImageIfUnreferenced(userId: string, id: string): boolean {
+  if (isImageReferenced(userId, id)) return false;
+  return deleteImage(userId, id);
+}

@@ -376,6 +376,41 @@ function rowToCharacter(row: any): Character {
   };
 }
 
+const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
+
+function collectImageIdsFromValue(value: unknown, ids: Set<string>): void {
+  if (typeof value === "string") {
+    UUID_RE.lastIndex = 0;
+    for (const match of value.matchAll(UUID_RE)) ids.add(match[0]);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectImageIdsFromValue(item, ids);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) collectImageIdsFromValue(item, ids);
+  }
+}
+
+function collectCharacterImageIds(character: Character): Set<string> {
+  const ids = new Set<string>();
+  if (character.image_id) ids.add(character.image_id);
+  collectImageIdsFromValue(character.extensions, ids);
+  return ids;
+}
+
+function cleanupUnreferencedImageIds(userId: string, ids: Iterable<string>): void {
+  for (const imageId of ids) imagesSvc.deleteImageIfUnreferenced(userId, imageId);
+}
+
+function listCharacterGalleryImageIds(userId: string, characterId: string): string[] {
+  const rows = getDb()
+    .query("SELECT image_id FROM character_gallery WHERE user_id = ? AND character_id = ?")
+    .all(userId, characterId) as Array<{ image_id: string }>;
+  return rows.map((row) => row.image_id).filter(Boolean);
+}
+
 /** Lightweight listing of all characters for manifest building (name, creator, extensions, created_at). */
 export function listCharactersForManifest(userId: string): Array<{ name: string; creator: string; extensions: Record<string, any>; created_at: number }> {
   const db = getDb();
@@ -524,6 +559,7 @@ export function createCharacter(userId: string, input: CreateCharacterInput): Ch
 export function updateCharacter(userId: string, id: string, input: UpdateCharacterInput): Character | null {
   const existing = getCharacter(userId, id);
   if (!existing) return null;
+  const oldImageIds = collectCharacterImageIds(existing);
 
   const now = Math.floor(Date.now() / 1000);
   const fields: string[] = [];
@@ -558,6 +594,11 @@ export function updateCharacter(userId: string, id: string, input: UpdateCharact
 
   getDb().query(`UPDATE characters SET ${fields.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
   const updated = getCharacter(userId, id)!;
+  if (input.extensions !== undefined) {
+    const newImageIds = collectCharacterImageIds(updated);
+    const removedImageIds = [...oldImageIds].filter((imageId) => !newImageIds.has(imageId));
+    cleanupUnreferencedImageIds(userId, removedImageIds);
+  }
   eventBus.emit(EventType.CHARACTER_EDITED, { id, character: updated }, userId);
   return updated;
 }
@@ -587,13 +628,13 @@ export async function replaceCharacterAvatar(userId: string, id: string, file: F
     ? existing.extensions.avatar_crop_image_id
     : null;
 
-  if (existing.image_id) imagesSvc.deleteImage(userId, existing.image_id);
-  if (oldOriginalImageId && oldOriginalImageId !== existing.image_id) imagesSvc.deleteImage(userId, oldOriginalImageId);
-  if (oldCropImageId && oldCropImageId !== existing.image_id && oldCropImageId !== oldOriginalImageId) imagesSvc.deleteImage(userId, oldCropImageId);
-  if (existing.avatar_path) await filesSvc.deleteAvatar(existing.avatar_path);
+  const oldImageIds = new Set<string>();
+  if (existing.image_id) oldImageIds.add(existing.image_id);
+  if (oldOriginalImageId) oldImageIds.add(oldOriginalImageId);
+  if (oldCropImageId) oldImageIds.add(oldCropImageId);
 
-  const originalImage = await imagesSvc.uploadImage(userId, originalFile ?? file);
-  const cropImage = originalFile ? await imagesSvc.uploadImage(userId, file) : null;
+  const originalImage = await imagesSvc.uploadImage(userId, originalFile ?? file, { owner_character_id: id });
+  const cropImage = originalFile ? await imagesSvc.uploadImage(userId, file, { owner_character_id: id }) : null;
   setCharacterImage(userId, id, originalImage.id);
   setCharacterAvatar(userId, id, originalImage.filename);
 
@@ -604,6 +645,8 @@ export async function replaceCharacterAvatar(userId: string, id: string, file: F
   getDb()
     .query("UPDATE characters SET extensions = ?, updated_at = ? WHERE id = ? AND user_id = ?")
     .run(JSON.stringify(extensions), Math.floor(Date.now() / 1000), id, userId);
+  cleanupUnreferencedImageIds(userId, oldImageIds);
+  if (existing.avatar_path) await filesSvc.deleteAvatar(existing.avatar_path);
 
   const updated = getCharacter(userId, id);
   if (!updated) return null;
@@ -686,9 +729,13 @@ export function setCharacterSourceFilename(userId: string, id: string, sourceFil
 export function deleteCharacter(userId: string, id: string): boolean {
   const existing = getCharacter(userId, id);
   if (!existing) return false;
+  const imageIds = collectCharacterImageIds(existing);
+  for (const imageId of listCharacterGalleryImageIds(userId, id)) imageIds.add(imageId);
 
   const result = getDb().query("DELETE FROM characters WHERE id = ? AND user_id = ?").run(id, userId);
   if (result.changes > 0) {
+    cleanupUnreferencedImageIds(userId, imageIds);
+    if (existing.avatar_path) void filesSvc.deleteAvatar(existing.avatar_path);
     deleteAutoManagedCharacterWorldBooks(userId, id);
     deleteRegexScriptsByCharacterId(userId, id);
     eventBus.emit(EventType.CHARACTER_DELETED, { id }, userId);
