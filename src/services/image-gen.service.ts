@@ -47,7 +47,7 @@ interface ImageGenSettings {
   recycledImageLimit: number;
   backgroundOpacity: number;
   fadeTransitionMs: number;
-  /** Per-session parameter overrides set via the Image Gen panel — merged on top of connection.default_parameters at generation time. */
+  /** @deprecated Legacy global parameter bag. Provider parameters live on connection.default_parameters. */
   parameters?: Record<string, any>;
   /**
    * Maximum seconds to wait for the LLM sidecar/parser prompt generation phase.
@@ -214,7 +214,7 @@ export async function generateSceneBackground(
     const promptInput = resolvePromptInput(settings, opts);
     const promptMode = opts?.promptMode || settings.promptMode || "scene";
     const outputTarget = opts?.outputTarget || settings.outputTarget || "background";
-    const params = { ...connection.default_parameters, ...(settings.parameters || {}) };
+    const params = { ...connection.default_parameters };
     normalizeRandomSeed(params, !!provider.capabilities.parameters.seed);
     resolveProviderRandomSeed(params, connection.provider);
     const promptTimeoutSecs = resolveTimeoutSeconds(opts?.promptGenerationTimeoutSeconds, settings.promptGenerationTimeoutSeconds ?? 60);

@@ -963,7 +963,7 @@ function PromptBehaviorSettings({ promptBehavior, onSave }: { promptBehavior: an
   const handleChange = (key: string, value: string) => onSave({ [key]: value })
   const handleRestore = (key: string) => onSave({ [key]: defaults[key as keyof typeof defaults] })
 
-  const Field = ({ fieldKey, label, hint, multiline }: { fieldKey: string; label: string; hint?: string; multiline?: boolean }) => {
+  const renderField = ({ fieldKey, label, hint, multiline }: { fieldKey: string; label: string; hint?: string; multiline?: boolean }) => {
     const value = behavior[fieldKey] ?? defaults[fieldKey as keyof typeof defaults]
     const isDefault = value === defaults[fieldKey as keyof typeof defaults]
     return (
@@ -999,13 +999,13 @@ function PromptBehaviorSettings({ promptBehavior, onSave }: { promptBehavior: an
       </div>
       {isExpanded && (
         <div className={s.accordionBody}>
-          <Field fieldKey="continueNudge" label="Continue Nudge" hint="Injected when continuing a response" multiline />
-          <Field fieldKey="emptySendNudge" label="Empty Send Nudge" hint="Injected when nudging for a fresh reply from an assistant-ending chat" multiline />
-          <Field fieldKey="impersonationPrompt" label="Impersonation Prompt" hint="Injected when impersonating the user" multiline />
-          <Field fieldKey="groupNudge" label="Group Nudge" hint="Injected in group chats" multiline />
-          <Field fieldKey="newChatPrompt" label="New Chat Separator" hint="Inserted at conversation start" />
-          <Field fieldKey="newGroupChatPrompt" label="New Group Chat Separator" hint="Inserted at group conversation start" />
-          <Field fieldKey="sendIfEmpty" label="Send If Empty" hint="Sent as a user message when the final assistant content is blank" />
+          {renderField({ fieldKey: 'continueNudge', label: 'Continue Nudge', hint: 'Injected when continuing a response', multiline: true })}
+          {renderField({ fieldKey: 'emptySendNudge', label: 'Empty Send Nudge', hint: 'Injected when nudging for a fresh reply from an assistant-ending chat', multiline: true })}
+          {renderField({ fieldKey: 'impersonationPrompt', label: 'Impersonation Prompt', hint: 'Injected when impersonating the user', multiline: true })}
+          {renderField({ fieldKey: 'groupNudge', label: 'Group Nudge', hint: 'Injected in group chats', multiline: true })}
+          {renderField({ fieldKey: 'newChatPrompt', label: 'New Chat Separator', hint: 'Inserted at conversation start' })}
+          {renderField({ fieldKey: 'newGroupChatPrompt', label: 'New Group Chat Separator', hint: 'Inserted at group conversation start' })}
+          {renderField({ fieldKey: 'sendIfEmpty', label: 'Send If Empty', hint: 'Sent as a user message when the final assistant content is blank' })}
         </div>
       )}
     </div>

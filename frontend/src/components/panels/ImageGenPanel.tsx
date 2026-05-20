@@ -474,14 +474,25 @@ export default function ImageGenPanel() {
     return { ...groups, extra: extraGroups }
   }, [capabilities])
 
-  // Generation parameters stored in imageGeneration.parameters (flat, provider-agnostic)
-  const genParams: Record<string, any> = imageGeneration.parameters || {}
+  // Provider parameters are saved on the active connection so they do not leak
+  // across profiles that happen to use the same parameter names.
+  const genParams: Record<string, any> = activeConnection?.default_parameters || {}
 
   const updateTop = (partial: Record<string, any>) => setImageGenSettings(partial)
 
   const updateParam = useCallback((key: string, value: any) => {
-    setImageGenSettings({ parameters: { ...genParams, [key]: value } } as any)
-  }, [genParams, setImageGenSettings])
+    if (!activeConnection) return
+
+    const nextParams = { ...genParams }
+    if (value === undefined || value === '') delete nextParams[key]
+    else nextParams[key] = value
+
+    const updatedConnection = { ...activeConnection, default_parameters: nextParams }
+    setImageGenProfiles(imageGenProfiles.map((profile) => (profile.id === activeConnection.id ? updatedConnection : profile)))
+    imageGenConnectionsApi.update(activeConnection.id, { default_parameters: nextParams }).catch(() => {
+      refreshActiveImageGenConnection()
+    })
+  }, [activeConnection, genParams, imageGenProfiles, refreshActiveImageGenConnection, setImageGenProfiles])
 
   const updateComfyCustomControl = useCallback((control: ComfyMappedFieldControl, value: string) => {
     const customKey = control.key.slice(COMFY_CUSTOM_CONTROL_PREFIX.length)
@@ -497,16 +508,11 @@ export default function ImageGenPanel() {
       nextCustom[customKey] = parsed
     }
 
-    setImageGenSettings({
-      parameters: {
-        ...genParams,
-        comfyui_field_values: {
-          ...existingFieldValues,
-          custom: nextCustom,
-        },
-      },
-    } as any)
-  }, [genParams, setImageGenSettings])
+    updateParam('comfyui_field_values', {
+      ...existingFieldValues,
+      custom: nextCustom,
+    })
+  }, [genParams, updateParam])
 
   const readComfyCustomControlValue = useCallback((control: ComfyMappedFieldControl) => {
     const customKey = control.key.slice(COMFY_CUSTOM_CONTROL_PREFIX.length)
@@ -562,10 +568,10 @@ export default function ImageGenPanel() {
     } as any)
   }, [activePromptPreset, promptPresets, setImageGenSettings])
 
-  // Reference images (stored per-session in settings)
+  // Reference images are provider parameters and stay scoped to this connection.
   const currentRefs: RefImage[] = genParams.referenceImages || []
   const setCurrentRefs = (next: RefImage[]) => {
-    setImageGenSettings({ parameters: { ...genParams, referenceImages: next } } as any)
+    updateParam('referenceImages', next)
   }
 
   const supportsRefs = providerName === 'novelai' || providerName === 'nanogpt'
