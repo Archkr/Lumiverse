@@ -33,6 +33,37 @@ type BackendSafetyCheck = {
   regex: RegExp;
 };
 
+type SourceSpan = { start: number; end: number };
+type ScannableSource = { text: string; ignoredSpans: SourceSpan[] };
+
+const DANGEROUS_MODULE_LABELS = new Map<string, string>([
+  ["fs", "filesystem module access"],
+  ["fs/promises", "filesystem module access"],
+  ["node:fs", "filesystem module access"],
+  ["node:fs/promises", "filesystem module access"],
+  ["child_process", "subprocess module access"],
+  ["node:child_process", "subprocess module access"],
+  ["net", "direct socket module access"],
+  ["tls", "direct socket module access"],
+  ["dgram", "direct socket module access"],
+  ["http", "direct socket module access"],
+  ["https", "direct socket module access"],
+  ["node:net", "direct socket module access"],
+  ["node:tls", "direct socket module access"],
+  ["node:dgram", "direct socket module access"],
+  ["node:http", "direct socket module access"],
+  ["node:https", "direct socket module access"],
+  ["worker_threads", "worker or cluster module access"],
+  ["cluster", "worker or cluster module access"],
+  ["node:worker_threads", "worker or cluster module access"],
+  ["node:cluster", "worker or cluster module access"],
+  ["bun:sqlite", "direct SQLite module access"],
+  ["node:sqlite", "direct SQLite module access"],
+]);
+
+const DANGEROUS_BUN_PROPERTIES = new Set(["file", "write", "spawn", "spawnSync", "serve", "connect", "listen"]);
+const DANGEROUS_PROCESS_PROPERTIES = new Set(["env", "exit", "kill", "chdir", "dlopen"]);
+
 const DANGEROUS_BACKEND_CHECKS: BackendSafetyCheck[] = [
   {
     label: "filesystem module access",
@@ -64,11 +95,247 @@ const DANGEROUS_BACKEND_CHECKS: BackendSafetyCheck[] = [
   },
 ];
 
+function normalizeJavaScriptForSafetyScan(content: string): string {
+  try {
+    return new Bun.Transpiler({ loader: "js" }).transformSync(content);
+  } catch {
+    return content;
+  }
+}
+
+function collectIgnoredSpans(source: string): SourceSpan[] {
+  const spans: SourceSpan[] = [];
+  const len = source.length;
+  const addSpan = (start: number, end: number) => {
+    if (end > start) spans.push({ start, end });
+  };
+
+  const skipQuoted = (start: number, quote: "'" | '"', end: number): number => {
+    let i = start + 1;
+    while (i < end) {
+      if (source[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (source[i] === quote) {
+        addSpan(start, i + 1);
+        return i + 1;
+      }
+      i += 1;
+    }
+    addSpan(start, end);
+    return end;
+  };
+
+  const scanTemplate = (start: number, end: number): number => {
+    let i = start + 1;
+    let textStart = start;
+    while (i < end) {
+      if (source[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (source[i] === "`") {
+        addSpan(textStart, i + 1);
+        return i + 1;
+      }
+      if (source[i] === "$" && source[i + 1] === "{") {
+        addSpan(textStart, i + 2);
+        i = scanCode(i + 2, end, true);
+        if (source[i] !== "}") return i;
+        textStart = i;
+        i += 1;
+        continue;
+      }
+      i += 1;
+    }
+    addSpan(textStart, end);
+    return end;
+  };
+
+  const scanCode = (start: number, end: number, stopOnTemplateBrace = false): number => {
+    let i = start;
+    while (i < end) {
+      if (stopOnTemplateBrace && source[i] === "}") return i;
+      if (source[i] === "/" && source[i + 1] === "/") {
+        const lineEnd = source.indexOf("\n", i + 2);
+        const commentEnd = lineEnd === -1 ? end : lineEnd;
+        addSpan(i, commentEnd);
+        i = commentEnd;
+        continue;
+      }
+      if (source[i] === "/" && source[i + 1] === "*") {
+        const blockEnd = source.indexOf("*/", i + 2);
+        const commentEnd = blockEnd === -1 ? end : blockEnd + 2;
+        addSpan(i, commentEnd);
+        i = commentEnd;
+        continue;
+      }
+      if (source[i] === '"' || source[i] === "'") {
+        i = skipQuoted(i, source[i] as "'" | '"', end);
+        continue;
+      }
+      if (source[i] === "`") {
+        i = scanTemplate(i, end);
+        continue;
+      }
+      i += 1;
+    }
+    return i;
+  };
+
+  scanCode(0, len);
+  return spans.sort((a, b) => a.start - b.start);
+}
+
+function isIgnoredIndex(index: number | undefined, spans: SourceSpan[]): boolean {
+  if (index === undefined || index < 0) return false;
+  for (const span of spans) {
+    if (index < span.start) return false;
+    if (index >= span.start && index < span.end) return true;
+  }
+  return false;
+}
+
+function createScannableSources(content: string): ScannableSource[] {
+  const normalized = normalizeJavaScriptForSafetyScan(content);
+  const texts = normalized === content ? [content] : [content, normalized];
+  return texts.map((text) => ({ text, ignoredSpans: collectIgnoredSpans(text) }));
+}
+
+function matchOutsideIgnored(source: ScannableSource, regex: RegExp): RegExpMatchArray[] {
+  const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
+  const globalRegex = new RegExp(regex.source, flags);
+  const matches: RegExpMatchArray[] = [];
+  for (const match of source.text.matchAll(globalRegex)) {
+    if (!isIgnoredIndex(match.index, source.ignoredSpans)) matches.push(match);
+  }
+  return matches;
+}
+
+function decodeQuotedLiteral(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!/^(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)$/.test(trimmed)) return null;
+  const quote = trimmed[0];
+  const body = trimmed.slice(1, -1);
+  if (quote === "`") return body.replace(/\$\{[^}]*\}/g, "");
+  if (quote === '"') {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return body;
+    }
+  }
+  return body.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+}
+
+function decodeSimpleStringExpression(raw: string): string | null {
+  const trimmed = raw.trim();
+  const direct = decodeQuotedLiteral(trimmed);
+  if (direct !== null) return direct;
+
+  const charCode = trimmed.match(/^String\.fromCharCode\s*\(([^)]*)\)$/);
+  if (charCode) {
+    const chars = charCode[1]
+      .split(",")
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 0x10ffff);
+    if (chars.length > 0) return String.fromCodePoint(...chars);
+  }
+
+  const literalParts = [...trimmed.matchAll(/"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`/g)].map((match) => {
+    if (match[3] !== undefined) return match[3].replace(/\$\{[^}]*\}/g, "");
+    if (match[1] !== undefined) return decodeQuotedLiteral(`"${match[1]}"`) ?? "";
+    return decodeQuotedLiteral(`'${match[2]}'`) ?? "";
+  });
+  return literalParts.length > 0 ? literalParts.join("") : null;
+}
+
+function addDynamicModuleHits(source: ScannableSource, hits: Set<string>): void {
+  for (const match of matchOutsideIgnored(source, /\b(?:require|import)\s*\(\s*String\.fromCharCode\s*\(([^)]*)\)\s*\)/)) {
+    const moduleName = decodeSimpleStringExpression(`String.fromCharCode(${match[1]})`);
+    const label = moduleName ? DANGEROUS_MODULE_LABELS.get(moduleName) : undefined;
+    if (label) hits.add(label);
+  }
+
+  for (const match of matchOutsideIgnored(source, /\b(?:require|import)\s*\(([^;\n]{1,300})\)/)) {
+    const moduleName = decodeSimpleStringExpression(match[1]);
+    const label = moduleName ? DANGEROUS_MODULE_LABELS.get(moduleName) : undefined;
+    if (label) hits.add(label);
+  }
+}
+
+function addPropertyAccessHits(
+  source: ScannableSource,
+  objectName: string,
+  properties: Set<string>,
+  label: string,
+  hits: Set<string>
+): void {
+  const escapedObject = objectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const dotAccess = new RegExp(`\\b${escapedObject}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, "g");
+  for (const match of matchOutsideIgnored(source, dotAccess)) {
+    if (properties.has(match[1])) hits.add(label);
+  }
+
+  const computedAccess = new RegExp(`\\b${escapedObject}\\s*\\[([^\\]]{1,300})\\]`, "g");
+  for (const match of matchOutsideIgnored(source, computedAccess)) {
+    const property = decodeSimpleStringExpression(match[1]);
+    if (property && properties.has(property)) hits.add(label);
+  }
+}
+
+function addAliasPropertyHits(source: ScannableSource, hits: Set<string>): void {
+  const aliases = new Map<string, "Bun" | "process">();
+  for (const match of matchOutsideIgnored(source, /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(Bun|process)\b/)) {
+    aliases.set(match[1], match[2] as "Bun" | "process");
+  }
+
+  for (const [alias, aliasSource] of aliases) {
+    addPropertyAccessHits(
+      source,
+      alias,
+      aliasSource === "Bun" ? DANGEROUS_BUN_PROPERTIES : DANGEROUS_PROCESS_PROPERTIES,
+      aliasSource === "Bun" ? "dangerous Bun system API usage" : "dangerous process API usage",
+      hits
+    );
+  }
+}
+
+function addDestructuringHits(source: ScannableSource, hits: Set<string>): void {
+  for (const match of matchOutsideIgnored(source, /\b(?:const|let|var)\s*\{([^}]+)\}\s*=\s*Bun\b/)) {
+    for (const prop of match[1].split(",")) {
+      const name = prop.trim().split(/\s*:/, 1)[0]?.trim();
+      if (DANGEROUS_BUN_PROPERTIES.has(name)) hits.add("dangerous Bun system API usage");
+    }
+  }
+
+  for (const match of matchOutsideIgnored(source, /\b(?:const|let|var)\s*\{([^}]+)\}\s*=\s*process\b/)) {
+    for (const prop of match[1].split(",")) {
+      const name = prop.trim().split(/\s*:/, 1)[0]?.trim();
+      if (DANGEROUS_PROCESS_PROPERTIES.has(name)) hits.add("dangerous process API usage");
+    }
+  }
+}
+
 export function detectDangerousBackendCapabilities(content: string): string[] {
   const hits = new Set<string>();
-  for (const check of DANGEROUS_BACKEND_CHECKS) {
-    if (check.regex.test(content)) {
-      hits.add(check.label);
+  for (const source of createScannableSources(content)) {
+    for (const check of DANGEROUS_BACKEND_CHECKS) {
+      if (matchOutsideIgnored(source, check.regex).length > 0) {
+        hits.add(check.label);
+      }
+    }
+    addDynamicModuleHits(source, hits);
+    addPropertyAccessHits(source, "Bun", DANGEROUS_BUN_PROPERTIES, "dangerous Bun system API usage", hits);
+    addPropertyAccessHits(source, "process", DANGEROUS_PROCESS_PROPERTIES, "dangerous process API usage", hits);
+    addAliasPropertyHits(source, hits);
+    addDestructuringHits(source, hits);
+    if (matchOutsideIgnored(source, /\bObject\.getOwnPropertyDescriptor\s*\(\s*process\s*,\s*["'`]env["'`]/).length > 0) {
+      hits.add("dangerous process API usage");
+    }
+    if (matchOutsideIgnored(source, /\beval\s*\(|\bFunction\s*\(|\bBuffer\.from\s*\([^)]*["'`]base64["'`]/).length > 0) {
+      hits.add("dynamic code execution");
     }
   }
   return [...hits];

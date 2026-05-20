@@ -65,6 +65,56 @@ describe("detectDangerousBackendCapabilities", () => {
     expect(detectDangerousBackendCapabilities(code)).toEqual([]);
   });
 
+  test("flags common evasions for native backend capabilities", () => {
+    const samples: Array<[string, string]> = [
+      [`Bun["file"]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`Bun["fil" + "e"]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`Bun[\`fil\${""}e\`]("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`const B = Bun; B.file("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`const { file } = Bun; file("/etc/passwd")`, "dangerous Bun system API usage"],
+      [`await import("f" + "s")`, "filesystem module access"],
+      [`await import(String.fromCharCode(102, 115))`, "filesystem module access"],
+      [`process["e" + "nv"].SECRET`, "dangerous process API usage"],
+      [`Object.getOwnPropertyDescriptor(process, "env")?.value`, "dangerous process API usage"],
+      [`\u0070rocess.env.SECRET`, "dangerous process API usage"],
+      [`eval(Buffer.from("Zm9v", "base64").toString())`, "dynamic code execution"],
+    ];
+
+    for (const [code, label] of samples) {
+      expect(detectDangerousBackendCapabilities(code)).toContain(label);
+    }
+  });
+
+  test("ignores unsafe examples inside documentation strings and comments", () => {
+    const code = String.raw`
+      const markdown = \`
+      # Bad examples
+
+      \`\`\`js
+      import fs from "fs";
+      await import("fs");
+      Bun["file"]("/etc/passwd");
+      process.env.SECRET;
+      eval(Buffer.from("Zm9v", "base64").toString());
+      \`\`\`
+      \`;
+
+      const html = '<pre><code>Bun.spawn(["whoami"]); process["env"];</code></pre>';
+
+      // Bad practice: Bun.file("/etc/passwd")
+      /* Bad practice: require("node:child_process") */
+
+      spindle.frontend.postMessage({ markdown, html });
+    `;
+
+    expect(detectDangerousBackendCapabilities(code)).toEqual([]);
+  });
+
+  test("still flags executable code inside template expressions", () => {
+    const code = 'const message = `value: ${process.env.SECRET}`; void message;';
+
+    expect(detectDangerousBackendCapabilities(code)).toContain("dangerous process API usage");
+  });
 });
 
 describe("PRIVILEGED_PERMISSIONS", () => {
