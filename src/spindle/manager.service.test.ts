@@ -5,7 +5,9 @@ import {
   declaredCapabilitiesFromManifest,
   detectDangerousBackendCapabilities,
   PRIVILEGED_PERMISSIONS,
+  withTemporarilyRelaxedBackendCapabilities,
 } from "./manager.service";
+import { TEMP_RELAX_CAPABILITY_BLOCKING_ENV } from "./capability-relaxation";
 import type { SpindleCapability, SpindleManifest } from "lumiverse-spindle-types";
 
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
@@ -159,6 +161,22 @@ describe("detectDangerousBackendCapabilities", () => {
         new Set<SpindleCapability>(["dynamic_code_execution", "base64_decode"]),
       ),
     ).toContain("filesystem module access");
+  });
+
+  test("temporarily relaxed capability blocking only unlocks declared capability labels", () => {
+    withEnv({ [TEMP_RELAX_CAPABILITY_BLOCKING_ENV]: "true" }, () => {
+      const relaxed = withTemporarilyRelaxedBackendCapabilities(new Set<SpindleCapability>());
+
+      expect(
+        detectDangerousBackendCapabilities(
+          `new Function("return 1"); Buffer.from(payload, "base64");`,
+          relaxed,
+        ),
+      ).toEqual([]);
+      expect(
+        detectDangerousBackendCapabilities(`import { readFileSync } from "node:fs";`, relaxed),
+      ).toContain("filesystem module access");
+    });
   });
 
   test("declaredCapabilitiesFromManifest accepts only valid entries", () => {

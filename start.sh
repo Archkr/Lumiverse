@@ -113,7 +113,7 @@ for arg in "$@"; do
     --relax-capability-blocking|-r) RELAX_CAPABILITY_BLOCKING=true ;;
     --no-runner)    USE_RUNNER=false ;;
     --help|-h)
-      sed -n '3,17p' "$0" | sed 's/^# \?//'
+      sed -n '3,17p' "$0" | sed 's/^# *//'
       exit 0
       ;;
     *) err "Unknown argument: $arg"; exit 1 ;;
