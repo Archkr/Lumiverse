@@ -94,31 +94,6 @@ If your refactor still hits a hard block, the design is asking too much for the 
 
 Invalid entries are dropped silently. The scanner still enforces the underlying check — an unrecognised capability value just means no opt-in.
 
-## Verifying locally
-
-Spindle's scanner runs automatically on install, rebuild, and every backend-process spawn. To check your bundle ahead of time:
-
-```ts
-import { detectDangerousBackendCapabilities } from "lumiverse/spindle/manager.service"
-import { readFileSync } from "fs"
-
-const bundle = readFileSync("dist/backend.js", "utf8")
-console.log(detectDangerousBackendCapabilities(bundle))
-// → [] means install will pass
-// → ["dynamic code execution"] means you need requested_capabilities: ["dynamic_code_execution"]
-// → ["filesystem module access"] means you must refactor — no opt-in available
-```
-
-You can also pass a declared-capability set to confirm your declaration covers everything:
-
-```ts
-detectDangerousBackendCapabilities(
-  bundle,
-  new Set(["dynamic_code_execution", "base64_decode"]),
-)
-// → [] confirms the declared capabilities are sufficient
-```
-
 ## When to use capabilities, not workarounds
 
 A few patterns worth avoiding:
