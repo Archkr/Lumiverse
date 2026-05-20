@@ -39,6 +39,27 @@ let patternCache: { patterns: { regex: RegExp; tokenizerId: string }[] } | null 
 
 // ---- Helpers ----
 
+const BENIGN_TOKENIZER_CLASS_WARNING =
+  'Unknown tokenizer class "TokenizersBackend", attempting to construct from base class.';
+
+function isBenignTokenizerWarning(args: unknown[]): boolean {
+  return args.length > 0 && String(args[0]) === BENIGN_TOKENIZER_CLASS_WARNING;
+}
+
+function withoutBenignTokenizerWarning<T>(fn: () => T): T {
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    if (!isBenignTokenizerWarning(args)) {
+      originalWarn(...args);
+    }
+  };
+  try {
+    return fn();
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
 function parseConfig(row: any): TokenizerConfig {
   return {
     ...row,
@@ -139,7 +160,7 @@ async function loadHuggingFace(config: TokenizerConfig): Promise<TokenizerInstan
       // @lenml/tokenizer-* v3.x packages export fromPreTrained(params?) which builds
       // a tokenizer from embedded model data (tokenizerJSON + tokenizerConfig baked in)
       if (typeof mod.fromPreTrained === "function") {
-        const tokenizer = mod.fromPreTrained();
+        const tokenizer = withoutBenignTokenizerWarning(() => mod.fromPreTrained());
         if (tokenizer?.encode) {
           return { count: (text: string) => tokenizer.encode(text).length };
         }
@@ -170,20 +191,26 @@ async function loadHuggingFace(config: TokenizerConfig): Promise<TokenizerInstan
       const resp = await fetch(cfg.url);
       if (!resp.ok) throw new Error(`Failed to fetch tokenizer.json from ${cfg.url}: ${resp.status}`);
       const tokenizerJSON = await resp.json();
-      const tokenizer = TokenizerLoader.fromPreTrained({
+      const tokenizer = withoutBenignTokenizerWarning(() => TokenizerLoader.fromPreTrained({
         tokenizerJSON,
         tokenizerConfig: { tokenizer_class: "PreTrainedTokenizer" },
-      });
+      }));
       return { count: (text: string) => tokenizer.encode(text).length };
     }
 
-    // fromPreTrainedUrls() fetches both URLs internally — validate both hosts up front
+    // Fetch both files ourselves so warning suppression is scoped only to construction,
+    // not the whole network request inside fromPreTrainedUrls().
     await validateTokenizerUrl(cfg.url, "tokenizer url");
     await validateTokenizerUrl(configUrl, "tokenizer config url");
-    const tokenizer = await TokenizerLoader.fromPreTrainedUrls({
-      tokenizerJSON: cfg.url,
-      tokenizerConfig: configUrl,
-    });
+    const tokenizerResp = await fetch(cfg.url);
+    if (!tokenizerResp.ok) throw new Error(`Failed to fetch tokenizer.json from ${cfg.url}: ${tokenizerResp.status}`);
+    const configResp = await fetch(configUrl);
+    if (!configResp.ok) throw new Error(`Failed to fetch tokenizer_config.json from ${configUrl}: ${configResp.status}`);
+    const tokenizerJSON = await tokenizerResp.json();
+    const tokenizerConfig = await configResp.json();
+    const tokenizer = withoutBenignTokenizerWarning(() =>
+      TokenizerLoader.fromPreTrained({ tokenizerJSON, tokenizerConfig })
+    );
     return { count: (text: string) => tokenizer.encode(text).length };
   }
 

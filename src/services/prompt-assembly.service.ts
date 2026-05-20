@@ -990,7 +990,7 @@ export async function assemblePrompt(
           requestedPresetId,
           chat.id,
           characterId,
-          { isGroup: chat.metadata?.group === true },
+          { isGroup: chat.metadata?.group === true, connectionId: connection?.id ?? null },
         );
   const resolvedPresetId = resolvedProfile.preset_id;
 

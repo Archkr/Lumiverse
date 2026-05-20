@@ -468,18 +468,22 @@ export function useWebSocket() {
 
             const optimisticMessageId = state.regeneratingMessageId
 
-            // End streaming immediately, then reconcile the full message list
-            // from backend source-of-truth to avoid id/index race conditions.
+            // Reconcile before clearing streaming. Clearing first collapses long
+            // streamed rows back to their blank/original content for a frame; on
+            // mobile, if the user is reading inside a multi-viewport final row,
+            // the browser clamps scrollTop toward the bottom and creates a
+            // visible snapdown before the saved message arrives.
             // Image gen is deferred until AFTER reconciliation completes so its
             // backend work (sidecar LLM scene analysis, DB reads) cannot delay
             // message delivery and cause a perceived UI stall.
-            state.endStreaming()
             fetchLatestMessages(payload.chatId).then((res) => {
               const s = store.getState()
               if (s.activeChatId === payload.chatId) {
                 s.setMessages(res.data, res.total)
+                s.endStreaming()
               }
             }).catch(() => {
+              store.getState().endStreaming()
               if (isLocalStreamPlaceholderId(optimisticMessageId)) {
                 store.getState().removeMessage(optimisticMessageId)
               }

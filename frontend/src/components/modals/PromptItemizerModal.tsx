@@ -121,7 +121,7 @@ export default function PromptItemizerModal() {
         connection_id: activeProfileId || undefined,
         persona_id: activePersonaId || undefined,
         preset_id: presetId,
-        force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId),
+        force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId, activeProfileId),
         exclude_message_id: messageId,
       })
       setRawData(res)

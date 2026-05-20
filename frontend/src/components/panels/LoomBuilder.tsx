@@ -1285,8 +1285,8 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
   const suppressNextProfileApplyRef = useRef<string | null>(null)
 
   const getProfileContextKey = useCallback(() => (
-    `${activePresetRef.current?.id ?? 'none'}:${presetProfiles.activeChatId ?? 'none'}:${presetProfiles.activeCharacterId ?? 'none'}`
-  ), [presetProfiles.activeChatId, presetProfiles.activeCharacterId])
+    `${activePresetRef.current?.id ?? 'none'}:${presetProfiles.activeChatId ?? 'none'}:${presetProfiles.activeCharacterId ?? 'none'}:${presetProfiles.activeProfileId ?? 'none'}`
+  ), [presetProfiles.activeChatId, presetProfiles.activeCharacterId, presetProfiles.activeProfileId])
 
   const captureDefaults = useCallback(() => {
     suppressNextProfileApplyRef.current = getProfileContextKey()
@@ -1326,7 +1326,7 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
   useEffect(() => {
     if (!presetProfiles.isResolved) return
 
-    const contextKey = `${activePresetRef.current?.id ?? 'none'}:${presetProfiles.activeChatId ?? 'none'}:${presetProfiles.activeCharacterId ?? 'none'}`
+    const contextKey = `${activePresetRef.current?.id ?? 'none'}:${presetProfiles.activeChatId ?? 'none'}:${presetProfiles.activeCharacterId ?? 'none'}:${presetProfiles.activeProfileId ?? 'none'}`
     const contextChanged = lastProfileContextRef.current !== contextKey
 
     if (
@@ -1346,11 +1346,11 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
     if (suppressNextProfileApplyRef.current === contextKey) {
       suppressNextProfileApplyRef.current = null
       lastProfileContextRef.current = contextKey
-      markLoomRuntimeProfileContext(activePresetRef.current?.id, presetProfiles.activeChatId, presetProfiles.activeCharacterId)
+      markLoomRuntimeProfileContext(activePresetRef.current?.id, presetProfiles.activeChatId, presetProfiles.activeCharacterId, presetProfiles.activeProfileId)
       return
     }
     lastProfileContextRef.current = contextKey
-    markLoomRuntimeProfileContext(activePresetRef.current?.id, presetProfiles.activeChatId, presetProfiles.activeCharacterId)
+    markLoomRuntimeProfileContext(activePresetRef.current?.id, presetProfiles.activeChatId, presetProfiles.activeCharacterId, presetProfiles.activeProfileId)
 
     const updatedBlocks = currentBlocks.map(b =>
       b.id in binding.block_states ? { ...b, enabled: binding.block_states[b.id] } : b
@@ -1368,6 +1368,7 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
     presetProfiles.activeSource,
     presetProfiles.activeChatId,
     presetProfiles.activeCharacterId,
+    presetProfiles.activeProfileId,
     activePreset?.id,
     saveBlocks,
   ])
@@ -1761,7 +1762,7 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
                 title="Capture the current preset and block states as this preset's defaults"
                 type="button"
               >
-                <Camera size={10} /> Capture Defaults
+                <Camera size={10} /> Capture
               </button>
             ) : (
               <button
@@ -1771,7 +1772,7 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
                 title="Reapply this preset's default block states"
                 type="button"
               >
-                <RotateCcw size={10} /> Defaults
+                <RotateCcw size={10} /> Default
                 <span
                   className={s.profileBtnDismiss}
                   onClick={(e) => { e.stopPropagation(); presetProfiles.clearDefaults() }}
@@ -1855,13 +1856,50 @@ export default function LoomBuilder({ compact = true }: LoomBuilderProps) {
                 </span>
               </button>
             )}
+
+            {/* Bind / unbind connection profile */}
+            {!presetProfiles.hasConnectionBinding ? (
+              <button
+                className={s.profileBtn}
+                onClick={presetProfiles.bindToConnection}
+                disabled={!presetProfiles.hasDefaults || presetProfiles.isLoading || !activePreset || !presetProfiles.activeProfileId}
+                title={
+                  !presetProfiles.activeProfileId ? 'No active connection profile selected'
+                    : !presetProfiles.hasDefaults ? 'Capture defaults first'
+                      : 'Bind the current preset and block states to this connection profile'
+                }
+                type="button"
+              >
+                <Link size={10} /> Conn
+              </button>
+            ) : (
+              <button
+                className={clsx(s.profileBtn, s.profileBtnActive)}
+                onClick={presetProfiles.bindToConnection}
+                disabled={presetProfiles.isLoading || !presetProfiles.activeProfileId}
+                title="Rebind the current preset and block states to this connection profile"
+                type="button"
+              >
+                <RotateCcw size={10} /> Conn
+                <span
+                  className={s.profileBtnDismiss}
+                  onClick={(e) => { e.stopPropagation(); presetProfiles.unbindConnection() }}
+                  title="Remove connection profile binding"
+                  role="button"
+                  tabIndex={0}
+                >
+                  <X size={8} />
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Active source indicator */}
           {presetProfiles.activeSource !== 'none' && (
             <span className={s.profileSourceBadge}>
               {presetProfiles.activeSource === 'chat' ? 'CHAT' :
-               presetProfiles.activeSource === 'character' ? 'CHAR' : 'DEFAULT'}
+               presetProfiles.activeSource === 'character' ? 'CHAR' :
+               presetProfiles.activeSource === 'connection' ? 'CONN' : 'DEFAULT'}
             </span>
           )}
         </div>

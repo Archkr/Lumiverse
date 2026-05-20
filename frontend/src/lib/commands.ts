@@ -51,7 +51,7 @@ export const COMMANDS: Command[] = [
           connection_id: activeProfileId || undefined,
           persona_id: activePersonaId || undefined,
           preset_id: presetId,
-          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId),
+          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId, activeProfileId),
           generation_type: 'regenerate',
         })
         startStreaming(res.generationId)
@@ -81,7 +81,7 @@ export const COMMANDS: Command[] = [
           connection_id: activeProfileId || undefined,
           persona_id: activePersonaId || undefined,
           preset_id: presetId,
-          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId),
+          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId, activeProfileId),
         })
 
         startStreaming(res.generationId)
@@ -290,7 +290,7 @@ export const COMMANDS: Command[] = [
           connection_id: activeProfileId || undefined,
           persona_id: activePersonaId || undefined,
           preset_id: presetId,
-          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId),
+          force_preset_id: shouldForceLoomRuntimePreset(presetId, activeChatId, activeCharacterId, activeProfileId),
         })
 
         openModal('dryRun', result)

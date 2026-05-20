@@ -344,6 +344,7 @@ export async function deleteConnection(userId: string, id: string): Promise<bool
   if (deleted) {
     // Cleanup the connection's secret
     secretsSvc.deleteSecret(userId, connectionSecretKey(id));
+    settingsSvc.deleteSetting(userId, `presetProfile:connection:${id}`);
   }
   return deleted;
 }

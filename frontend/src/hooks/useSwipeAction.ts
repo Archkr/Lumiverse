@@ -52,7 +52,7 @@ export default function useSwipeAction(message: Message, chatId: string): SwipeA
         connection_id: activeProfileId || undefined,
         persona_id: activePersonaId || undefined,
         preset_id: presetId,
-        force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId),
+        force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId, activeProfileId),
       }
       if (feedback) {
         genOpts.regen_feedback = feedback
@@ -141,7 +141,7 @@ export async function executeSwipe(message: Message, chatId: string, direction: 
           connection_id: activeProfileId || undefined,
           persona_id: activePersonaId || undefined,
           preset_id: presetId,
-          force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId),
+          force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId, activeProfileId),
         }
         if (feedback) {
           genOpts.regen_feedback = feedback

@@ -246,12 +246,14 @@ export function deletePreset(userId: string, id: string): boolean {
   if (!deleted) return false;
 
   // Clean up preset_profile bindings (setting-keyed, no FK) that referenced
-  // the now-deleted preset. Covers defaults, per-character, and per-chat.
+  // the now-deleted preset. Covers defaults, per-character, per-chat, and
+  // per-connection profile bindings.
   for (const s of settingsSvc.getAllSettings(userId)) {
     if (s.key !== "presetProfileDefaults"
       && !s.key.startsWith("presetProfileDefaults:")
       && !s.key.startsWith("presetProfile:character:")
-      && !s.key.startsWith("presetProfile:chat:")) continue;
+      && !s.key.startsWith("presetProfile:chat:")
+      && !s.key.startsWith("presetProfile:connection:")) continue;
     if (s.value && typeof s.value === "object" && (s.value as any).preset_id === id) {
       settingsSvc.deleteSetting(userId, s.key);
     }

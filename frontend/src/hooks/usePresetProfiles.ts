@@ -20,9 +20,11 @@ function snapshotBlockStates(blocks: PromptBlock[]): Record<string, boolean> {
 // against, or `null` when unresolved/inactive.
 type ChatSlot = { for: string | null; binding: PresetProfileBinding | null }
 type CharSlot = { for: string | null; binding: PresetProfileBinding | null }
+type ConnectionSlot = { for: string | null; binding: PresetProfileBinding | null }
 
 const EMPTY_CHAT_SLOT: ChatSlot = { for: null, binding: null }
 const EMPTY_CHAR_SLOT: CharSlot = { for: null, binding: null }
+const EMPTY_CONNECTION_SLOT: ConnectionSlot = { for: null, binding: null }
 
 export function usePresetProfiles(
   presetId: string | null,
@@ -30,6 +32,7 @@ export function usePresetProfiles(
 ) {
   const activeChatId = useStore((s) => s.activeChatId)
   const activeCharacterId = useStore((s) => s.activeCharacterId)
+  const activeProfileId = useStore((s) => s.activeProfileId)
   const setActiveLoomPreset = useStore((s) => s.setActiveLoomPreset)
   const isGroupChat = useStore((s) => s.isGroupChat)
   const addToast = useStore((s) => s.addToast)
@@ -37,6 +40,7 @@ export function usePresetProfiles(
   const [defaults, setDefaults] = useState<PresetProfileBinding | null>(null)
   const [chatSlot, setChatSlot] = useState<ChatSlot>(EMPTY_CHAT_SLOT)
   const [charSlot, setCharSlot] = useState<CharSlot>(EMPTY_CHAR_SLOT)
+  const [connectionSlot, setConnectionSlot] = useState<ConnectionSlot>(EMPTY_CONNECTION_SLOT)
   const [isLoading, setIsLoading] = useState(false)
 
   // Load defaults for the currently selected preset. Defaults are stored per
@@ -84,17 +88,34 @@ export function usePresetProfiles(
     return () => { cancelled = true }
   }, [activeCharacterId])
 
+  // Load connection profile binding when active connection changes.
+  useEffect(() => {
+    if (!activeProfileId) {
+      setConnectionSlot(EMPTY_CONNECTION_SLOT)
+      return
+    }
+    const target = activeProfileId
+    let cancelled = false
+    setConnectionSlot((prev) => (prev.for === target ? prev : EMPTY_CONNECTION_SLOT))
+    presetProfilesApi.getConnectionBinding(target)
+      .then((b) => { if (!cancelled) setConnectionSlot({ for: target, binding: b }) })
+      .catch(() => { if (!cancelled) setConnectionSlot({ for: target, binding: null }) })
+    return () => { cancelled = true }
+  }, [activeProfileId])
+
   // A binding is only considered "for" the current context if its `for` id
   // still matches the store's active id. Anything else is stale.
   const chatBinding = chatSlot.for === activeChatId ? chatSlot.binding : null
   const characterBinding = charSlot.for === activeCharacterId ? charSlot.binding : null
+  const connectionBinding = connectionSlot.for === activeProfileId ? connectionSlot.binding : null
 
   // isResolved: true when every applicable fetch has landed for the current
   // context. The LoomBuilder apply-effect waits on this so it doesn't overwrite
   // blocks with a stale binding mid-transition.
   const chatResolved = !activeChatId || chatSlot.for === activeChatId
   const characterResolved = !activeCharacterId || charSlot.for === activeCharacterId
-  const isResolved = chatResolved && characterResolved
+  const connectionResolved = !activeProfileId || connectionSlot.for === activeProfileId
+  const isResolved = chatResolved && characterResolved && connectionResolved
 
   const hasDefaults = defaults !== null
 
@@ -188,6 +209,36 @@ export function usePresetProfiles(
     }
   }, [activeCharacterId, isGroupChat, addToast])
 
+  // Bind to current connection profile
+  const bindToConnection = useCallback(async () => {
+    if (!presetId || !blocks || !activeProfileId) return
+    setIsLoading(true)
+    try {
+      const binding = await presetProfilesApi.setConnectionBinding(activeProfileId, presetId, snapshotBlockStates(blocks))
+      setConnectionSlot({ for: activeProfileId, binding })
+      addToast({ type: 'success', message: 'Preset and block states bound to this connection profile' })
+    } catch {
+      addToast({ type: 'error', message: 'Failed to bind to connection profile' })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [presetId, blocks, activeProfileId, addToast])
+
+  // Unbind from current connection profile
+  const unbindConnection = useCallback(async () => {
+    if (!activeProfileId) return
+    setIsLoading(true)
+    try {
+      await presetProfilesApi.deleteConnectionBinding(activeProfileId)
+      setConnectionSlot({ for: activeProfileId, binding: null })
+      addToast({ type: 'info', message: 'Connection profile binding removed' })
+    } catch {
+      addToast({ type: 'error', message: 'Failed to remove connection profile binding' })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [activeProfileId, addToast])
+
   // Character bindings are skipped in group chats (per-member bindings are
   // ambiguous — backend resolveProfile applies the same gate).
   const characterBindingEnabled = !isGroupChat
@@ -195,10 +246,11 @@ export function usePresetProfiles(
   const resolvedPresetId = useMemo(() => {
     if (chatBinding) return chatBinding.preset_id
     if (characterBindingEnabled && characterBinding) return characterBinding.preset_id
+    if (connectionBinding) return connectionBinding.preset_id
     return presetId
-  }, [chatBinding, characterBinding, characterBindingEnabled, presetId])
+  }, [chatBinding, characterBinding, characterBindingEnabled, connectionBinding, presetId])
 
-  // Resolved active binding (chat > character > defaults > none)
+  // Resolved active binding (chat > character > connection > defaults > none)
   const activeBinding = useMemo(() => {
     if (chatBinding) {
       if (chatBinding.linked_to_defaults) {
@@ -207,20 +259,23 @@ export function usePresetProfiles(
       return chatBinding
     }
     if (characterBindingEnabled && characterBinding) return characterBinding
+    if (connectionBinding) return connectionBinding
     if (defaults) return defaults
     return null
-  }, [chatBinding, characterBinding, defaults, characterBindingEnabled])
+  }, [chatBinding, characterBinding, connectionBinding, defaults, characterBindingEnabled])
 
   // Determine active source
-  const activeSource: 'chat' | 'character' | 'defaults' | 'none' = (() => {
+  const activeSource: 'chat' | 'character' | 'connection' | 'defaults' | 'none' = (() => {
     if (chatBinding) return 'chat'
     if (characterBindingEnabled && characterBinding) return 'character'
+    if (connectionBinding) return 'connection'
     if (defaults) return 'defaults'
     return 'none'
   })()
 
   const hasChatBinding = chatBinding !== null
   const hasCharacterBinding = characterBindingEnabled && characterBinding !== null
+  const hasConnectionBinding = connectionBinding !== null
 
   const selectResolvedPreset = useCallback(() => {
     if (!resolvedPresetId || resolvedPresetId === presetId) return
@@ -232,6 +287,7 @@ export function usePresetProfiles(
     hasDefaults,
     hasChatBinding,
     hasCharacterBinding,
+    hasConnectionBinding,
     characterBindingEnabled,
     activeSource,
     activeBinding,
@@ -241,11 +297,13 @@ export function usePresetProfiles(
     defaults,
     chatBinding,
     characterBinding,
+    connectionBinding,
     // Context the binding was resolved for — consumers include this in effect
     // deps so the apply-pass re-runs whenever the user switches chat/character,
     // even when the binding itself happens to be structurally unchanged.
     activeChatId,
     activeCharacterId,
+    activeProfileId,
 
     // Actions
     captureDefaults,
@@ -255,5 +313,7 @@ export function usePresetProfiles(
     unbindChat,
     bindToCharacter,
     unbindCharacter,
+    bindToConnection,
+    unbindConnection,
   }
 }

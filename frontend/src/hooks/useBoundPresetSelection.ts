@@ -7,6 +7,7 @@ export function useBoundPresetSelection() {
   const settingsLoaded = useStore((s) => s.settingsLoaded)
   const activeChatId = useStore((s) => s.activeChatId)
   const activeCharacterId = useStore((s) => s.activeCharacterId)
+  const activeProfileId = useStore((s) => s.activeProfileId)
   const setActiveLoomPreset = useStore((s) => s.setActiveLoomPreset)
 
   useEffect(() => {
@@ -15,10 +16,10 @@ export function useBoundPresetSelection() {
     let cancelled = false
     const fallbackPresetId = useStore.getState().activeLoomPresetId
 
-    presetProfilesApi.resolve(activeChatId, fallbackPresetId)
+    presetProfilesApi.resolve(activeChatId, fallbackPresetId, activeProfileId)
       .then((resolved) => {
         if (cancelled) return
-        if (resolved.source !== 'chat' && resolved.source !== 'character') return
+        if (resolved.source !== 'chat' && resolved.source !== 'character' && resolved.source !== 'connection') return
         if (!resolved.preset_id) return
         if (useStore.getState().activeChatId !== activeChatId) return
         if (useStore.getState().activeLoomPresetId === resolved.preset_id) return
@@ -27,5 +28,5 @@ export function useBoundPresetSelection() {
       .catch(() => {})
 
     return () => { cancelled = true }
-  }, [activeChatId, activeCharacterId, isAuthenticated, settingsLoaded, setActiveLoomPreset])
+  }, [activeChatId, activeCharacterId, activeProfileId, isAuthenticated, settingsLoaded, setActiveLoomPreset])
 }

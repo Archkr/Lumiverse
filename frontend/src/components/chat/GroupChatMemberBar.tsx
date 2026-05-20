@@ -52,7 +52,7 @@ export default function GroupChatMemberBar({ chatId }: GroupChatMemberBarProps) 
           connection_id: activeProfileId || undefined,
           persona_id: activePersonaId || undefined,
           preset_id: presetId,
-          force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId),
+          force_preset_id: shouldForceLoomRuntimePreset(presetId, chatId, activeCharacterId, activeProfileId),
           generation_type: 'normal',
         })
         startStreaming(res.generationId)
