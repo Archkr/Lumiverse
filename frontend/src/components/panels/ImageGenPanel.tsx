@@ -686,14 +686,14 @@ export default function ImageGenPanel() {
           </FormField>
 
           <EditorSection title="Prompt Mode" Icon={IconBrush}>
-            <FormField label="Mode" hint="Scene uses the built-in scene parser. Custom sends your prompt directly. Parsed custom rewrites your prompt with chat context first.">
+            <FormField label="Mode" hint="Scene analyzes chat into a scene prompt. Custom sends your prompt directly. Chat-aware custom uses your instructions to rewrite the current chat context into the final image prompt.">
               <Select
                 value={imageGeneration.promptMode || 'scene'}
                 onChange={(value) => updateTop({ promptMode: value })}
                 options={[
                   { value: 'scene', label: 'Scene tool' },
                   { value: 'custom', label: 'Custom prompt' },
-                  { value: 'parsed_custom', label: 'Parsed custom prompt' },
+                  { value: 'parsed_custom', label: 'Chat-aware custom' },
                 ]}
               />
             </FormField>
@@ -720,12 +720,12 @@ export default function ImageGenPanel() {
                   />
                 </FormField>
 
-                <FormField label="Prompt" hint={imageGeneration.promptMode === 'parsed_custom' ? 'Instructions for the parser LLM to turn chat context into the final image prompt.' : 'Sent directly to the image provider.'}>
+                <FormField label={imageGeneration.promptMode === 'parsed_custom' ? 'Parser Instructions' : 'Prompt'} hint={imageGeneration.promptMode === 'parsed_custom' ? 'Instructions for how the parser LLM should turn chat context into the final image prompt. This is not sent directly to the image provider.' : 'Sent directly to the image provider.'}>
                   <TextArea
                     rows={5}
                     value={imageGeneration.customPrompt || ''}
                     onChange={(value) => updateTop({ customPrompt: value })}
-                    placeholder="Describe the image you want to generate..."
+                    placeholder={imageGeneration.promptMode === 'parsed_custom' ? 'Example: Focus on the current pose, expressions, clothing, lighting, and room details. Use concise image-generation tags.' : 'Describe the image you want to generate...'}
                   />
                 </FormField>
 
@@ -998,7 +998,7 @@ export default function ImageGenPanel() {
           <input ref={refInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onRefFiles} />
 
           <EditorSection title="Scene Settings" Icon={IconBrush}>
-            <ToggleRow checked={!!imageGeneration.includeCharacters} onChange={(checked) => updateTop({ includeCharacters: checked })} label="Include Characters" />
+            <ToggleRow checked={!!imageGeneration.includeCharacters} onChange={(checked) => updateTop({ includeCharacters: checked })} label="Include Characters and Persona" hint="Adds character and active persona descriptions to scene parsing, and asks the parser to include visible subjects when supported by the chat context." />
             <ToggleRow checked={imageGeneration.autoGenerate !== false} onChange={(checked) => updateTop({ autoGenerate: checked })} label="Auto-Generate On Reply" />
             <ToggleRow checked={!!imageGeneration.forceGeneration} onChange={(checked) => updateTop({ forceGeneration: checked })} label="Ignore Scene Change Detection" />
             <ToggleRow

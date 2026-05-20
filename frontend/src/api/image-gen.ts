@@ -28,6 +28,17 @@ export interface SceneData {
   focal_detail: string
   palette_override?: string
   scene_changed: boolean
+  character_names?: string
+  character_appearances?: Array<{
+    name?: string
+    role?: string
+    appearance?: string
+    tags?: string
+  }>
+  composition_subjects?: string
+  composition_shot?: string
+  composition_camera?: string
+  composition_rating?: string[]
 }
 
 export interface ImageGenResponse {

@@ -98,6 +98,17 @@ export interface SceneData {
   focal_detail: string;
   palette_override?: string;
   scene_changed: boolean;
+  character_names?: string;
+  character_appearances?: Array<{
+    name?: string;
+    role?: string;
+    appearance?: string;
+    tags?: string;
+  }>;
+  composition_subjects?: string;
+  composition_shot?: string;
+  composition_camera?: string;
+  composition_rating?: string[];
 }
 
 export interface ImageGenResult {
@@ -144,6 +155,22 @@ export interface GenerateImageOptions {
 const SCENE_CACHE_MAX = 200;
 const sceneCache = new Map<string, SceneData>();
 const SCENE_FIELDS: Array<keyof SceneData> = ["environment", "time_of_day", "weather", "mood", "focal_detail"];
+
+const CUSTOM_PROMPT_PARSER_SYSTEM =
+  "You are a visual scene analyst and image-prompt writer. Read the current roleplay chat context and rewrite it into the final image generation prompt. Preserve the current scene, visible subjects, actions, composition, lighting, and mood. Follow the user's parser instructions, but do not treat those instructions as the final prompt unless they explicitly say so. Return either plain prompt text or JSON with keys prompt and negative_prompt. Do not include markdown fences unless returning JSON.";
+
+const CHARACTER_AWARE_SCENE_INSTRUCTIONS = `Character-aware mode is enabled because the user selected Include Characters.
+Override any earlier environment-only instruction: include visible characters and the user persona when the context supports it.
+
+In addition to the base scene keys, include these optional JSON keys:
+- character_names: comma-separated names of visible subjects.
+- character_appearances: array of objects with name, role, appearance, and tags. Use concise visual image-generation tags in tags.
+- composition_subjects: the main subject grouping or pose/action relationship.
+- composition_shot: shot framing such as close-up, waist-up, full-body, or wide shot.
+- composition_camera: camera angle or lens direction.
+- composition_rating: array of concise composition tags.
+
+Do not invent unsupported character details. Use character/persona descriptions and the latest chat actions.`;
 
 // Tracks in-flight image generations keyed by `${userId}:${chatId}` so a new
 // request for the same chat can abort an existing one mid-flight.
@@ -566,13 +593,12 @@ async function parseCustomPrompt(
     messages: [
       {
         role: "system",
-        content:
-          "You rewrite roleplay chat context into an image generation prompt. Return either plain prompt text or JSON with keys prompt and negative_prompt. Do not include markdown fences unless returning JSON.",
+        content: CUSTOM_PROMPT_PARSER_SYSTEM,
       },
-      ...buildContextMessages(userId, chatId),
+      ...buildContextMessages(userId, chatId, settings.includeCharacters),
       {
         role: "user",
-        content: `User image prompt instructions:\n${input.prompt}\n\nReturn the final image prompt now.`,
+        content: `Parser instructions from the user:\n${input.prompt}\n\nReturn the final image prompt now.`,
       },
     ],
     parameters: parser.parameters,
@@ -643,9 +669,9 @@ async function analyzeScene(userId: string, chatId: string, settings: ImageGenSe
     messages: [
       {
         role: "system",
-        content: `${tool.prompt}\n\nYou must return ONLY valid JSON with the exact schema keys and no markdown fences.`,
+        content: `${tool.prompt}${settings.includeCharacters ? `\n\n${CHARACTER_AWARE_SCENE_INSTRUCTIONS}` : ""}\n\nYou must return ONLY valid JSON with the requested schema keys and no markdown fences.`,
       },
-      ...buildContextMessages(userId, chatId),
+      ...buildContextMessages(userId, chatId, settings.includeCharacters),
       { role: "user", content: "Return scene JSON now." },
     ],
     parameters: {
@@ -657,7 +683,7 @@ async function analyzeScene(userId: string, chatId: string, settings: ImageGenSe
   return parseSceneJson(response.content || "");
 }
 
-function buildContextMessages(userId: string, chatId: string): LlmMessage[] {
+function buildContextMessages(userId: string, chatId: string, includeCharacters = false): LlmMessage[] {
   const msgs: LlmMessage[] = [];
   const chat = chatsSvc.getChat(userId, chatId);
   if (chat) {
@@ -671,6 +697,21 @@ function buildContextMessages(userId: string, chatId: string): LlmMessage[] {
         .filter(Boolean)
         .join("\n");
       if (charInfo) msgs.push({ role: "system", content: `## Character Information\n${charInfo}` });
+    }
+  }
+  if (includeCharacters) {
+    const persona = personasSvc.resolvePersonaOrDefault(userId);
+    if (persona) {
+      const personaInfo = [
+        persona.name && `Name: ${persona.name}`,
+        persona.title && `Title: ${persona.title}`,
+        persona.description && `Description: ${persona.description}`,
+        (persona.subjective_pronoun || persona.objective_pronoun || persona.possessive_pronoun) &&
+          `Pronouns: ${[persona.subjective_pronoun, persona.objective_pronoun, persona.possessive_pronoun].filter(Boolean).join("/")}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      if (personaInfo) msgs.push({ role: "system", content: `## User Persona\n${personaInfo}` });
     }
   }
   for (const m of chatsSvc.getMessages(userId, chatId).slice(-24)) {
@@ -692,7 +733,7 @@ function parseSceneJson(input: string): SceneData {
     if (start >= 0 && end > start) parsed = JSON.parse(candidate.slice(start, end + 1));
     else throw new Error("Could not parse scene JSON from council response");
   }
-  return {
+  const scene: SceneData = {
     environment: String(parsed.environment || "A neutral establishing shot"),
     time_of_day: String(parsed.time_of_day || "night"),
     weather: String(parsed.weather || "clear"),
@@ -701,6 +742,22 @@ function parseSceneJson(input: string): SceneData {
     palette_override: parsed.palette_override ? String(parsed.palette_override) : undefined,
     scene_changed: Boolean(parsed.scene_changed),
   };
+  if (parsed.character_names) scene.character_names = String(parsed.character_names);
+  if (Array.isArray(parsed.character_appearances)) {
+    scene.character_appearances = parsed.character_appearances
+      .filter((entry: any) => entry && typeof entry === "object")
+      .map((entry: any) => ({
+        name: entry.name ? String(entry.name) : undefined,
+        role: entry.role ? String(entry.role) : undefined,
+        appearance: entry.appearance ? String(entry.appearance) : undefined,
+        tags: entry.tags ? String(entry.tags) : undefined,
+      }));
+  }
+  if (parsed.composition_subjects) scene.composition_subjects = String(parsed.composition_subjects);
+  if (parsed.composition_shot) scene.composition_shot = String(parsed.composition_shot);
+  if (parsed.composition_camera) scene.composition_camera = String(parsed.composition_camera);
+  if (Array.isArray(parsed.composition_rating)) scene.composition_rating = parsed.composition_rating.map((v: any) => String(v));
+  return scene;
 }
 
 // --- Prompt Building ---
@@ -760,7 +817,19 @@ function buildImagePrompt(
   if (scene.mood) prompt += ` Mood: ${scene.mood}.`;
   if (scene.focal_detail) prompt += ` Focus: ${scene.focal_detail}.`;
   if (scene.palette_override) prompt += ` Colors: ${scene.palette_override}.`;
-  if (!includeCharacters) {
+  if (includeCharacters) {
+    if (scene.character_names) prompt += ` Characters: ${scene.character_names}.`;
+    if (Array.isArray(scene.character_appearances) && scene.character_appearances.length > 0) {
+      const appearances = scene.character_appearances
+        .map((c) => [c.name, c.role, c.appearance, c.tags].filter(Boolean).join(" - "))
+        .filter(Boolean)
+        .join("; ");
+      if (appearances) prompt += ` Character details: ${appearances}.`;
+    }
+    if (scene.composition_subjects) prompt += ` Composition: ${scene.composition_subjects}.`;
+    if (scene.composition_shot) prompt += ` Framing: ${scene.composition_shot}.`;
+    if (scene.composition_camera) prompt += ` Camera: ${scene.composition_camera}.`;
+  } else {
     prompt +=
       "\nThis is a background/environment image ONLY. Do NOT include any people, characters, or humanoid figures in the image.";
   }
