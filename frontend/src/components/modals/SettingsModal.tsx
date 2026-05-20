@@ -2647,7 +2647,7 @@ function AdvancedSettings() {
                   <label className={styles.fieldLabel}>Exclusion Window</label>
                   <NumericInput
                     className={styles.numberInput}
-                    min={5} max={100}
+                    min={5} max={50}
                     value={cfg.exclusionWindow}
                     disabled={cfg.quickMode !== null}
                     integer

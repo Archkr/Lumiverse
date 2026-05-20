@@ -395,7 +395,11 @@ async function computeFreshMemoryResult(
   }
 
   const effectiveTopK = perChatOverrides?.retrievalTopK ?? settings.retrievalTopK;
-  const effectiveExclusionWindow = perChatOverrides?.exclusionWindow ?? settings.exclusionWindow;
+  // Per-chat overrides aren't run through normalizeChatMemorySettings, so a
+  // legacy or hand-crafted override could exceed the clamp. Cap defensively
+  // — extreme values stress chunk-retrieval payloads without improving recall.
+  const rawExclusionWindow = perChatOverrides?.exclusionWindow ?? settings.exclusionWindow;
+  const effectiveExclusionWindow = Math.max(5, Math.min(50, rawExclusionWindow));
   const effectiveThreshold = settings.similarityThreshold;
 
   if (chunksPending > 0) {
@@ -450,6 +454,14 @@ async function computeFreshMemoryResult(
       effectiveTopK,
       queryText,
       cfg.hybrid_weight_mode,
+      undefined,
+      undefined,
+      // Skip the vector column in chat-memory retrievals. MMR degrades to
+      // distance-ordered top-K — diversity is nice-to-have, but pulling 4 MB
+      // of Float32 vectors per query through Lance/Arrow has been Bun-fragile
+      // in 1.3.12+ and the exclusion filter above already prevents most
+      // duplicate-content hits.
+      { skipVectorFetch: true },
     );
 
     const filteredHits = effectiveThreshold > 0

@@ -179,7 +179,7 @@ export interface ChatMemorySettings {
   chunkOverlapTokens: number;     // Default 120. Range: 0–500
 
   // --- Exclusion ---
-  exclusionWindow: number;        // Default 20. Range: 5–100. Recent messages skipped during search
+  exclusionWindow: number;        // Default 20. Range: 5–50. Recent messages skipped during search
 
   // --- Retrieval ---
   queryContextSize: number;       // Default 6. Range: 1–64. Messages used to build query vector
@@ -242,7 +242,7 @@ export function normalizeChatMemorySettings(input: any): ChatMemorySettings {
     chunkTargetTokens: clampInt(input?.chunkTargetTokens, 200, 2000, d.chunkTargetTokens),
     chunkMaxTokens: clampInt(input?.chunkMaxTokens, 400, 4000, d.chunkMaxTokens),
     chunkOverlapTokens: clampInt(input?.chunkOverlapTokens, 0, 500, d.chunkOverlapTokens),
-    exclusionWindow: clampInt(input?.exclusionWindow, 5, 100, d.exclusionWindow),
+    exclusionWindow: clampInt(input?.exclusionWindow, 5, 50, d.exclusionWindow),
     queryContextSize: clampInt(input?.queryContextSize, 1, 64, d.queryContextSize),
     retrievalTopK: clampInt(input?.retrievalTopK, 1, Infinity, d.retrievalTopK),
     similarityThreshold: clampFloat(input?.similarityThreshold, 0, 2, d.similarityThreshold),
@@ -3572,15 +3572,30 @@ export async function searchChatChunks(
   hybridWeightMode?: "keyword_first" | "balanced" | "vector_first",
   allowedChunkIds?: Set<string>,
   signal?: AbortSignal,
+  options?: { skipVectorFetch?: boolean },
 ): Promise<Array<{ chunk_id: string; score: number; content: string; metadata: any }>> {
   if (signal?.aborted) return [];
   const table = await getTableIfExists(EMBEDDINGS_TABLE);
   if (!table) return [];
 
+  const skipVectorFetch = options?.skipVectorFetch === true;
+
+  // Resolve excluded message IDs to chunk IDs so LanceDB can filter at the
+  // storage layer instead of us over-fetching and post-discarding. Massive
+  // payload reduction when the exclusion set actually overlaps cached chunks.
+  const excludedChunkIds = excludeIds.size > 0
+    ? resolveExcludedChunkIds(chatId, excludeIds)
+    : null;
+
   const baseFilter = `user_id = ${sqlValue(userId)} AND source_type = 'chat_chunk' AND owner_id = ${sqlValue(chatId)}`;
-  const sourceFilter = buildAllowedChunkFilter(allowedChunkIds);
-  const filterWasScoped = sourceFilter != null;
-  const filter = sourceFilter ? `${baseFilter} AND ${sourceFilter}` : baseFilter;
+  const allowedFilter = buildAllowedChunkFilter(allowedChunkIds);
+  const excludedFilter = buildExcludedChunkFilter(excludedChunkIds);
+  const filterWasScoped = allowedFilter != null || excludedFilter != null;
+
+  const filterParts = [baseFilter];
+  if (allowedFilter) filterParts.push(allowedFilter);
+  if (excludedFilter) filterParts.push(excludedFilter);
+  const filter = filterParts.join(" AND ");
 
   // When source filter was dropped (candidate set > MAX_LANCE_SOURCE_FILTER_IDS),
   // the query searches the entire chat partition and results are client-side filtered.
@@ -3589,6 +3604,18 @@ export async function searchChatChunks(
   const fetchLimit = filterWasScoped
     ? Math.max(1, Math.min(limit + 50, 150))
     : Math.max(1, Math.min(limit * 4, 300));
+
+  // Vector column is only needed for MMR diversity selection downstream. When
+  // the caller opts out, we skip the column entirely — that's the bulk of the
+  // per-row payload on high-dim embeddings (3072 floats × 4 bytes = 12 KB
+  // each) and Float32Array marshaling through Lance/Arrow has been a tender
+  // spot in Bun 1.3.12+.
+  const vectorOnlyColumns = skipVectorFetch
+    ? ["source_id", "content", "_distance", "metadata_json"]
+    : ["source_id", "content", "_distance", "metadata_json", "vector"];
+  const hybridColumns = skipVectorFetch
+    ? ["source_id", "content", "_distance", "_relevance_score", "metadata_json"]
+    : ["source_id", "content", "_distance", "_relevance_score", "metadata_json", "vector"];
 
   // Try hybrid search when query text is available
   let rows: any[];
@@ -3607,7 +3634,7 @@ export async function searchChatChunks(
         .fullTextSearch(queryText.trim())
         .where(filter)
         .rerank(reranker)
-        .select(["source_id", "content", "_distance", "_relevance_score", "metadata_json", "vector"])
+        .select(hybridColumns)
         .limit(fetchLimit);
       rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
     } catch {
@@ -3617,7 +3644,7 @@ export async function searchChatChunks(
         .query()
         .nearestTo(vector)
         .where(filter)
-        .select(["source_id", "content", "_distance", "metadata_json", "vector"])
+        .select(vectorOnlyColumns)
         .limit(fetchLimit);
       rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
     }
@@ -3626,7 +3653,7 @@ export async function searchChatChunks(
       .query()
       .nearestTo(vector)
       .where(filter)
-      .select(["source_id", "content", "_distance", "metadata_json", "vector"])
+      .select(vectorOnlyColumns)
       .limit(fetchLimit);
     rows = await raceWithSignal(applyRefineFactor(q).toArray() as Promise<any[]>, signal);
   }
@@ -3693,7 +3720,7 @@ export async function searchChatChunks(
     candidates.push({
       chunkId,
       score: typeof row._distance === "number" ? row._distance : 0,
-      content: String(row.content || ""),
+      content: clipOversizedChunkContent(String(row.content || ""), chunkId),
       metadata: meta,
       rowVector,
     });
@@ -3717,6 +3744,53 @@ function buildAllowedChunkFilter(allowedChunkIds?: Set<string>): string | null {
   if (allowedChunkIds.size > MAX_LANCE_SOURCE_FILTER_IDS) return null;
   const values = [...allowedChunkIds].map((id) => sqlValue(id)).join(", ");
   return `source_id IN (${values})`;
+}
+
+function buildExcludedChunkFilter(excludedChunkIds: Set<string> | null): string | null {
+  if (!excludedChunkIds || excludedChunkIds.size === 0) return null;
+  if (excludedChunkIds.size > MAX_LANCE_SOURCE_FILTER_IDS) return null;
+  const values = [...excludedChunkIds].map((id) => sqlValue(id)).join(", ");
+  return `source_id NOT IN (${values})`;
+}
+
+/** Resolve a set of excluded message IDs into the chunks that hold them.
+ *  Returns null when nothing maps (so the caller can skip building a filter). */
+function resolveExcludedChunkIds(chatId: string, excludedMessageIds: Set<string>): Set<string> | null {
+  if (excludedMessageIds.size === 0) return null;
+  const rows = getDb()
+    .query("SELECT id, message_ids FROM chat_chunks WHERE chat_id = ?")
+    .all(chatId) as Array<{ id: string; message_ids: string | null }>;
+  const chunkIds = new Set<string>();
+  for (const row of rows) {
+    if (!row.message_ids) continue;
+    let parsed: string[];
+    try { parsed = JSON.parse(row.message_ids); } catch { continue; }
+    for (const mid of parsed) {
+      if (excludedMessageIds.has(mid)) {
+        chunkIds.add(row.id);
+        break;
+      }
+    }
+  }
+  return chunkIds.size > 0 ? chunkIds : null;
+}
+
+/**
+ * Sanity ceiling for a single chunk's content after retrieval. A well-formed
+ * chunk respects `chunkMaxTokens` (default 1600 ≈ 6.4 KB); anything over the
+ * cap indicates a single oversized message overflowed the chunk and is
+ * sitting in the candidate list with a payload large enough to stress
+ * downstream string handling. Truncates with a marker so the prompt builder
+ * gets a usable fragment instead of nothing.
+ */
+const MAX_CHUNK_CONTENT_CHARS = 65536;
+function clipOversizedChunkContent(content: string, chunkId: string): string {
+  if (content.length <= MAX_CHUNK_CONTENT_CHARS) return content;
+  console.warn(
+    `[embeddings] Clipping oversized chunk content (chat_chunks.id=${chunkId}, ${content.length} chars). `
+      + `Consider lowering chunkMaxTokens or splitting the underlying message.`,
+  );
+  return `${content.slice(0, MAX_CHUNK_CONTENT_CHARS)}\n…[content clipped]`;
 }
 
 /**
