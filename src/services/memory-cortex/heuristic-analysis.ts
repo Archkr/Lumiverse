@@ -38,6 +38,7 @@ function inflateKnownEntities(input: HeuristicAnalysisInput): MemoryEntity[] {
     lastMentionTimestamp: null,
     recentMentionCount: 0,
     confidence: "confirmed",
+    userEditedAt: null,
   }));
 }
 

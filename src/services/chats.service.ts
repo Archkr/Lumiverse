@@ -1361,7 +1361,7 @@ export function updateMessage(userId: string, id: string, input: UpdateMessageIn
       memoryCortex.invalidateLinkedCortexCache(updated.chat_id);
     } catch { /* ignore if not loaded */ }
 
-    rebuildChatChunks(userId, updated.chat_id).catch(err => {
+    rebuildChatChunksFromMessages(userId, updated.chat_id, [updated.id]).catch(err => {
       console.warn("[chats] Failed to rebuild chunks after message edit:", err);
     });
   }
@@ -1413,8 +1413,10 @@ export function bulkSetHidden(userId: string, chatId: string, messageIds: string
     memoryCortex.invalidateLinkedCortexCache(chatId);
   } catch { /* ignore if not loaded */ }
 
-  // Rebuild chunks once after all updates
-  rebuildChatChunks(userId, chatId).catch(err => {
+  // Rebuild chunks once after all updates. Surgical from the earliest affected
+  // chunk; if any of the flipped messages were previously hidden (not in any
+  // chunk), the surgical path falls back to a full rebuild automatically.
+  rebuildChatChunksFromMessages(userId, chatId, updated.map(m => m.id)).catch(err => {
     console.warn("[chats] Failed to rebuild chunks after bulk hide:", err);
   });
 
@@ -1459,7 +1461,7 @@ export function bulkDeleteMessages(userId: string, chatId: string, messageIds: s
       memoryCortex.invalidateLinkedCortexCache(chatId);
     } catch { /* ignore if not loaded */ }
 
-    rebuildChatChunks(userId, chatId).catch(err => {
+    rebuildChatChunksFromMessages(userId, chatId, deletedIds).catch(err => {
       console.warn("[chats] Failed to rebuild chunks after bulk delete:", err);
     });
   }
@@ -1480,7 +1482,7 @@ export function deleteMessage(userId: string, id: string): boolean {
       memoryCortex.invalidateLinkedCortexCache(msg.chat_id);
     } catch { /* ignore if not loaded */ }
 
-    rebuildChatChunks(userId, msg.chat_id).catch(err => {
+    rebuildChatChunksFromMessages(userId, msg.chat_id, [id]).catch(err => {
       console.warn("[chats] Failed to rebuild chunks after message delete:", err);
     });
   }
@@ -2444,6 +2446,57 @@ export async function ensureChatMemoryFresh(userId: string, chatId: string): Pro
 }
 
 /**
+ * Find the earliest chunk that holds any of the given message IDs. Used to
+ * scope a surgical rebuild: chunks before this one stay intact (keeping
+ * their cortex_warmup_signature, salience, embeddings), chunks from this
+ * one onward are dropped and re-chunked.
+ *
+ * Returns null when none of the messages map to a known chunk — typically
+ * because they were hidden before chunks were built or the chat has no
+ * chunks yet. Callers should fall back to a full rebuild in that case.
+ */
+function findAnchorChunkForMessages(chatId: string, messageIds: Iterable<string>): string | null {
+  const idSet = new Set(messageIds);
+  if (idSet.size === 0) return null;
+  const rows = getDb()
+    .query("SELECT id, message_ids FROM chat_chunks WHERE chat_id = ? ORDER BY created_at ASC")
+    .all(chatId) as Array<{ id: string; message_ids: string }>;
+  for (const row of rows) {
+    let parsed: string[];
+    try { parsed = JSON.parse(row.message_ids); } catch { continue; }
+    for (const mid of parsed) {
+      if (idSet.has(mid)) return row.id;
+    }
+  }
+  return null;
+}
+
+function snapshotSalienceForChunks(chatId: string, chunkIds: string[]): Map<string, SalienceSnapshotRow[]> {
+  if (chunkIds.length === 0) return new Map();
+  const placeholders = chunkIds.map(() => "?").join(",");
+  const rows = getDb().query(
+    `SELECT cc.content,
+            ms.score, ms.score_source, ms.emotional_tags, ms.status_changes,
+            ms.narrative_flags, ms.has_dialogue, ms.has_action,
+            ms.has_internal_thought, ms.word_count, ms.scored_at,
+            ms.scored_by, ms.created_at
+     FROM memory_salience ms
+     JOIN chat_chunks cc ON cc.id = ms.chunk_id
+     WHERE ms.chat_id = ? AND cc.id IN (${placeholders})
+     ORDER BY cc.created_at ASC`,
+  ).all(chatId, ...chunkIds) as Array<SalienceSnapshotRow & { content: string }>;
+
+  const byContent = new Map<string, SalienceSnapshotRow[]>();
+  for (const row of rows) {
+    const { content, ...salience } = row;
+    const bucket = byContent.get(content);
+    if (bucket) bucket.push(salience);
+    else byContent.set(content, [salience]);
+  }
+  return byContent;
+}
+
+/**
  * In-flight rebuild tracking per chat — prevents concurrent rebuilds from
  * racing each other (each deleting the previous one's chunks). When a
  * rebuild is already running for a chatId, subsequent calls wait for it
@@ -2488,6 +2541,52 @@ export async function rebuildChatChunks(userId: string, chatId: string): Promise
   }
 }
 
+/**
+ * Surgical rebuild scoped to chunks containing any of the given message IDs.
+ * Chunks BEFORE the earliest affected chunk are left intact (keeping their
+ * cortex_warmup_signature and salience), so a message edit no longer cascades
+ * into a full-chat cortex rebuild.
+ *
+ * Falls back to a full rebuild when:
+ *   - No chunk contains any of the affected message IDs (e.g., the message
+ *     was hidden, the chat has no chunks yet).
+ *   - A rebuild is already in flight (the follow-up runs as a full rebuild
+ *     because we can't know which scope covers the work that landed during
+ *     the wait).
+ */
+export async function rebuildChatChunksFromMessages(
+  userId: string,
+  chatId: string,
+  affectedMessageIds: Iterable<string>,
+): Promise<void> {
+  const anchorChunkId = findAnchorChunkForMessages(chatId, affectedMessageIds);
+  if (anchorChunkId === null) {
+    return rebuildChatChunks(userId, chatId);
+  }
+
+  const inflight = _rebuildInflight.get(chatId);
+  if (inflight) {
+    _rebuildPending.add(chatId);
+    await inflight;
+    if (!_rebuildPending.has(chatId)) return;
+    _rebuildPending.delete(chatId);
+    // Conservative follow-up: the in-flight rebuild may have already replaced
+    // the chunk graph, so the anchor we picked could be stale. A full rebuild
+    // is correct under any state.
+    return rebuildChatChunks(userId, chatId);
+  }
+
+  const promise = _rebuildChatChunksFromImpl(userId, chatId, anchorChunkId);
+  _rebuildInflight.set(chatId, promise);
+  try {
+    await promise;
+  } finally {
+    if (_rebuildInflight.get(chatId) === promise) {
+      _rebuildInflight.delete(chatId);
+    }
+  }
+}
+
 async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<void> {
   invalidateChatMemoryCache(chatId);
 
@@ -2518,6 +2617,30 @@ async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<v
     embeddingsSvc.loadChatMemorySettings(userId),
     cfg,
   );
+  await chunkAndPersistMessages(userId, chatId, messages, chatMemSettings, salienceByContent);
+
+  // Stamp the config hash so we can detect staleness later
+  stampChatMemoryHash(userId, chatId);
+  scheduleChatMemoryRefresh(userId, chatId, 9);
+
+  console.info(`[chats] Rebuilt chunks for chat ${chatId}`);
+}
+
+/**
+ * Shared chunking pipeline used by both full and surgical rebuilds. Sanitizes
+ * each message once, walks the standard boundary rules (role/token/scene/
+ * time/max), and persists each completed chunk with restored salience and
+ * a queued embedding job.
+ */
+async function chunkAndPersistMessages(
+  userId: string,
+  chatId: string,
+  messages: Message[],
+  chatMemSettings: embeddingsSvc.ChatMemorySettings,
+  salienceByContent: Map<string, SalienceSnapshotRow[]>,
+): Promise<void> {
+  if (messages.length === 0) return;
+
   const targetTokens = chatMemSettings.chunkTargetTokens;
   const reasoningStrip = getReasoningStripOptions(userId);
   const anyMessageHasMacros = messages.some((m) => contentHasMacroHints(m.content));
@@ -2591,10 +2714,75 @@ async function _rebuildChatChunksImpl(userId: string, chatId: string): Promise<v
     restoreSalienceForRebuiltChunk(chatId, chunk, salienceByContent);
     vectorizationQueue.queueChunkVectorization(userId, chatId, chunk.id, 3);
   }
+}
 
-  // Stamp the config hash so we can detect staleness later
+/**
+ * Surgical rebuild: keep every chunk up to (but not including) `fromChunkId`
+ * intact, drop the rest, and re-chunk messages that follow the last preserved
+ * chunk. Preserved chunks keep their cortex_warmup_signature so the Memory
+ * Cortex coverage check skips them on the next warmup. Falls back to a full
+ * rebuild whenever the inputs make a surgical pass unsafe (anchor missing,
+ * anchor is chunk 0, preserved chunk's tail message has been deleted).
+ */
+async function _rebuildChatChunksFromImpl(userId: string, chatId: string, fromChunkId: string): Promise<void> {
+  invalidateChatMemoryCache(chatId);
+
+  const cfg = await embeddingsSvc.getEmbeddingConfig(userId);
+  if (!cfg.enabled || !cfg.vectorize_chat_messages) {
+    // Without embeddings, chunks have no purpose — fall back to the full
+    // rebuild path which handles the disabled-embeddings drop cleanly.
+    return _rebuildChatChunksImpl(userId, chatId);
+  }
+
+  const allChunks = getDb()
+    .query("SELECT * FROM chat_chunks WHERE chat_id = ? ORDER BY created_at ASC")
+    .all(chatId) as Array<{ id: string; end_message_id: string; created_at: number }>;
+  const fromIdx = allChunks.findIndex((c) => c.id === fromChunkId);
+
+  if (fromIdx <= 0) {
+    // Anchor disappeared between selection and execution, or it was the very
+    // first chunk (preserving nothing → equivalent to full rebuild).
+    return _rebuildChatChunksImpl(userId, chatId);
+  }
+
+  const lastPreserved = allChunks[fromIdx - 1];
+  const discardedChunkIds = allChunks.slice(fromIdx).map((c) => c.id);
+
+  const allMessages = getMessages(userId, chatId).filter((m) => m.extra?.hidden !== true);
+  const preservedEndIdx = allMessages.findIndex((m) => m.id === lastPreserved.end_message_id);
+  if (preservedEndIdx < 0) {
+    // The last preserved chunk's tail message was deleted; the surgical
+    // boundary is no longer well-defined. Full rebuild is safer.
+    return _rebuildChatChunksImpl(userId, chatId);
+  }
+  const messagesToChunk = allMessages.slice(preservedEndIdx + 1);
+
+  const salienceByContent = snapshotSalienceForChunks(chatId, discardedChunkIds);
+
+  try {
+    await embeddingsSvc.deleteChatChunkEmbeddings(userId, chatId, discardedChunkIds);
+  } catch (err) {
+    console.warn(`[chats] Failed to delete LanceDB chat_chunk vectors for chat ${chatId}:`, err);
+  }
+
+  const placeholders = discardedChunkIds.map(() => "?").join(",");
+  getDb().query(`DELETE FROM chat_chunks WHERE id IN (${placeholders})`).run(...discardedChunkIds);
+
+  if (messagesToChunk.length === 0) {
+    stampChatMemoryHash(userId, chatId);
+    scheduleChatMemoryRefresh(userId, chatId, 9);
+    console.info(`[chats] Surgically rebuilt chat ${chatId}: dropped ${discardedChunkIds.length} trailing chunks (no replacement messages)`);
+    return;
+  }
+
+  const chatMemSettings = embeddingsSvc.resolveEffectiveChatMemorySettings(
+    embeddingsSvc.loadChatMemorySettings(userId),
+    cfg,
+  );
+  await chunkAndPersistMessages(userId, chatId, messagesToChunk, chatMemSettings, salienceByContent);
+
   stampChatMemoryHash(userId, chatId);
   scheduleChatMemoryRefresh(userId, chatId, 9);
 
-  console.info(`[chats] Rebuilt chunks for chat ${chatId}`);
+  console.info(`[chats] Surgically rebuilt chat ${chatId}: ${discardedChunkIds.length} chunks → re-chunked ${messagesToChunk.length} messages (${fromIdx} chunks preserved)`);
 }

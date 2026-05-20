@@ -1104,8 +1104,8 @@ app.put("/chats/:chatId/entities/:entityId", async (c) => {
 
   if (updates.length === 0) return c.json({ error: "No fields to update" }, 400);
 
-  updates.push("updated_at = ?");
-  params.push(now, entityId, chatId);
+  updates.push("updated_at = ?", "user_edited_at = ?");
+  params.push(now, now, entityId, chatId);
 
   // Scope WHERE by chat_id as defense-in-depth: even if a global entity ID leaks,
   // the chat-ownership gate above plus this filter prevents cross-chat writes.
@@ -1177,11 +1177,12 @@ app.post("/chats/:chatId/entities/merge", async (c) => {
         aliases = ?, facts = ?,
         mention_count = mention_count + ?,
         salience_avg = MAX(salience_avg, ?),
-        updated_at = ?
+        updated_at = ?,
+        user_edited_at = ?
        WHERE id = ?`,
     ).run(
       JSON.stringify(targetAliases), JSON.stringify(targetFacts.slice(-20)),
-      source.mentionCount, source.salienceAvg, now, targetId,
+      source.mentionCount, source.salienceAvg, now, now, targetId,
     );
 
     // Re-point all source mentions to target

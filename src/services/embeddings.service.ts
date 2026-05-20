@@ -3374,10 +3374,19 @@ export async function forceResetLanceDB(): Promise<{ deleted: boolean; path: str
 
 // --- Chat Vectorization ---
 
-export async function deleteChatChunkEmbeddings(userId: string, chatId: string, chunkId?: string): Promise<void> {
+export async function deleteChatChunkEmbeddings(
+  userId: string,
+  chatId: string,
+  chunkIds?: string | string[],
+): Promise<void> {
+  const idList = chunkIds === undefined
+    ? null
+    : (Array.isArray(chunkIds) ? chunkIds : [chunkIds]);
+  if (idList && idList.length === 0) return;
+
   let filter = `user_id = ${sqlValue(userId)} AND source_type = 'chat_chunk' AND owner_id = ${sqlValue(chatId)}`;
-  if (chunkId) {
-    filter += ` AND source_id = ${sqlValue(chunkId)}`;
+  if (idList) {
+    filter += ` AND source_id IN (${idList.map((id) => sqlValue(id)).join(", ")})`;
   }
   await withWriteLock(async () => {
     const table = await getTableIfExists(EMBEDDINGS_TABLE, true);

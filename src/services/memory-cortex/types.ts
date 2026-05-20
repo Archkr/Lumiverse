@@ -58,6 +58,7 @@ export interface MemoryEntityRow {
   last_mention_timestamp: number | null;
   recent_mention_count: number;
   confidence: string; // EntityConfidence
+  user_edited_at: number | null;
 }
 
 /** Salience breakdown — decomposed salience inputs for transparent scoring */
@@ -96,6 +97,7 @@ export interface MemoryEntity {
   lastMentionTimestamp: number | null;
   recentMentionCount: number;
   confidence: EntityConfidence;
+  userEditedAt: number | null;
 }
 
 /** SQLite row shape for memory_mentions */

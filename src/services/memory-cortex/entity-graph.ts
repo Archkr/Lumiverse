@@ -57,6 +57,7 @@ function rowToEntity(row: MemoryEntityRow): MemoryEntity {
     lastMentionTimestamp: row.last_mention_timestamp ?? null,
     recentMentionCount: row.recent_mention_count ?? 0,
     confidence: (row.confidence ?? "confirmed") as EntityConfidence,
+    userEditedAt: row.user_edited_at ?? null,
   };
 }
 
@@ -658,6 +659,21 @@ export function upsertEntity(
   const existing = findEntityByName(chatId, extracted.name);
 
   if (existing) {
+    // User-edited rows: never overwrite curated fields (name, entity_type,
+    // aliases, confidence). Still bump derived counters so salience tracks
+    // recent activity.
+    if (existing.userEditedAt !== null) {
+      db.query(
+        `UPDATE memory_entities SET
+          last_seen_chunk_id = ?,
+          last_seen_at = ?,
+          mention_count = mention_count + 1,
+          updated_at = ?
+         WHERE id = ?`,
+      ).run(chunkId, chunkTimestamp, now, existing.id);
+      return existing.id;
+    }
+
     // Update existing entity, including cross-chunk type evidence.
     const newAliases = mergeAliases(existing.aliases, extracted.aliases, existing.name);
     const nextMentionCount = existing.mentionCount + 1;
@@ -1073,9 +1089,43 @@ export function consolidateEdgeTypes(chatId: string): number {
   return mergeCount;
 }
 
-/** Delete all entities for a chat (used in rebuild) */
-export function deleteEntitiesForChat(chatId: string): void {
-  getDb().query("DELETE FROM memory_entities WHERE chat_id = ?").run(chatId);
+/** Delete all entities for a chat (used in rebuild).
+ *
+ *  With `preserveUserEdited`, rows that the user has manually edited keep
+ *  their curated fields but have derived stats (mention counts, salience,
+ *  recency, type-evidence metadata) reset to zero so live ingestion can
+ *  rebuild those without double-counting against the prior pre-rebuild run.
+ */
+export function deleteEntitiesForChat(
+  chatId: string,
+  opts: { preserveUserEdited?: boolean } = {},
+): void {
+  const db = getDb();
+  if (!opts.preserveUserEdited) {
+    db.query("DELETE FROM memory_entities WHERE chat_id = ?").run(chatId);
+    return;
+  }
+
+  db.transaction(() => {
+    db.query(
+      `UPDATE memory_entities SET
+        mention_count = 0,
+        salience_avg = 0,
+        last_seen_chunk_id = NULL,
+        last_seen_at = NULL,
+        first_seen_chunk_id = NULL,
+        first_seen_at = NULL,
+        last_mention_timestamp = NULL,
+        recent_mention_count = 0,
+        salience_breakdown = '{"mentionComponent":0,"arcComponent":0,"graphComponent":0,"total":0}',
+        metadata = '{}',
+        updated_at = ?
+       WHERE chat_id = ? AND user_edited_at IS NOT NULL`,
+    ).run(Math.floor(Date.now() / 1000), chatId);
+    db.query(
+      "DELETE FROM memory_entities WHERE chat_id = ? AND user_edited_at IS NULL",
+    ).run(chatId);
+  })();
 }
 
 // ─── Mention CRUD ──────────────────────────────────────────────

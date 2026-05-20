@@ -329,7 +329,9 @@ export function migrateLegacyChunkSignatures(chatId: string): number {
 function clearDerivedCortexData(chatId: string, options: { preserveSalience?: boolean } = {}): void {
   const db = getDb();
   invalidateCortexCache(chatId);
-  entityGraph.deleteEntitiesForChat(chatId);
+  // User-edited entity rows survive rebuilds with their curated fields intact;
+  // their derived counters are reset so live ingestion can rebuild stats cleanly.
+  entityGraph.deleteEntitiesForChat(chatId, { preserveUserEdited: true });
   entityGraph.deleteMentionsForChat(chatId);
   entityGraph.deleteRelationsForChat(chatId);
   consolidation.deleteConsolidationsForChat(chatId);

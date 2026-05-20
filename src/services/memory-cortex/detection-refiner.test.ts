@@ -38,6 +38,7 @@ function makeEntity(name: string, entityType: MemoryEntity["entityType"], aliase
     lastMentionTimestamp: null,
     recentMentionCount: 0,
     confidence: "confirmed",
+    userEditedAt: null,
   };
 }
 
