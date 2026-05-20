@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { BaseColorKey, BaseColors } from '@/types/theme'
+import { useStore } from '@/store'
 import styles from './BaseColorPicker.module.css'
 import clsx from 'clsx'
 import { getSaturationValueFromPoint } from './colorPickerMath'
@@ -71,6 +72,64 @@ const COLOR_KEYS: ColorDef[] = [
   { key: 'thoughts',   label: 'Thoughts',   defaultColor: '#c8c8d4' },
 ]
 
+// Each base color key maps to the CSS variable the theme engine actually
+// emits. Reading these from :root lets the swatches reflect whatever the
+// current preset / accent produces, not a stale hardcoded default.
+const CSS_VAR_BY_KEY: Record<BaseColorKey, string> = {
+  primary:    '--lumiverse-primary',
+  secondary:  '--lumiverse-secondary',
+  background: '--lumiverse-bg',
+  text:       '--lumiverse-text',
+  danger:     '--lumiverse-danger',
+  success:    '--lumiverse-success',
+  warning:    '--lumiverse-warning',
+  speech:     '--lumiverse-prose-dialogue',
+  thoughts:   '--lumiverse-prose-italic',
+}
+
+function parseCssColorToHex(value: string): string | null {
+  if (!value) return null
+  const v = value.trim()
+  if (v.startsWith('#')) {
+    const parsed = hexToRgb(v)
+    return parsed ? rgbToHex(parsed[0], parsed[1], parsed[2]) : null
+  }
+  const rgbMatch = v.match(/rgba?\(\s*([\d.]+)(?:\s*,\s*|\s+)([\d.]+)(?:\s*,\s*|\s+)([\d.]+)/)
+  if (rgbMatch) {
+    return rgbToHex(
+      Math.round(parseFloat(rgbMatch[1])),
+      Math.round(parseFloat(rgbMatch[2])),
+      Math.round(parseFloat(rgbMatch[3])),
+    )
+  }
+  const hslMatch = v.match(/hsla?\(\s*([\d.]+)(?:deg)?(?:\s*,\s*|\s+)([\d.]+)%(?:\s*,\s*|\s+)([\d.]+)%/)
+  if (hslMatch) {
+    const hh = parseFloat(hslMatch[1]) / 360
+    const ss = parseFloat(hslMatch[2]) / 100
+    const ll = parseFloat(hslMatch[3]) / 100
+    if (ss === 0) {
+      const x = Math.round(ll * 255)
+      return rgbToHex(x, x, x)
+    }
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1
+      if (t > 1) t -= 1
+      if (t < 1 / 6) return p + (q - p) * 6 * t
+      if (t < 1 / 2) return q
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6
+      return p
+    }
+    const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss
+    const p = 2 * ll - q
+    return rgbToHex(
+      Math.round(hue2rgb(p, q, hh + 1 / 3) * 255),
+      Math.round(hue2rgb(p, q, hh) * 255),
+      Math.round(hue2rgb(p, q, hh - 1 / 3) * 255),
+    )
+  }
+  return null
+}
+
 // ── Component ──
 
 interface BaseColorPickerProps {
@@ -86,8 +145,30 @@ export default function BaseColorPicker({ baseColors, onChange }: BaseColorPicke
   const draggingCanvas = useRef(false)
   const draggingHue = useRef(false)
 
+  // Track theme inputs so we re-read CSS vars whenever the applied theme could
+  // have changed (preset switch, accent edit, mode toggle, extension overlay).
+  const theme = useStore((s) => s.theme)
+  const characterThemeOverlay = useStore((s) => s.characterThemeOverlay)
+  const extensionThemeOverrides = useStore((s) => s.extensionThemeOverrides)
+  const [resolvedDefaults, setResolvedDefaults] = useState<Partial<Record<BaseColorKey, string>>>({})
+
+  useEffect(() => {
+    // Defer past the theme applicator's own effect (which writes :root vars)
+    // so we read the freshly-applied values, not the previous frame's.
+    const id = requestAnimationFrame(() => {
+      const styles = getComputedStyle(document.documentElement)
+      const next: Partial<Record<BaseColorKey, string>> = {}
+      for (const def of COLOR_KEYS) {
+        const hex = parseCssColorToHex(styles.getPropertyValue(CSS_VAR_BY_KEY[def.key]))
+        if (hex) next[def.key] = hex
+      }
+      setResolvedDefaults(next)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [theme, characterThemeOverlay, extensionThemeOverrides])
+
   const activeDef = COLOR_KEYS.find(c => c.key === activeKey)!
-  const currentHex = baseColors[activeKey] || activeDef.defaultColor
+  const currentHex = baseColors[activeKey] || resolvedDefaults[activeKey] || activeDef.defaultColor
   const rgb = hexToRgb(currentHex) || [147, 112, 219]
   const [rawHue, sat, val] = rgbToHsv(rgb[0], rgb[1], rgb[2])
   const [preservedHue, setPreservedHue] = useState(rawHue)
@@ -269,7 +350,7 @@ export default function BaseColorPicker({ baseColors, onChange }: BaseColorPicke
           >
             <div
               className={styles.swatchCircle}
-              style={{ background: baseColors[key] || defaultColor }}
+              style={{ background: baseColors[key] || resolvedDefaults[key] || defaultColor }}
             />
             <span className={styles.swatchLabel}>{label}</span>
           </button>
