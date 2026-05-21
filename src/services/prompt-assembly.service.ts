@@ -1325,14 +1325,14 @@ export async function assemblePrompt(
       vectorActivated = detailed.entries;
       vectorRetrievalDetails = detailed;
 
-      if (detailed.blockerMessages.length > 0) {
+      if (detailed.blockerMessages.length > 0 && detailed.eligibleCount > 0) {
         console.log(
           "[prompt-assembly] Vector WI blocked: %s (eligible=%d, books=%d)",
           detailed.blockerMessages.join("; "),
           detailed.eligibleCount,
           wiSources.worldBookIds.length,
         );
-      } else {
+      } else if (detailed.blockerMessages.length === 0) {
         console.log(
           "[prompt-assembly] Vector WI retrieval: eligible=%d, hits=%d, afterThreshold=%d, afterRerank=%d, shortlisted=%d (topK=%d)",
           detailed.eligibleCount,

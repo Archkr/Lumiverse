@@ -81,9 +81,16 @@ export default function ContextMenu({ position, items, onClose }: ContextMenuPro
   // Listen on both mousedown and pointerdown because some elements (e.g.
   // Spindle float widgets) call preventDefault() on pointerdown which
   // suppresses the subsequent mousedown event.
+  //
+  // The ~150ms `openedAt` guard ignores the synthetic mousedown/pointerdown
+  // that some browsers synthesize from the very touch sequence that opened
+  // the menu (e.g. long-press → synthetic contextmenu → touchend fires
+  // compatibility events). Per CLAUDE.md: popovers need this guard.
   useEffect(() => {
     if (!position) return
+    const openedAt = performance.now()
     const handleDown = (e: MouseEvent | PointerEvent) => {
+      if (performance.now() - openedAt < 150) return
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     const handleKey = (e: KeyboardEvent) => {

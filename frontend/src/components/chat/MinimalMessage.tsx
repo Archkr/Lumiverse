@@ -1,10 +1,14 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Copy, Pencil, Trash2, EyeOff, Eye, BarChart3, Volume2, Square } from 'lucide-react'
+import { IconGitFork } from '@tabler/icons-react'
 import { useStore } from '@/store'
 import { useMessageCard } from '@/hooks/useMessageCard'
 import { useMessagePlayback } from '@/hooks/useMessagePlayback'
+import { useLongPress } from '@/hooks/useLongPress'
 import useSwipeAction from '@/hooks/useSwipeAction'
 import useSwipeGesture from '@/hooks/useSwipeGesture'
+import { copyTextToClipboard, getSelectionTextWithin } from '@/lib/clipboard'
 import MessageContent from './MessageContent'
 import MessageEditArea from './MessageEditArea'
 import MessageAttachments from './MessageAttachments'
@@ -14,6 +18,7 @@ import GreetingNav from './GreetingNav'
 import ReasoningBlock from './ReasoningBlock'
 import StreamingIndicator from './StreamingIndicator'
 import LazyImage from '@/components/shared/LazyImage'
+import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
 import type { Message } from '@/types/api'
 import type { GenerationMetrics } from '@/types/ws-events'
 import styles from './MinimalMessage.module.css'
@@ -168,10 +173,87 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
   }, [openModal, message.id])
 
   const cardRef = useRef<HTMLDivElement>(null)
+  const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPos | null>(null)
   const { handleSwipe } = useSwipeAction(message, chatId)
   const onSwipeLeft = useCallback(() => handleSwipe('left'), [handleSwipe])
   const onSwipeRight = useCallback(() => handleSwipe('right'), [handleSwipe])
   const { canPlay, isPlaying, toggle: togglePlayback } = useMessagePlayback(message.id, message.content)
+  const canOpenContextMenu = !isEditing && !isSelectMode
+
+  const closeContextMenu = useCallback(() => setContextMenuPos(null), [])
+
+  const contextAction = useCallback((action: () => void) => {
+    closeContextMenu()
+    action()
+  }, [closeContextMenu])
+
+  const handleCopy = useCallback(() => {
+    const selected = getSelectionTextWithin(cardRef.current)
+    copyTextToClipboard(selected || message.content).catch(console.error)
+  }, [message.content])
+
+  const longPress = useLongPress({
+    onLongPress: (pos) => {
+      if (canOpenContextMenu) setContextMenuPos(pos)
+    },
+  })
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!canOpenContextMenu) return
+    longPress.onContextMenu(e)
+  }, [canOpenContextMenu, longPress])
+
+  const contextMenuItems: ContextMenuEntry[] = useMemo(() => [
+    {
+      key: 'copy',
+      label: 'Copy',
+      icon: <Copy size={14} />,
+      onClick: () => contextAction(handleCopy),
+    },
+    {
+      key: 'edit',
+      label: 'Edit',
+      icon: <Pencil size={14} />,
+      onClick: () => contextAction(handleEdit),
+    },
+    ...(canPlay ? [{
+      key: 'play',
+      label: isPlaying ? 'Stop playback' : 'Play with TTS',
+      icon: isPlaying ? <Square size={14} /> : <Volume2 size={14} />,
+      onClick: () => contextAction(togglePlayback),
+    }] satisfies ContextMenuEntry[] : []),
+    {
+      key: 'toggle-hidden',
+      label: isHidden ? 'Unhide from AI context' : 'Hide from AI context',
+      icon: isHidden ? <Eye size={14} /> : <EyeOff size={14} />,
+      active: isHidden,
+      onClick: () => contextAction(handleToggleHidden),
+    },
+    {
+      key: 'fork',
+      label: 'Fork chat here',
+      icon: <IconGitFork size={14} />,
+      onClick: () => contextAction(handleFork),
+    },
+    ...(!isUser ? [{
+      key: 'prompt-breakdown',
+      label: 'Prompt breakdown',
+      icon: <BarChart3 size={14} />,
+      onClick: () => contextAction(handlePromptBreakdown),
+    }] satisfies ContextMenuEntry[] : []),
+    { key: 'delete-divider', type: 'divider' },
+    {
+      key: 'delete',
+      label: 'Delete',
+      icon: <Trash2 size={14} />,
+      danger: true,
+      onClick: () => contextAction(handleDelete),
+    },
+  ], [
+    canPlay, contextAction, handleCopy, handleDelete, handleEdit, handleFork,
+    handlePromptBreakdown, handleToggleHidden, isHidden, isPlaying, isUser,
+    togglePlayback,
+  ])
 
   useSwipeGesture(cardRef, {
     enabled: swipeGesturesEnabled && !isUser && !isEditing && !isSelectMode,
@@ -195,6 +277,10 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
       )}
       data-message-id={message.id}
       onClick={isSelectMode ? onToggleSelect : undefined}
+      onContextMenu={handleContextMenu}
+      onTouchStart={canOpenContextMenu ? longPress.onTouchStart : undefined}
+      onTouchMove={canOpenContextMenu ? longPress.onTouchMove : undefined}
+      onTouchEnd={canOpenContextMenu ? longPress.onTouchEnd : undefined}
     >
       {/* Avatar */}
       <div
@@ -303,6 +389,8 @@ export default function MinimalMessage({ message, chatId, depth = 0, isSelectMod
           />
         </div>
       )}
+
+      <ContextMenu position={contextMenuPos} items={contextMenuItems} onClose={closeContextMenu} />
     </div>
   )
 }
