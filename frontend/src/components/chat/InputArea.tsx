@@ -76,6 +76,8 @@ import {
   subscribePresetProfilePromptVariableChanges,
   updatePresetProfilePromptVariables,
 } from '@/hooks/preset-profile-prompt-variables'
+import { registerChatDockerActionOwners } from './chatDockerActionCatalog'
+import { acknowledgeConnectionProfileSelection } from '@/lib/uiProductivityDefaults'
 
 interface InputAreaProps {
   chatId: string
@@ -258,6 +260,8 @@ function deferTouchReleaseAction(action: () => void): void {
   window.setTimeout(action, 0)
 }
 
+export { acknowledgeConnectionProfileSelection }
+
 export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: InputAreaProps) {
   const { t } = useTranslation('chat')
   const { t: te } = useTranslation('errors')
@@ -296,6 +300,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
   promptVariablesBindingRef.current = promptVariablesBinding
   const [promptVariablesLoading, setPromptVariablesLoading] = useState(false)
   const [promptVariablesAvailability, setPromptVariablesAvailability] = useState<PromptVariablesAvailability | null>(null)
+  const [memoryCortexInFlight, setMemoryCortexInFlight] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<(MessageAttachment & { previewUrl?: string })[]>([])
   const [uploading, setUploading] = useState(false)
   const [dragActive, setDragActive] = useState(false)
@@ -2500,6 +2505,77 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
     }
   }, [chatId, activeCharacterId, isGroupChat, navigate, openModal, t])
 
+  const openChatSettings = useCallback(() => {
+    void (async () => {
+      try {
+        const chat = await chatsApi.get(chatId, { messages: false })
+        openModal('chatSettings', {
+          chatId,
+          chatName: chat.name || '',
+          metadata: chat.metadata || {},
+          onSaved: (updatedChat: import('@/types/api').Chat) => {
+            const value = updatedChat.metadata?.impersonation_preset_id
+            setImpersonationPresetId(typeof value === 'string' && value ? value : null)
+            const mode = updatedChat.metadata?.group_scenario_override?.mode
+            setGroupScenarioMode(mode === 'member' || mode === 'custom' ? mode : 'individual')
+          },
+        })
+      } catch (err) {
+        console.error('[InputArea] Failed to load chat settings:', err)
+      }
+    })()
+  }, [chatId, openModal])
+
+  const openGroupChatCreator = useCallback(() => {
+    openModal('groupChatCreator')
+  }, [openModal])
+
+  const warmMemories = useCallback(async (targetChatId: string) => {
+    setMemoryCortexInFlight(true)
+    try {
+      toast.info(t('toast.recompilingMemories'))
+      const res = await memoryCortexApi.warm(targetChatId, { force: true })
+      if (res.cortex.status === 'started') {
+        toast.success(t('toast.memoryRebuildStarted'))
+      } else if (res.chatMemory.status === 'complete') {
+        toast.success(t('toast.memoryRebuilt'))
+      } else if (res.reason === 'chat_vectorization_disabled') {
+        toast.error(t('toast.memoryVectorizationDisabled'))
+      } else {
+        toast.info(t('toast.noMemoryRebuildNeeded'))
+      }
+    } catch (err: any) {
+      toast.error(err?.message || t('toast.failedRecompileMemories'))
+    } finally {
+      setMemoryCortexInFlight(false)
+    }
+  }, [t])
+
+  useEffect(() => {
+    return registerChatDockerActionOwners({
+      createNewChat: handleNewChat,
+      openPromptVariablesModal,
+      handleConvertToGroup,
+      setAuthorsNoteOpen,
+      openChatSettings,
+      openGroupChatCreator,
+      warmMemories,
+      promptVariablesLoading,
+      memoryCortexAvailable: true,
+      memoryCortexInFlight,
+      groupChatCreatorRegistered: true,
+    })
+  }, [
+    handleNewChat,
+    openPromptVariablesModal,
+    handleConvertToGroup,
+    openChatSettings,
+    openGroupChatCreator,
+    warmMemories,
+    promptVariablesLoading,
+    memoryCortexInFlight,
+  ])
+
   const handleDryRun = useCallback(async () => {
     if (dryRunning || isGeneratingInChat) return
     const presetId = getActivePresetForGeneration()
@@ -3089,10 +3165,10 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
         />
       )}
 
-      <span data-spindle-mount="chat_composer_above" style={{ display: 'contents' }} />
+      <span data-spindle-mount="chat_composer_above" data-spindle-scope={`chat:${chatId}:composer-above`} style={{ display: 'contents' }} />
 
       {/* Action bar */}
-      <div data-spindle-mount="chat_toolbar">
+      <div data-spindle-mount="chat_toolbar" data-spindle-scope={`chat:${chatId}:toolbar`}>
         <div className={styles.actionBar}>
           <button type="button" className={styles.actionBtn} onClick={onNavigateHome ?? (() => navigate('/'))} title={t('input.backHome')}>
             <Home size={14} />
@@ -3140,7 +3216,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
           >
             <Link2 size={14} />
           </button>
-          <span data-spindle-mount="chat_actions" style={{ display: 'contents' }} />
+          <span data-spindle-mount="chat_actions" data-spindle-scope={`chat:${chatId}:actions`} style={{ display: 'contents' }} />
           {hasAltFields && (() => {
             const selectionCount = activeAltSelectionCount
             const hasSelection = selectionCount > 0
@@ -3404,8 +3480,11 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
                   type="button"
                   className={clsx(styles.popRowBtn, activeProfileId === p.id && styles.popRowBtnActive)}
                   onClick={() => {
-                    setActiveProfile(p.id)
-                    setOpenPopover(null)
+                    void acknowledgeConnectionProfileSelection({
+                      profileId: p.id,
+                      setActiveProfile,
+                      closePopover: () => setOpenPopover(null),
+                    })
                   }}
                 >
                   <span className={styles.personaMain}>
@@ -3460,24 +3539,9 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
               <button
                 type="button"
                 className={styles.popRowBtn}
-                onClick={async () => {
+                onClick={() => {
                   setOpenPopover(null)
-                  try {
-                    const chat = await chatsApi.get(chatId, { messages: false })
-                    openModal('chatSettings', {
-                      chatId,
-                      chatName: chat.name || '',
-                      metadata: chat.metadata || {},
-                      onSaved: (updatedChat: import('@/types/api').Chat) => {
-                        const value = updatedChat.metadata?.impersonation_preset_id
-                        setImpersonationPresetId(typeof value === 'string' && value ? value : null)
-                        const mode = updatedChat.metadata?.group_scenario_override?.mode
-                        setGroupScenarioMode(mode === 'member' || mode === 'custom' ? mode : 'individual')
-                      },
-                    })
-                  } catch (err) {
-                    console.error('[InputArea] Failed to load chat settings:', err)
-                  }
+                  openChatSettings()
                 }}
               >
                 <span className={styles.personaMain}>
@@ -3505,7 +3569,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
                 className={styles.popRowBtn}
                 onClick={() => {
                   setOpenPopover(null)
-                  openModal('groupChatCreator')
+                  openGroupChatCreator()
                 }}
               >
                 <span className={styles.personaMain}>
@@ -3529,23 +3593,9 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
               <button
                 type="button"
                 className={styles.popRowBtn}
-                onClick={async () => {
+                onClick={() => {
                   setOpenPopover(null)
-                  try {
-                    toast.info(t('toast.recompilingMemories'))
-                    const res = await memoryCortexApi.warm(chatId, { force: true })
-                    if (res.cortex.status === 'started') {
-                      toast.success(t('toast.memoryRebuildStarted'))
-                    } else if (res.chatMemory.status === 'complete') {
-                      toast.success(t('toast.memoryRebuilt'))
-                    } else if (res.reason === 'chat_vectorization_disabled') {
-                      toast.error(t('toast.memoryVectorizationDisabled'))
-                    } else {
-                      toast.info(t('toast.noMemoryRebuildNeeded'))
-                    }
-                  } catch (err: any) {
-                    toast.error(err?.message || t('toast.failedRecompileMemories'))
-                  }
+                  void warmMemories(chatId)
                 }}
               >
                 <span className={styles.personaMain}>
@@ -4135,6 +4185,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
         </button>
       ) : (
         <div className={styles.inputRow}>
+          <span data-spindle-mount="chat_input_tools_left" data-spindle-scope={`chat:${chatId}:input-tools-left`} style={{ display: 'contents' }} />
           <button
             type="button"
             className={styles.attachBtn}
@@ -4245,8 +4296,10 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
               </button>
             </div>
           )}
+          <span data-spindle-mount="chat_input_tools_right" data-spindle-scope={`chat:${chatId}:input-tools-right`} style={{ display: 'contents' }} />
         </div>
       )}
+      <span data-spindle-mount="chat_composer_below" data-spindle-scope={`chat:${chatId}:composer-below`} style={{ display: 'contents' }} />
     </div>
   )
 }
