@@ -700,6 +700,7 @@ export default function LorebookEditorWorkspace({
           )}
         </div>
       </header>
+      <span data-spindle-mount="lorebook_workspace" data-spindle-scope={`lorebook:${selectedBookId ?? 'none'}:workspace`} style={{ display: 'contents' }} />
 
       <div className={styles.panes} ref={panesRef}>
         {variant === 'full' && (
@@ -797,6 +798,7 @@ export default function LorebookEditorWorkspace({
           />
 
           <EntryTable
+            bookId={selectedBookId}
             entries={entries}
             filteredEntries={filteredEntries}
             searchResultsById={entrySearchResultsById}
