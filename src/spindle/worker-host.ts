@@ -76,6 +76,12 @@ import { WorkerHostInteractionApi } from "./worker-host-interaction-api";
 import { WorkerHostPresentationApi } from "./worker-host-presentation-api";
 import { createRuntimeTransport, type RuntimeTransport } from "./runtime-transport";
 import {
+  providerRegistry,
+  type ProviderHostToWorker,
+  type ProviderWorkerToHost,
+} from "./provider-registry";
+import { getSecret } from "../services/secrets.service";
+import {
   readSharedRpcEndpoint,
   registerSharedRpcRequestEndpoint,
   syncSharedRpcEndpoint,
@@ -557,7 +563,8 @@ type RuntimeWorkerToHost =
       userId?: string;
     }
   | { type: "image_gen_generate_stream"; requestId: string; input: Record<string, unknown> }
-  | { type: "image_gen_cancel_stream"; requestId: string };
+  | { type: "image_gen_cancel_stream"; requestId: string }
+  | ProviderWorkerToHost;
 
 type RuntimeHostToWorker =
   | HostToWorker
@@ -603,7 +610,8 @@ type RuntimeHostToWorker =
         | { type: "preview"; imageDataUrl: string; step?: number; totalSteps?: number; nodeId?: string }
         | { type: "done"; result: Record<string, unknown> };
     }
-  | { type: "image_gen_stream_error"; requestId: string; error: string };
+  | { type: "image_gen_stream_error"; requestId: string; error: string }
+  | ProviderHostToWorker;
 
 let cachedBackendVersion: string | null = null;
 let cachedFrontendVersion: string | null = null;
@@ -957,6 +965,10 @@ export class WorkerHost {
       resolveEffectiveUserId: (userId) => this.resolveEffectiveUserId(userId),
       enforceScopedUser: (userId) => this.enforceScopedUser(userId),
       post: (message) => this.postToWorker(message),
+    });
+    providerRegistry.configure({ getSecret });
+    providerRegistry.attachWorker(this.extensionId, (message) => {
+      this.postToWorker(message);
     });
   }
 
@@ -1317,6 +1329,7 @@ export class WorkerHost {
     macroInterceptorChain.unregisterByExtension(this.extensionId);
     worldInfoInterceptorChain.unregisterByExtension(this.extensionId);
     unregisterSharedRpcEndpointsByOwner(this.manifest.identifier);
+    providerRegistry.detachWorker(this.extensionId);
 
     // Reject pending requests
     for (const [, pending] of this.pendingRequests) {
@@ -2442,6 +2455,15 @@ export class WorkerHost {
       case "theme_generate_variables":
         this.presentationApi.handleThemeGenerateVariables(msg.requestId, msg.config);
         break;
+      case "provider_register":
+        this.handleProviderRegister(msg);
+        break;
+      case "provider_unregister":
+        this.handleProviderUnregister(msg);
+        break;
+      case "provider_result":
+        providerRegistry.handleProviderResult(msg);
+        break;
       default:
         // Fail fast for unrecognized message types so the worker's
         // await request(...) doesn't hang indefinitely.
@@ -2841,6 +2863,35 @@ export class WorkerHost {
       extension_id: this.extensionId,
     };
     toolRegistry.register(tool);
+  }
+
+  private providerHostContext() {
+    return {
+      installationId: this.extensionId,
+      installScope: this.installScope,
+      installedByUserId: this.installedByUserId,
+      authenticatedSubject: this.installedByUserId,
+    };
+  }
+
+  private handleProviderRegister(msg: Extract<RuntimeWorkerToHost, { type: "provider_register" }>): void {
+    try {
+      providerRegistry.handleWorkerMessage(msg, this.providerHostContext());
+    } catch (err: any) {
+      console.warn(
+        `[Spindle:${this.manifest.identifier}] provider_register failed: ${err?.message || err}`,
+      );
+    }
+  }
+
+  private handleProviderUnregister(msg: Extract<RuntimeWorkerToHost, { type: "provider_unregister" }>): void {
+    try {
+      providerRegistry.handleWorkerMessage(msg, this.providerHostContext());
+    } catch (err: any) {
+      console.warn(
+        `[Spindle:${this.manifest.identifier}] provider_unregister failed: ${err?.message || err}`,
+      );
+    }
   }
 
   // ─── Generation ──────────────────────────────────────────────────────
