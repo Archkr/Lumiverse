@@ -175,6 +175,64 @@ mock.module('@/ws/client', () => ({
   WS_RESUME_RECOVERY_FAILED: '__ws_resume_recovery_failed',
   wsClient: loaderWsClient,
 }))
+mock.module('./host-surfaces', () => ({
+  createHostSurfaceAPI: () => ({
+    list: () => [],
+    subscribe: () => () => {},
+    invoke() {},
+    registerDeepLinkTarget: () => () => {},
+  }),
+}))
+mock.module('./character-host-surface-renderers', () => ({}))
+mock.module('./world-book-host-surface-renderers', () => ({}))
+mock.module('./productivity-host-surface-renderers', () => ({}))
+mock.module('./settings-bridge', () => ({
+  createSettingsBridge: () => ({
+    get: async () => undefined,
+    set: async () => {},
+    remove: async () => {},
+    watch: () => () => {},
+    core: {
+      get: () => undefined,
+      watch: () => () => {},
+      list: () => [],
+      isReady: () => true,
+    },
+    dispose() {},
+  }),
+}))
+mock.module('./frontend-domain-api', () => ({
+  createFrontendDomainApi: () => ({
+    connections: {
+      list: () => [],
+      getActive: () => ({ activeProfileId: null, provider: null, model: null }),
+      subscribe: () => () => {},
+      models: async () => ({ models: [] }),
+      setActive() {},
+      setActiveAcknowledged: async () => {},
+      update: async () => ({}),
+    },
+    chats: {
+      listForCharacter: async () => [],
+      getMessages: async () => ({ items: [], total: 0 }),
+    },
+    worldBooks: {
+      list: async () => [],
+      entries: async () => [],
+    },
+    messages: {
+      getContent: () => null,
+      getRecent: () => [],
+    },
+    tokens: {
+      countText: async () => ({}),
+      countMessages: async () => ({}),
+      countChat: async () => ({}),
+      countTextBatch: async () => ({}),
+    },
+    dispose() {},
+  }),
+}))
 mock.module('@/api/spindle', () => ({
   spindleApi: {
     getPermissions: async () => {
