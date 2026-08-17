@@ -37,7 +37,7 @@ import PortraitPanel from './PortraitPanel'
 import ExpressionDisplay from './expressions/ExpressionDisplay'
 import FloatingAvatarViewer from './FloatingAvatarViewer'
 import { QuickToolbar } from '../quick-toolbar/QuickToolbar'
-import { readQuickToolbarPlacement } from '../quick-toolbar/quickToolbarDock'
+import { isShowNativeSelectMessages, readQuickToolbarPlacement } from '../quick-toolbar/quickToolbarDock'
 import { wsClient } from '@/ws/client'
 import { EventType } from '@/ws/events'
 import type { SpindlePreGenerationActivityPayload } from '@/types/ws-events'
@@ -1141,14 +1141,18 @@ export default function ChatView() {
             <div data-spindle-mount="chat_header_center" data-spindle-scope={`chat:${chatId}:header-center`} style={{ display: 'contents' }} />
             <div data-spindle-mount="chat_header_right" data-spindle-scope={`chat:${chatId}:header-right`} style={{ display: 'contents' }} />
             <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request="floating">
-              <button
-                type="button"
-                className={clsx(styles.toolbarBtn, styles.toolbarBtnPrimary, messageSelectMode && styles.toolbarBtnActive)}
-                onClick={toggleSelectMode}
-                title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
-              >
-                <ListChecks size={14} />
-              </button>
+              {isShowNativeSelectMessages(quickToolbarSettings) && (
+                <button
+                  type="button"
+                  className={clsx(styles.toolbarBtn, messageSelectMode && styles.toolbarBtnActive)}
+                  onClick={toggleSelectMode}
+                  title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
+                  aria-label={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
+                  aria-pressed={messageSelectMode}
+                >
+                  <ListChecks size={14} />
+                </button>
+              )}
               {totalChatLength > 1 && (
                 <button
                   type="button"

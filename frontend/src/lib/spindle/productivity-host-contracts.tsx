@@ -274,6 +274,7 @@ function EnhancedLorebookWorkspaceSurface({
   return (
     <div
       className={modalStyles.backdrop}
+      style={{ zIndex: 10006 }}
       onPointerDown={(event) => {
         backdropPointerDownRef.current = event.target === event.currentTarget ? event.currentTarget : null
       }}

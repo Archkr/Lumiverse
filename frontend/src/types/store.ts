@@ -125,6 +125,7 @@ export interface StartupSettings {
   drawerSettings?: DrawerSettings
   spindleSettings?: Partial<SpindleSettings>
   connectionsOrder?: Partial<Record<'llm' | 'imageGen' | 'stt' | 'tts', string[]>>
+  activeProfileId?: string | null
 }
 
 export interface CharactersSlice {
@@ -546,11 +547,22 @@ export interface QuickToolbarSettings {
   rectVersion: number
   /** Undefined keeps the responsive default: hide only on mobile overlays. */
   hideWhenOverlaid?: boolean
+  /** Dock-chrome hide only. Undefined/false keeps the docked toolbar in `chat_top_dock`. */
+  hideInChatTopDock?: boolean
   modalRestoreHandle: boolean
   v2IconSize: number
   v2LabelTextSize: number
   v2LabelVisible: boolean
   v2Density: QuickToolbarDensity
+  quickToolbarPlacement?: 'floating' | 'chat_top_dock'
+  autoFitBounds?: boolean
+  v2IconOnly?: boolean
+  /** Stretch docked V2 across leftover `.chatToolbar` width. Default on. */
+  fillTopDockWidth?: boolean
+  /** Native ChatView ListChecks. Default on (`!== false`). */
+  showNativeSelectMessages?: boolean
+  /** Opaque plate behind the Quick Toolbar box. Default off. */
+  opaqueToolbarBackdrop?: boolean
 }
 
 export interface ConnectionsPickerSettings {
@@ -575,6 +587,7 @@ export interface ConnectionsPickerSettings {
   rowGap: number
   sectionSpacing: number
   columnWidths: Record<string, number>
+  modelLayout?: 'grid' | 'list'
 }
 
 export interface LoreIndicatorSettings {
@@ -757,6 +770,10 @@ export interface SettingsSlice {
   characterTabDisplaySettings: CharacterTabDisplaySettings
   portraitDockSettings: PortraitDockSettings
   lorebookEditorSettings: LorebookEditorSettings
+  showEmbeddingFallbackUi: boolean
+  showCortexSecondaryUi: boolean
+  showEditAndSend: boolean
+  enableToolbarIconReorder: boolean
   hydrateStartupSettings: (settings: StartupSettings) => void
   setVoiceSettings: (partial: Partial<VoiceSettings>) => void
   setWallpaper: (settings: Partial<WallpaperSettings>) => void
@@ -843,11 +860,18 @@ export interface PresetsSlice {
 }
 
 // ---- Connections Slice ----
+export type ActiveProfileSwitchReason =
+  | 'user_selection'
+  | 'bootstrap_reconcile'
+  | 'profile_deleted'
+  | 'profile_invalidated'
+  | 'settings_reconcile'
+
 export interface ConnectionsSlice {
   profiles: ConnectionProfile[]
   activeProfileId: string | null
   setProfiles: (profiles: ConnectionProfile[]) => void
-  setActiveProfile: (id: string | null) => void
+  setActiveProfile: (id: string | null, reason?: ActiveProfileSwitchReason) => void
 
   addProfile: (profile: ConnectionProfile) => void
   updateProfile: (id: string, updates: Partial<ConnectionProfile>) => void
