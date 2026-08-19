@@ -944,11 +944,15 @@ describe("regex JSON overwrite imports", () => {
 
     const [bundled] = getRegexScriptsByPresetId(USER_ID, "preset-historical");
     expect(bundled).toMatchObject({
-      folder: "Historical preset",
+      folder: "Historical preset · LumiHub",
       script_id: "",
       metadata: {
         imported_script_id: "shared_preset_import",
-        _lumiverse_lumihub_preset: { id: "hub-preset-1", version: "1.4.0" },
+        _lumiverse_lumihub_preset: {
+          id: "hub-preset-1",
+          version: "1.4.0",
+          folderName: "Historical preset",
+        },
       },
     });
     expect(getRegexScriptByScriptId(USER_ID, "shared_preset_import", { presetId: "preset-historical" })?.id)
@@ -1063,6 +1067,39 @@ describe("regex JSON overwrite imports", () => {
       .toMatchObject({ disabled: true, folder: "Legacy folder preset · v1.0.0" });
     expect(bundled.find((script) => script.metadata._lumiverse_lumihub_preset?.version === "2.0.0"))
       .toMatchObject({ folder: "Legacy folder preset · LumiHub" });
+  });
+
+  test("preserves every payload folder through a LumiHub update", () => {
+    const install = (version: string) => installLumiHubPresetRegexScripts(USER_ID, {
+      presetId: "preset-multiple-folders",
+      presetName: "ThreadBare",
+      hubPresetId: "hub-multiple-folders",
+      presetVersion: version,
+      previous: version === "1.0.0" ? undefined : {
+        hubPresetId: "hub-multiple-folders",
+        version: "1.0.0",
+        presetName: "ThreadBare",
+      },
+      scripts: [
+        { name: `Stella ${version}`, find_regex: `stella-${version}`, folder: "Stella Interactive Cards", disabled: false },
+        { name: `Rules ${version}`, find_regex: `rules-${version}`, folder: "Thread Rules", disabled: false },
+      ],
+    });
+
+    install("1.0.0");
+    expect(getRegexScriptsByPresetId(USER_ID, "preset-multiple-folders").map((script) => script.folder).sort())
+      .toEqual(["Stella Interactive Cards · LumiHub", "Thread Rules · LumiHub"]);
+
+    install("2.0.0");
+    const folders = getRegexScriptsByPresetId(USER_ID, "preset-multiple-folders")
+      .map((script) => script.folder)
+      .sort();
+    expect(folders).toEqual([
+      "Stella Interactive Cards · LumiHub",
+      "Stella Interactive Cards · v1.0.0",
+      "Thread Rules · LumiHub",
+      "Thread Rules · v1.0.0",
+    ]);
   });
 
   test("retroactively attributes legacy preset-owned regexes before archiving them", () => {
