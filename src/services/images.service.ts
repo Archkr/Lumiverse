@@ -3,6 +3,7 @@ import { getDb } from "../db/connection";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { env } from "../env";
+import { currentWorkerBudget } from "../utils/cpu-budget";
 import type { Image } from "../types/image";
 import { mkdirSync, existsSync, lstatSync, statSync, unlinkSync } from "fs";
 import { unlink } from "fs/promises";
@@ -28,6 +29,52 @@ export const WALLPAPER_LIBRARY_OWNER = "lumiverse.wallpaper";
 type ThumbnailSource = Buffer | string;
 
 const inflightThumbnailGenerations = new Map<string, Promise<boolean>>();
+
+const deferredImageQueue: Array<() => Promise<void>> = [];
+let deferredImageActive = 0;
+let deferredImageWaiters: Array<() => void> = [];
+let deferredImageWaveTotal = 0;
+let deferredImageWaveCompleted = 0;
+let lastDeferredImageStatusEmitAt = 0;
+
+const DEFERRED_IMAGE_STATUS_EMIT_MS = 150;
+
+export interface DeferredImageProcessingStatus {
+  processed: number;
+  remaining: number;
+  total: number;
+  active: number;
+  queued: number;
+}
+
+let lastExternalDeferredStatus: DeferredImageProcessingStatus | null = null;
+
+export function getDeferredImageProcessingStatus(): DeferredImageProcessingStatus {
+  const live = liveDeferredImageProcessingStatus();
+  if (live.remaining > 0) return live;
+  if (lastExternalDeferredStatus && lastExternalDeferredStatus.remaining > 0) {
+    return lastExternalDeferredStatus;
+  }
+  return lastExternalDeferredStatus ?? live;
+}
+
+export function applyExternalDeferredImageProcessingStatus(
+  status: DeferredImageProcessingStatus,
+): void {
+  lastExternalDeferredStatus = status;
+}
+
+function liveDeferredImageProcessingStatus(): DeferredImageProcessingStatus {
+  const queued = deferredImageQueue.length;
+  const remaining = deferredImageActive + queued;
+  return {
+    processed: deferredImageWaveCompleted,
+    remaining,
+    total: deferredImageWaveTotal,
+    active: deferredImageActive,
+    queued,
+  };
+}
 
 export type ThumbTier = "sm" | "lg";
 export type ImageSpecificity = "full" | ThumbTier;
@@ -670,7 +717,7 @@ export async function uploadImages(
   },
 ): Promise<UploadImagesResult[]> {
   if (items.length === 0) return [];
-  const concurrency = Math.min(Math.max(1, options?.concurrency ?? 16), 32);
+  const concurrency = Math.min(Math.max(1, options?.concurrency ?? currentWorkerBudget().workerConcurrency), 16);
   const dir = getImagesDir();
   const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
 
@@ -778,37 +825,156 @@ export async function uploadImages(
   return results;
 }
 
+function notifyDeferredImageIdle(): void {
+  if (deferredImageActive > 0 || deferredImageQueue.length > 0) return;
+  const waiters = deferredImageWaiters;
+  deferredImageWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+function emitDeferredImageStatus(force = false): void {
+  const status = liveDeferredImageProcessingStatus();
+  const now = Date.now();
+  if (!force && lastDeferredImageStatusEmitAt > 0 && now - lastDeferredImageStatusEmitAt < DEFERRED_IMAGE_STATUS_EMIT_MS) {
+    return;
+  }
+  lastDeferredImageStatusEmitAt = now;
+  if (status.remaining > 0) lastExternalDeferredStatus = null;
+  if (process.env.LUMIVERSE_ST_MIGRATION_CHILD === "1" && typeof process.send === "function") {
+    process.send({ type: "thumbnailQueue", ...status });
+  }
+  eventBus.emit(EventType.IMAGE_THUMBNAIL_QUEUE, status);
+}
+
+function pumpDeferredImageQueue(): void {
+  const limit = currentWorkerBudget().deferredImageConcurrency;
+  while (deferredImageActive < limit) {
+    const job = deferredImageQueue.shift();
+    if (!job) break;
+    deferredImageActive++;
+    emitDeferredImageStatus();
+    void job().finally(() => {
+      deferredImageActive--;
+      deferredImageWaveCompleted++;
+      if (deferredImageQueue.length > 0) pumpDeferredImageQueue();
+      else notifyDeferredImageIdle();
+      emitDeferredImageStatus(deferredImageActive === 0 && deferredImageQueue.length === 0);
+    });
+  }
+}
+
+async function processDeferredImage(
+  userId: string,
+  id: string,
+  filepath: string,
+): Promise<void> {
+  const buffer = Buffer.from(await Bun.file(filepath).arrayBuffer());
+  let width: number | null = null;
+  let height: number | null = null;
+  try {
+    const meta = await sharp(buffer).metadata();
+    width = meta.width ?? null;
+    height = meta.height ?? null;
+  } catch {
+    return;
+  }
+  const dir = getImagesDir();
+  const sizes = getThumbnailSettings(userId);
+  const [smOk, lgOk] = await Promise.all([
+    ensureThumbnail(`${id}_sm`, buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
+    ensureThumbnail(`${id}_lg`, buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
+  ]);
+  const hasThumb = smOk || lgOk;
+  getDb()
+    .query("UPDATE images SET width = COALESCE(?, width), height = COALESCE(?, height), has_thumbnail = ? WHERE id = ?")
+    .run(width, height, hasThumb ? 1 : 0, id);
+}
+function enqueueDeferredImageJob(job: () => Promise<void>): void {
+  if (deferredImageActive === 0 && deferredImageQueue.length === 0) {
+    deferredImageWaveTotal = 0;
+    deferredImageWaveCompleted = 0;
+  }
+  deferredImageWaveTotal++;
+  deferredImageQueue.push(async () => {
+    try {
+      await job();
+    } catch (err) {
+      console.warn("[images] deferred image processing failed:", err);
+    }
+  });
+  pumpDeferredImageQueue();
+}
+
 function scheduleDeferredImageProcessing(
   userId: string,
   id: string,
   filepath: string,
 ): void {
-  void (async () => {
+  enqueueDeferredImageJob(() => processDeferredImage(userId, id, filepath));
+}
+
+function scheduleRebuildThumbnailJob(
+  userId: string,
+  id: string,
+  filename: string,
+  progress: ThumbnailRebuildProgress,
+  onProgress?: (p: ThumbnailRebuildProgress) => void,
+): void {
+  enqueueDeferredImageJob(async () => {
     try {
-      const buffer = Buffer.from(await Bun.file(filepath).arrayBuffer());
-      let width: number | null = null;
-      let height: number | null = null;
-      try {
-        const meta = await sharp(buffer).metadata();
-        width = meta.width ?? null;
-        height = meta.height ?? null;
-      } catch {
+      const dir = getImagesDir();
+      const originalPath = join(dir, filename);
+      if (!existsSync(originalPath)) {
+        progress.skipped++;
         return;
       }
-      const dir = getImagesDir();
+
+      for (const tier of ["sm", "lg"] as const) {
+        for (const suffix of [thumbSuffix(tier), legacyThumbSuffix(tier)]) {
+          const p = join(dir, `${id}${suffix}`);
+          if (existsSync(p)) unlinkSync(p);
+        }
+      }
+
+      const buffer = Buffer.from(await Bun.file(originalPath).arrayBuffer());
       const sizes = getThumbnailSettings(userId);
       const [smOk, lgOk] = await Promise.all([
-        ensureThumbnail(`${id}_sm`, buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-        ensureThumbnail(`${id}_lg`, buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
+        generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
+        generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
       ]);
-      const hasThumb = smOk || lgOk;
-      getDb()
-        .query("UPDATE images SET width = COALESCE(?, width), height = COALESCE(?, height), has_thumbnail = ? WHERE id = ?")
-        .run(width, height, hasThumb ? 1 : 0, id);
+
+      if (smOk || lgOk) {
+        getDb().query("UPDATE images SET has_thumbnail = 1 WHERE id = ?").run(id);
+        progress.generated++;
+        return;
+      }
+      progress.failed++;
     } catch (err) {
-      console.warn(`[images] deferred image processing failed for ${id}:`, err);
+      progress.failed++;
+      console.warn(`[images] rebuild thumbnail failed for ${id}:`, err);
+    } finally {
+      progress.current++;
+      onProgress?.({ ...progress });
     }
-  })();
+  });
+}
+
+export async function waitForDeferredImageProcessing(): Promise<void> {
+  if (deferredImageActive === 0 && deferredImageQueue.length === 0) return;
+  await new Promise<void>((resolve) => {
+    deferredImageWaiters.push(resolve);
+    notifyDeferredImageIdle();
+  });
+}
+
+export function resetDeferredImageProcessingForTests(): void {
+  deferredImageQueue.length = 0;
+  deferredImageActive = 0;
+  deferredImageWaiters = [];
+  deferredImageWaveTotal = 0;
+  deferredImageWaveCompleted = 0;
+  lastDeferredImageStatusEmitAt = 0;
+  lastExternalDeferredStatus = null;
 }
 
 export const IMAGE_GEN_FILENAME_PREFIX = "image-gen-";
@@ -945,15 +1111,10 @@ export interface ThumbnailRebuildProgress {
   failed: number;
 }
 
-const REBUILD_BATCH = 20;
-
 export async function rebuildAllThumbnails(
   userId: string,
-  options?: { onProgress?: (p: ThumbnailRebuildProgress) => void }
+  options?: { onProgress?: (p: ThumbnailRebuildProgress) => void },
 ): Promise<ThumbnailRebuildProgress> {
-  const dir = getImagesDir();
-  const sizes = getThumbnailSettings(userId);
-
   const rows = getDb()
     .query("SELECT id, filename FROM images WHERE user_id = ?")
     .all(userId) as Array<{ id: string; filename: string }>;
@@ -967,46 +1128,13 @@ export async function rebuildAllThumbnails(
   };
 
   options?.onProgress?.({ ...progress });
+  if (rows.length === 0) return progress;
 
-  for (let i = 0; i < rows.length; i += REBUILD_BATCH) {
-    const batch = rows.slice(i, i + REBUILD_BATCH);
-
-    await Promise.all(
-      batch.map(async (img) => {
-        const originalPath = join(dir, img.filename);
-        if (!existsSync(originalPath)) {
-          progress.skipped++;
-          progress.current++;
-          return;
-        }
-
-        // Delete existing tier files
-        for (const tier of ["sm", "lg"] as const) {
-          for (const suffix of [thumbSuffix(tier), legacyThumbSuffix(tier)]) {
-            const p = join(dir, `${img.id}${suffix}`);
-            if (existsSync(p)) unlinkSync(p);
-          }
-        }
-
-        // Regenerate both tiers
-        const [smOk, lgOk] = await Promise.all([
-          generateThumbnail(originalPath, join(dir, `${img.id}${thumbSuffix("sm")}`), sizes.smallSize),
-          generateThumbnail(originalPath, join(dir, `${img.id}${thumbSuffix("lg")}`), sizes.largeSize),
-        ]);
-
-        if (smOk || lgOk) {
-          getDb().query("UPDATE images SET has_thumbnail = 1 WHERE id = ?").run(img.id);
-          progress.generated++;
-        } else {
-          progress.failed++;
-        }
-        progress.current++;
-      })
-    );
-
-    options?.onProgress?.({ ...progress });
+  for (const img of rows) {
+    scheduleRebuildThumbnailJob(userId, img.id, img.filename, progress, options?.onProgress);
   }
-
+  await waitForDeferredImageProcessing();
+  options?.onProgress?.({ ...progress });
   return progress;
 }
 

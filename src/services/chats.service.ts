@@ -3454,6 +3454,23 @@ export function createChatRaw(userId: string, input: { character_id: string; nam
   return getChat(userId, id)!;
 }
 
+/** Load migration identities once so a rerun does not re-import the same ST chat. */
+export function listChatSourceFilenameIds(userId: string): Map<string, string> {
+  const rows = getDb()
+    .query(
+      `SELECT id, json_extract(metadata, '$._lumiverse_source_filename') AS source_filename
+       FROM chats
+       WHERE user_id = ?
+         AND json_type(metadata, '$._lumiverse_source_filename') = 'text'
+       ORDER BY updated_at ASC`,
+    )
+    .all(userId) as Array<{ id: string; source_filename: string }>;
+
+  const result = new Map<string, string>();
+  for (const row of rows) result.set(row.source_filename, row.id);
+  return result;
+}
+
 export function bulkInsertMessages(chatId: string, messages: BulkMessageInput[], userId: string): number {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);

@@ -3,7 +3,7 @@
  *
  * These call Lumiverse service functions directly (no HTTP), accepting a
  * userId and data read by st-reader.ts. Used by the Docker migration
- * orchestrator.
+ * orchestrator and the UI-driven execute path.
  *
  * All functions accept an optional FileSystem parameter for remote sources.
  */
@@ -21,35 +21,50 @@ import {
   readGroupChatFile,
   parseDateString,
 } from "./st-reader";
+import { mapWithConcurrency } from "./st-concurrency";
 
 import { extractCardFromPng } from "../services/character-card.service";
 import {
   createCharacter,
   listCharacterSourceFilenameIds,
 } from "../services/characters.service";
-import { uploadImage, uploadImages } from "../services/images.service";
-import { createPersona, setPersonaAvatar, setPersonaImage } from "../services/personas.service";
+import { uploadImages } from "../services/images.service";
+import { createPersona, listPersonaSourceFilenameIds, setPersonaAvatar, setPersonaImage } from "../services/personas.service";
 import {
   emitWorldBookLibraryChanged,
   importWorldBookBulk,
   listSillyTavernWorldBookSourceFilenameIds,
 } from "../services/world-books.service";
-import { createChatRaw, bulkInsertMessages } from "../services/chats.service";
+import { bulkInsertMessages, createChatRaw, listChatSourceFilenameIds } from "../services/chats.service";
 import { createCooperativeYielder, yieldToEventLoop } from "../llm/stream-utils";
 import { getDb } from "../db/connection";
+import { currentWorkerBudget } from "../utils/cpu-budget";
+
 import type { CreateCharacterInput } from "../types/character";
 
-// ─── Default filesystem singleton ──────────────────────────────────────────
-
 const defaultFs = new LocalFileSystem();
-const characterBatchSize = 50;
-const characterReadConcurrency = 8;
-const characterAvatarWriteConcurrency = 8;
-const yieldEveryPersona = 4;
-const yieldEveryChat = 8;
-const yieldEveryGroupChat = 4;
+const yieldEveryPersona = 8;
+const yieldEveryChatBatch = 1;
 
-// ─── Result types ───────────────────────────────────────────────────────────
+function characterBatchSize(): number {
+  return 10 * currentWorkerBudget().workerConcurrency;
+}
+
+function characterReadConcurrency(): number {
+  return currentWorkerBudget().workerConcurrency;
+}
+
+function characterAvatarWriteConcurrency(): number {
+  return currentWorkerBudget().workerConcurrency;
+}
+
+function chatReadConcurrency(): number {
+  return Math.max(1, Math.ceil(currentWorkerBudget().workerConcurrency * 0.75));
+}
+
+function groupChatReadConcurrency(): number {
+  return Math.max(1, Math.ceil(currentWorkerBudget().workerConcurrency / 2));
+}
 
 export interface CharacterImportResult {
   imported: number;
@@ -68,6 +83,7 @@ export interface WorldBookImportResult {
 
 export interface PersonaImportResult {
   imported: number;
+  skipped: number;
   failed: number;
   avatarsUploaded: number;
   nameToId: Map<string, string>;
@@ -75,6 +91,7 @@ export interface PersonaImportResult {
 
 export interface ChatImportResult {
   imported: number;
+  skipped: number;
   failed: number;
   totalMessages: number;
   skippedChars: number;
@@ -87,24 +104,13 @@ export interface GroupChatImportResult {
   totalMessages: number;
 }
 
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (true) {
-      const index = next++;
-      if (index >= items.length) return;
-      results[index] = await mapper(items[index], index);
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, worker),
-  );
-  return results;
+export function characterChatSourceKey(charDirName: string, chatFileName: string): string {
+  return `chats/${charDirName}/${chatFileName}`;
+}
+
+export function groupChatSourceKey(chatId: string): string {
+  const fileName = chatId.toLowerCase().endsWith(".jsonl") ? chatId : `${chatId}.jsonl`;
+  return `group chats/${fileName}`;
 }
 
 type PreparedCharacter =
@@ -117,8 +123,6 @@ type PreparedCharacter =
       bytes: Uint8Array;
       cardInput: CreateCharacterInput;
     };
-
-// ─── Character import ───────────────────────────────────────────────────────
 
 export async function importCharacters(
   userId: string,
@@ -140,14 +144,13 @@ export async function importCharacters(
   );
 
   const total = pngFiles.length;
-  // One indexed query replaces N progressively slower JSON lookups.
   const existingByFilename = listCharacterSourceFilenameIds(userId);
 
-  for (let batchStart = 0; batchStart < pngFiles.length; batchStart += characterBatchSize) {
-    const batch = pngFiles.slice(batchStart, batchStart + characterBatchSize);
+  for (let batchStart = 0; batchStart < pngFiles.length; batchStart += characterBatchSize()) {
+    const batch = pngFiles.slice(batchStart, batchStart + characterBatchSize());
     const prepared = await mapWithConcurrency(
       batch,
-      characterReadConcurrency,
+      characterReadConcurrency(),
       async (entry): Promise<PreparedCharacter> => {
         const filename = entry.name;
         const stem = fs.basename(filename, ".png");
@@ -160,10 +163,7 @@ export async function importCharacters(
             fs.readFile(filePath),
             fs.stat(filePath).catch(() => null),
           ]);
-          const bytes = new Uint8Array(buffer);
-          const cardInput = await extractCardFromPng(
-            new File([bytes], filename, { type: "image/png" }),
-          );
+          const cardInput = await extractCardFromPng(buffer);
           if (cardInput.created_at == null && fileStat) {
             cardInput.created_at = fileStat.createdAt ?? fileStat.modifiedAt;
           }
@@ -171,9 +171,10 @@ export async function importCharacters(
             ...(cardInput.extensions ?? {}),
             _lumiverse_source_filename: filename,
           };
-          return { kind: "ready", filename, stem, bytes, cardInput };
-        } catch (err: any) {
-          logger.warn(`Failed to import ${filename}: ${err.message}`);
+          return { kind: "ready", filename, stem, bytes: buffer, cardInput };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Failed to import ${filename}: ${message}`);
           return { kind: "failed", filename };
         }
       },
@@ -185,7 +186,6 @@ export async function importCharacters(
       characterId: string;
     }> = [];
 
-    // Keep commits bounded, but collapse the per-card autocommit overhead.
     getDb().transaction(() => {
       for (const item of prepared) {
         if (item.kind === "existing") {
@@ -207,8 +207,9 @@ export async function importCharacters(
             characterId: character.id,
           });
           imported++;
-        } catch (err: any) {
-          logger.warn(`Failed to import ${item.filename}: ${err.message}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Failed to import ${item.filename}: ${message}`);
           failed++;
         }
       }
@@ -216,9 +217,6 @@ export async function importCharacters(
 
     if (created.length > 0) {
       try {
-        // Store originals in parallel and let thumbnails generate lazily on
-        // first use. Starting two Sharp jobs for every card would swamp large
-        // migrations long after their database phase completed.
         const avatarResults = await uploadImages(
           userId,
           created.map((item) => ({
@@ -228,8 +226,8 @@ export async function importCharacters(
             owner_character_id: item.characterId,
           })),
           {
-            concurrency: characterAvatarWriteConcurrency,
-            deferProcessing: false,
+            concurrency: characterAvatarWriteConcurrency(),
+            deferProcessing: true,
           },
         );
 
@@ -246,21 +244,18 @@ export async function importCharacters(
             attachAvatar.run(image.id, image.filename, now, created[i].characterId, userId);
           }
         })();
-      } catch (err: any) {
-        logger.warn(`Avatar batch failed; characters were still imported: ${err.message}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(`Avatar batch failed; characters were still imported: ${message}`);
       }
     }
 
-    for (let i = 0; i < batch.length; i++) {
-      logger.progress("Importing characters", batchStart + i + 1, total);
-    }
+    logger.progress("Importing characters", Math.min(batchStart + batch.length, total), total);
     await yieldToEventLoop();
   }
 
   return { imported, skipped, failed, filenameToId };
 }
-
-// ─── World book import ──────────────────────────────────────────────────────
 
 export async function importWorldBooks(
   userId: string,
@@ -303,8 +298,9 @@ export async function importWorldBooks(
         totalEntries += result.entryCount;
         nameToId.set(wb.name, result.worldBook.id);
         existingByFilename.set(wb.filename, result.worldBook.id);
-      } catch (err: any) {
-        logger.warn(`Failed to import world book "${wb.name}": ${err.message}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(`Failed to import world book "${wb.name}": ${message}`);
         failed++;
       }
 
@@ -322,8 +318,6 @@ export async function importWorldBooks(
   return { imported, skipped, failed, totalEntries, nameToId };
 }
 
-// ─── Persona import ─────────────────────────────────────────────────────────
-
 export async function importPersonas(
   userId: string,
   stDataDir: string,
@@ -333,60 +327,102 @@ export async function importPersonas(
 ): Promise<PersonaImportResult> {
   const nameToId = new Map<string, string>();
   let imported = 0;
+  let skipped = 0;
   let failed = 0;
   let avatarsUploaded = 0;
 
   const personaPayloads = await readPersonasFromDisk(stDataDir, fs);
   const total = personaPayloads.length;
+  const existingBySource = listPersonaSourceFilenameIds(userId);
   const maybeYield = createCooperativeYielder(yieldEveryPersona);
+  const avatarDir = fs.join(stDataDir, "User Avatars");
+  const pendingAvatars: Array<{ personaId: string; avatarKey: string; bytes: Uint8Array; mimeType: string }> = [];
 
   for (let i = 0; i < personaPayloads.length; i++) {
     const p = personaPayloads[i];
     logger.progress("Importing personas", i + 1, total);
 
+    const existing = existingBySource.get(p.avatarKey);
+    if (existing) {
+      nameToId.set(existing.name, existing.id);
+      nameToId.set(p.name, existing.id);
+      skipped++;
+      await maybeYield();
+      continue;
+    }
+
     try {
       const attachedWbId = p.lorebookName ? worldBookNameToId.get(p.lorebookName) : undefined;
-
       const persona = createPersona(userId, {
         name: p.name,
         description: p.description || undefined,
         title: p.title || undefined,
         attached_world_book_id: attachedWbId,
+        metadata: {
+          source: "sillytavern_migration",
+          _lumiverse_source_filename: p.avatarKey,
+        },
       });
 
       nameToId.set(p.name, persona.id);
+      existingBySource.set(p.avatarKey, { id: persona.id, name: p.name });
       imported++;
 
-      // Try avatar upload
-      const avatarDir = fs.join(stDataDir, "User Avatars");
       const avatarPath = fs.join(avatarDir, p.avatarKey);
-
       if (await fs.exists(avatarPath)) {
         try {
           const avatarBuffer = await fs.readFile(avatarPath);
-          const avatarBytes = new Uint8Array(avatarBuffer);
           const mimeType = p.avatarKey.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-          const file = new File([avatarBytes], p.avatarKey, { type: mimeType });
-          const image = await uploadImage(userId, file);
-          setPersonaImage(userId, persona.id, image.id);
-          setPersonaAvatar(userId, persona.id, image.filename);
-          avatarsUploaded++;
+          pendingAvatars.push({
+            personaId: persona.id,
+            avatarKey: p.avatarKey,
+            bytes: avatarBuffer,
+            mimeType,
+          });
         } catch {
-          // Avatar upload failed, not critical
+          // Avatar read failed, not critical
         }
       }
-    } catch (err: any) {
-      logger.warn(`Failed to import persona "${p.name}": ${err.message}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(`Failed to import persona "${p.name}": ${message}`);
       failed++;
     }
 
     await maybeYield();
   }
 
-  return { imported, failed, avatarsUploaded, nameToId };
+  if (pendingAvatars.length > 0) {
+    try {
+      const avatarResults = await uploadImages(
+        userId,
+        pendingAvatars.map((item) => ({
+          data: item.bytes,
+          filename: item.avatarKey,
+          mime_type: item.mimeType,
+        })),
+        { concurrency: characterAvatarWriteConcurrency(), deferProcessing: true },
+      );
+      for (let i = 0; i < avatarResults.length; i++) {
+        const image = avatarResults[i]?.image;
+        const pending = pendingAvatars[i];
+        if (!image || !pending) continue;
+        setPersonaImage(userId, pending.personaId, image.id);
+        setPersonaAvatar(userId, pending.personaId, image.filename);
+        avatarsUploaded++;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(`Persona avatar batch failed; personas were still imported: ${message}`);
+    }
+  }
+
+  return { imported, skipped, failed, avatarsUploaded, nameToId };
 }
 
-// ─── Chat import ────────────────────────────────────────────────────────────
+type ChatWorkItem =
+  | { kind: "char-missing"; charDirName: string; files: string[] }
+  | { kind: "chat"; charDirName: string; characterId: string; fileName: string };
 
 export async function importChats(
   userId: string,
@@ -398,90 +434,129 @@ export async function importChats(
 ): Promise<ChatImportResult> {
   const chatsDir = fs.join(stDataDir, "chats");
   let imported = 0;
+  let skipped = 0;
   let failed = 0;
   let totalMessages = 0;
   let skippedChars = 0;
 
-  if (!(await fs.exists(chatsDir))) return { imported, failed, totalMessages, skippedChars };
+  if (!(await fs.exists(chatsDir))) {
+    return { imported, skipped, failed, totalMessages, skippedChars };
+  }
 
   const entries = await fs.readdir(chatsDir);
   const charDirs = entries.filter((e) => e.isDirectory);
+  const existingBySource = listChatSourceFilenameIds(userId);
+  const work: ChatWorkItem[] = [];
 
-  // Count total chats for progress
-  let totalChats = 0;
   for (const dir of charDirs) {
     const chatEntries = await fs.readdir(fs.join(chatsDir, dir.name));
-    totalChats += chatEntries.filter(
-      (e) => e.isFile && fs.extname(e.name).toLowerCase() === ".jsonl"
-    ).length;
-  }
-
-  let processedChats = 0;
-  const maybeYield = createCooperativeYielder(yieldEveryChat);
-
-  for (const charDirEntry of charDirs) {
-    const charDirName = charDirEntry.name;
-    const characterId = filenameToId.get(charDirName);
-
+    const jsonlFiles = chatEntries
+      .filter((e) => e.isFile && fs.extname(e.name).toLowerCase() === ".jsonl")
+      .map((e) => e.name);
+    const characterId = filenameToId.get(dir.name);
     if (!characterId) {
-      const chatEntries = await fs.readdir(fs.join(chatsDir, charDirName));
-      const chatCount = chatEntries.filter(
-        (e) => e.isFile && fs.extname(e.name).toLowerCase() === ".jsonl"
-      ).length;
-      skippedChars++;
-      processedChats += chatCount;
-      logger.warn(`No character found for "${charDirName}", skipping ${chatCount} chat(s)`);
-      logger.progress("Importing chats", processedChats, totalChats);
-      await maybeYield();
+      work.push({ kind: "char-missing", charDirName: dir.name, files: jsonlFiles });
       continue;
     }
+    for (const fileName of jsonlFiles) {
+      work.push({ kind: "chat", charDirName: dir.name, characterId, fileName });
+    }
+  }
 
-    const chatEntries = await fs.readdir(fs.join(chatsDir, charDirName));
-    const jsonlFiles = chatEntries.filter(
-      (e) => e.isFile && fs.extname(e.name).toLowerCase() === ".jsonl"
-    );
+  const totalChats = work.reduce((sum, item) => sum + (item.kind === "chat" ? 1 : item.files.length), 0);
+  let processedChats = 0;
+  const maybeYield = createCooperativeYielder(yieldEveryChatBatch);
 
-    for (const chatFile of jsonlFiles) {
+  const chatItems = work.filter((item): item is Extract<ChatWorkItem, { kind: "chat" }> => item.kind === "chat");
+  for (const item of work) {
+    if (item.kind !== "char-missing") continue;
+    skippedChars++;
+    processedChats += item.files.length;
+    logger.warn(`No character found for "${item.charDirName}", skipping ${item.files.length} chat(s)`);
+    logger.progress("Importing chats", processedChats, totalChats);
+    await maybeYield();
+  }
+
+  for (let batchStart = 0; batchStart < chatItems.length; batchStart += characterBatchSize()) {
+    const batch = chatItems.slice(batchStart, batchStart + characterBatchSize());
+    const prepared = await mapWithConcurrency(batch, chatReadConcurrency(), async (item) => {
+      const sourceKey = characterChatSourceKey(item.charDirName, item.fileName);
+      if (existingBySource.has(sourceKey)) {
+        return { kind: "skipped" as const, sourceKey };
+      }
       try {
         const chatData = await readCharacterChatFile({
           stDataDir,
-          charDirName,
-          chatFileName: chatFile.name,
+          charDirName: item.charDirName,
+          chatFileName: item.fileName,
           personaNameToId,
           filenameToId,
           fs,
         });
-
         if (!chatData) {
-          logger.warn(`Could not read ${charDirName}/${chatFile.name}, skipping`);
+          return { kind: "unreadable" as const, label: `${item.charDirName}/${item.fileName}` };
+        }
+        return {
+          kind: "ready" as const,
+          item,
+          sourceKey,
+          chatData,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          kind: "failed" as const,
+          label: `${item.charDirName}/${item.fileName}`,
+          message,
+        };
+      }
+    });
+
+    getDb().transaction(() => {
+      for (const preparedItem of prepared) {
+        if (preparedItem.kind === "skipped") {
+          skipped++;
           continue;
         }
-
-        const chat = createChatRaw(userId, {
-          character_id: characterId,
-          name: chatData.name,
-          metadata: chatData.metadata,
-          created_at: chatData.created_at,
-        });
-
-        const msgCount = bulkInsertMessages(chat.id, chatData.messages, userId);
-        imported++;
-        totalMessages += msgCount;
-      } catch (err: any) {
-        logger.warn(`Failed to import chat "${charDirName}/${chatFile.name}": ${err.message}`);
-        failed++;
-      } finally {
-        processedChats++;
-        logger.progress("Importing chats", processedChats, totalChats);
-        await maybeYield();
+        if (preparedItem.kind === "unreadable") {
+          logger.warn(`Could not read ${preparedItem.label}, skipping`);
+          continue;
+        }
+        if (preparedItem.kind === "failed") {
+          logger.warn(`Failed to import chat "${preparedItem.label}": ${preparedItem.message}`);
+          failed++;
+          continue;
+        }
+        try {
+          const chat = createChatRaw(userId, {
+            character_id: preparedItem.item.characterId,
+            name: preparedItem.chatData.name,
+            metadata: {
+              ...(preparedItem.chatData.metadata ?? {}),
+              source: "sillytavern_migration",
+              _lumiverse_source_filename: preparedItem.sourceKey,
+            },
+            created_at: preparedItem.chatData.created_at,
+          });
+          const msgCount = bulkInsertMessages(chat.id, preparedItem.chatData.messages, userId);
+          existingBySource.set(preparedItem.sourceKey, chat.id);
+          imported++;
+          totalMessages += msgCount;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Failed to import chat "${preparedItem.item.charDirName}/${preparedItem.item.fileName}": ${message}`);
+          failed++;
+        }
       }
-    }
+    })();
+
+    processedChats += batch.length;
+    logger.progress("Importing chats", processedChats, totalChats);
+    await maybeYield();
   }
 
-  return { imported, failed, totalMessages, skippedChars };
+  return { imported, skipped, failed, totalMessages, skippedChars };
 }
-
-// ─── Group chat import ──────────────────────────────────────────────────────
 
 export async function importGroupChats(
   userId: string,
@@ -517,15 +592,17 @@ export async function importGroupChats(
     );
   }
 
-  // Count total chat files for progress
-  let totalChatsToProcess = 0;
-  for (const gd of groupDefs) totalChatsToProcess += gd.chatIds.length;
-
-  let processedChats = 0;
-  const maybeYield = createCooperativeYielder(yieldEveryGroupChat);
+  const existingBySource = listChatSourceFilenameIds(userId);
+  type GroupChatWork = {
+    groupName: string;
+    memberCharIds: string[];
+    chatId: string;
+    createDate?: string;
+  };
+  const work: GroupChatWork[] = [];
+  let skippedProgress = 0;
 
   for (const group of groupDefs) {
-    // Resolve member character IDs
     const memberCharIds: string[] = [];
     for (const memberFile of group.members) {
       const stem = fs.basename(memberFile, ".png");
@@ -535,51 +612,83 @@ export async function importGroupChats(
 
     if (memberCharIds.length === 0) {
       skipped++;
-      processedChats += group.chatIds.length;
+      skippedProgress += group.chatIds.length;
       logger.warn(`No members found for group "${group.name}", skipping`);
-      logger.progress("Importing group chats", processedChats, totalChatsToProcess);
-      await maybeYield();
       continue;
     }
 
     for (const chatId of group.chatIds) {
-      const chatData = await readGroupChatFile(stDataDir, chatId, personaNameToId, filenameToId, fs);
-
-      if (!chatData) {
-        logger.warn(`Could not read group chat "${group.name}/${chatId}", skipping`);
-        failed++;
-        processedChats++;
-        logger.progress("Importing group chats", processedChats, totalChatsToProcess);
-        await maybeYield();
-        continue;
-      }
-
-      try {
-        let chatCreatedAt = chatData.createdAt;
-        if (!chatCreatedAt && group.createDate) {
-          const ts = parseDateString(group.createDate);
-          if (ts) chatCreatedAt = ts;
-        }
-
-        const chat = createChatRaw(userId, {
-          character_id: memberCharIds[0],
-          name: group.name,
-          metadata: { group: true, character_ids: memberCharIds },
-          created_at: chatCreatedAt,
-        });
-
-        const msgCount = bulkInsertMessages(chat.id, chatData.messages, userId);
-        imported++;
-        totalMessages += msgCount;
-      } catch (err: any) {
-        logger.warn(`Failed to import group chat "${group.name}/${chatId}": ${err.message}`);
-        failed++;
-      }
-
-      processedChats++;
-      logger.progress("Importing group chats", processedChats, totalChatsToProcess);
-      await maybeYield();
+      work.push({
+        groupName: group.name,
+        memberCharIds,
+        chatId,
+        createDate: group.createDate,
+      });
     }
+  }
+
+  const totalChatsToProcess = work.length + skippedProgress;
+  let processedChats = skippedProgress;
+  logger.progress("Importing group chats", processedChats, totalChatsToProcess);
+
+  const maybeYield = createCooperativeYielder(yieldEveryChatBatch);
+  for (let batchStart = 0; batchStart < work.length; batchStart += characterBatchSize()) {
+    const batch = work.slice(batchStart, batchStart + characterBatchSize());
+    const prepared = await mapWithConcurrency(batch, groupChatReadConcurrency(), async (item) => {
+      const sourceKey = groupChatSourceKey(item.chatId);
+      if (existingBySource.has(sourceKey)) {
+        return { kind: "skipped" as const, sourceKey };
+      }
+      const chatData = await readGroupChatFile(stDataDir, item.chatId, personaNameToId, filenameToId, fs);
+      if (!chatData) {
+        return { kind: "unreadable" as const, label: `${item.groupName}/${item.chatId}` };
+      }
+      return { kind: "ready" as const, item, sourceKey, chatData };
+    });
+
+    getDb().transaction(() => {
+      for (const preparedItem of prepared) {
+        if (preparedItem.kind === "skipped") {
+          skipped++;
+          continue;
+        }
+        if (preparedItem.kind === "unreadable") {
+          logger.warn(`Could not read group chat "${preparedItem.label}", skipping`);
+          failed++;
+          continue;
+        }
+        try {
+          let chatCreatedAt = preparedItem.chatData.createdAt;
+          if (!chatCreatedAt && preparedItem.item.createDate) {
+            const ts = parseDateString(preparedItem.item.createDate);
+            if (ts) chatCreatedAt = ts;
+          }
+          const chat = createChatRaw(userId, {
+            character_id: preparedItem.item.memberCharIds[0],
+            name: preparedItem.item.groupName,
+            metadata: {
+              group: true,
+              character_ids: preparedItem.item.memberCharIds,
+              source: "sillytavern_migration",
+              _lumiverse_source_filename: preparedItem.sourceKey,
+            },
+            created_at: chatCreatedAt,
+          });
+          const msgCount = bulkInsertMessages(chat.id, preparedItem.chatData.messages, userId);
+          existingBySource.set(preparedItem.sourceKey, chat.id);
+          imported++;
+          totalMessages += msgCount;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Failed to import group chat "${preparedItem.item.groupName}/${preparedItem.item.chatId}": ${message}`);
+          failed++;
+        }
+      }
+    })();
+
+    processedChats += batch.length;
+    logger.progress("Importing group chats", processedChats, totalChatsToProcess);
+    await maybeYield();
   }
 
   return { imported, failed, skipped, totalMessages };

@@ -486,6 +486,8 @@ export default function OperatorPanel() {
   const [hostDraft, setHostDraft] = useState('')
   const storeBusy = useStore((s) => s.operatorBusy)
   const storeProgressMessage = useStore((s) => s.operatorProgressMessage)
+  const thumbnailQueue = useStore((s) => s.thumbnailQueue)
+  const setThumbnailQueue = useStore((s) => s.setThumbnailQueue)
   const addToast = useStore((s) => s.addToast)
 
   // Track the operation that triggered a server restart so we can
@@ -612,11 +614,12 @@ export default function OperatorPanel() {
         cacheFiles: next.configuredSettings.cacheFiles ?? null,
         cacheItems: next.configuredSettings.cacheItems ?? null,
       })
+      if (next.thumbnailQueue) setThumbnailQueue(next.thumbnailQueue)
       return next
     } catch {
       return null
     }
-  }, [])
+  }, [setThumbnailQueue])
 
   const refreshDnsSettings = useCallback(async () => {
     try {
@@ -2396,6 +2399,43 @@ export default function OperatorPanel() {
                 onChange={(value) => setSharpSettings((prev) => ({ ...prev, cacheItems: value }))}
               />
             </label>
+          </div>
+
+          <div
+            className={styles.thumbnailQueue}
+            role="status"
+            aria-live="polite"
+            aria-label={t('operator.sharpThumbnailTitle')}
+          >
+            <div className={styles.thumbnailQueueHeader}>
+              <span className={styles.thumbnailQueueTitle}>{t('operator.sharpThumbnailTitle')}</span>
+              <span className={styles.thumbnailQueueCounts}>
+                {thumbnailQueue.remaining > 0
+                  ? t('operator.sharpThumbnailCounts', {
+                      processed: thumbnailQueue.processed,
+                      remaining: thumbnailQueue.remaining,
+                      total: thumbnailQueue.total,
+                    })
+                  : t('operator.sharpThumbnailIdle')}
+              </span>
+            </div>
+            <div
+              className={styles.thumbnailQueueTrack}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(thumbnailQueue.total, 1)}
+              aria-valuenow={thumbnailQueue.processed}
+            >
+              <div
+                className={`${styles.thumbnailQueueFill}${thumbnailQueue.remaining > 0 ? ` ${styles.thumbnailQueueFillActive}` : ''}`}
+                style={{
+                  width: thumbnailQueue.remaining > 0 && thumbnailQueue.total > 0
+                    ? `${Math.min(100, (thumbnailQueue.processed / thumbnailQueue.total) * 100)}%`
+                    : '0%',
+                }}
+              />
+            </div>
+            <p className={styles.thumbnailQueueHint}>{t('operator.sharpThumbnailHint')}</p>
           </div>
 
           <div className={styles.controls}>

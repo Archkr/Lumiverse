@@ -157,6 +157,8 @@ export enum EventType {
   OPERATOR_LOG = 'OPERATOR_LOG',
   OPERATOR_STATUS = 'OPERATOR_STATUS',
   OPERATOR_PROGRESS = 'OPERATOR_PROGRESS',
+  IMAGE_THUMBNAIL_QUEUE = 'IMAGE_THUMBNAIL_QUEUE',
+
 
   // Memory Cortex
   CORTEX_REBUILD_PROGRESS = 'CORTEX_REBUILD_PROGRESS',
@@ -271,6 +273,14 @@ export interface OperatorProgressPayload {
   operation: string
   status: 'in_progress' | 'complete' | 'error'
   message: string
+}
+
+export interface ImageThumbnailQueuePayload {
+  processed: number
+  remaining: number
+  total: number
+  active: number
+  queued: number
 }
 
 export interface SpindlePreGenerationActivityPayload {

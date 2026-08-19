@@ -1709,17 +1709,19 @@ export interface MigrationSlice {
 }
 
 // ---- Operator Slice ----
-import type { OperatorLogEntry, OperatorStatusPayload } from '@/types/ws-events'
+import type { ImageThumbnailQueuePayload, OperatorLogEntry, OperatorStatusPayload } from '@/types/ws-events'
 
 export interface OperatorSlice {
   operatorLogs: OperatorLogEntry[]
   operatorStatus: OperatorStatusPayload | null
   operatorBusy: string | null
   operatorProgressMessage: string | null
+  thumbnailQueue: ImageThumbnailQueuePayload
   appendOperatorLogs: (entries: OperatorLogEntry[]) => void
   setOperatorStatus: (status: OperatorStatusPayload) => void
   setOperatorBusy: (operation: string | null) => void
   setOperatorProgressMessage: (message: string | null) => void
+  setThumbnailQueue: (status: ImageThumbnailQueuePayload) => void
   clearOperatorLogs: () => void
 }
 

@@ -1,5 +1,5 @@
 import { get, post, put, del } from './client'
-import type { OperatorLogEntry, OperatorStatusPayload } from '@/types/ws-events'
+import type { ImageThumbnailQueuePayload, OperatorLogEntry, OperatorStatusPayload } from '@/types/ws-events'
 
 export type OperatorStatus = OperatorStatusPayload
 
@@ -46,6 +46,7 @@ export interface OperatorSharpStatus {
   configuredSettings: SharpSettings
   effectiveSettings: ResolvedSharpSettings
   defaults: ResolvedSharpSettings
+  thumbnailQueue?: ImageThumbnailQueuePayload
 }
 
 export interface DnsSettings {

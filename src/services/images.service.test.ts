@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, unlinkSync } from "fs";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import { tmpdir } from "os";
@@ -18,8 +18,14 @@ import {
   getImage,
   getImageFilePath,
   listImages,
+  getDeferredImageProcessingStatus,
+  rebuildAllThumbnails,
+  resetDeferredImageProcessingForTests,
   uploadImage,
+  uploadImages,
+  waitForDeferredImageProcessing,
 } from "./images.service";
+import { deriveWorkerBudget, setWorkerBudgetOverride } from "../utils/cpu-budget";
 
 const originalDataDir = env.dataDir;
 let testDataDir = "";
@@ -141,12 +147,16 @@ function seedChat(id: string, metadata: Record<string, unknown>, updatedAt = 100
 }
 
 beforeEach(() => {
+  resetDeferredImageProcessingForTests();
+  setWorkerBudgetOverride(null);
   initImagesTestDb();
   testDataDir = mkdtempSync(join(tmpdir(), "lumiverse-images-test-"));
   env.dataDir = testDataDir;
 });
 
 afterEach(() => {
+  resetDeferredImageProcessingForTests();
+  setWorkerBudgetOverride(null);
   closeDatabase();
   env.dataDir = originalDataDir;
   if (testDataDir) {
@@ -483,5 +493,77 @@ describe("images.service ownership filters", () => {
     } finally {
       rmSync(workdir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("deferred image processing", () => {
+  const ONE_BY_ONE_PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  test("waitForDeferredImageProcessing drains queued thumbnail work", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const results = await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+      { data: ONE_BY_ONE_PNG, filename: "b.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    expect(results.every((row) => row.image)).toBe(true);
+    await waitForDeferredImageProcessing();
+    const thumbs = getDb().query("SELECT COUNT(*) AS count FROM images WHERE has_thumbnail = 1").get() as { count: number };
+    expect(thumbs.count).toBe(2);
+  });
+
+  test("reports processed and remaining counts until drain completes", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+      { data: ONE_BY_ONE_PNG, filename: "b.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    const mid = getDeferredImageProcessingStatus();
+    expect(mid.total).toBe(2);
+    expect(mid.processed + mid.remaining).toBe(2);
+    await waitForDeferredImageProcessing();
+    expect(getDeferredImageProcessingStatus()).toEqual({
+      processed: 2,
+      remaining: 0,
+      total: 2,
+      active: 0,
+      queued: 0,
+    });
+  });
+
+  test("rebuildAllThumbnails drains through the deferred Sharp queue", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const uploaded = await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+      { data: ONE_BY_ONE_PNG, filename: "b.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    await waitForDeferredImageProcessing();
+    const first = uploaded[0]?.image;
+    if (!first) throw new Error("expected uploaded image");
+    unlinkSync(join(testDataDir, "images", `${first.id}_thumb_sm_v2.webp`));
+
+    const ticks: number[] = [];
+    const result = await rebuildAllThumbnails("u1", {
+      onProgress: (progress) => ticks.push(progress.current),
+    });
+    expect(result).toEqual({
+      total: 2,
+      current: 2,
+      generated: 2,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(ticks.at(-1)).toBe(2);
+    expect(getDeferredImageProcessingStatus()).toMatchObject({
+      processed: 2,
+      remaining: 0,
+      total: 2,
+    });
+    expect(existsSync(join(testDataDir, "images", `${first.id}_thumb_sm_v2.webp`))).toBe(true);
   });
 });

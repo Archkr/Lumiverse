@@ -1002,6 +1002,20 @@ export function listSillyTavernWorldBookSourceFilenameIds(userId: string): Map<s
   return result;
 }
 
+export function listSillyTavernWorldBookNameIds(userId: string): Map<string, string> {
+  const rows = getDb().query(
+    `SELECT id, name
+     FROM world_books
+     WHERE user_id = ?
+       AND json_extract(metadata, '$.source') = 'sillytavern_migration'
+     ORDER BY updated_at ASC`,
+  ).all(userId) as Array<{ id: string; name: string }>;
+
+  const result = new Map<string, string>();
+  for (const row of rows) result.set(row.name, row.id);
+  return result;
+}
+
 export function updateWorldBook(userId: string, id: string, input: UpdateWorldBookInput): WorldBook | null {
   const existing = getWorldBook(userId, id);
   if (!existing) return null;

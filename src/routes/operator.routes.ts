@@ -12,6 +12,7 @@ import {
   getSharpSettingsStatus,
   putSharpSettings,
 } from "../services/sharp-settings.service";
+import { getDeferredImageProcessingStatus } from "../services/images.service";
 import {
   getDnsSettingsStatus,
   putDnsSettings,
@@ -46,7 +47,10 @@ app.get("/database", async (c) => {
 });
 
 app.get("/sharp", (c) => {
-  return c.json(getSharpSettingsStatus());
+  return c.json({
+    ...getSharpSettingsStatus(),
+    thumbnailQueue: getDeferredImageProcessingStatus(),
+  });
 });
 
 app.put("/sharp", async (c) => {

@@ -4,7 +4,7 @@
  * for all existing migration code.
  */
 
-import { access, readFile, readdir, stat } from "fs/promises";
+import { access, readdir, stat } from "fs/promises";
 import { join, dirname, basename, extname } from "path";
 import type { FileSystem, FileEntry, FileStat } from "../types";
 
@@ -56,7 +56,7 @@ export class LocalFileSystem implements FileSystem {
   }
 
   async readFile(path: string): Promise<Buffer> {
-    return readFile(path);
+    return Buffer.from(await Bun.file(path).arrayBuffer());
   }
 
   async readText(path: string): Promise<string> {

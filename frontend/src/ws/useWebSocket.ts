@@ -1884,6 +1884,11 @@ export function useWebSocket() {
           store.getState().setOperatorProgressMessage(inProgress ? (payload.message ?? null) : null)
         }
       }),
+      wsClient.on(EventType.IMAGE_THUMBNAIL_QUEUE, (payload: { processed: number; remaining: number; total: number; active: number; queued: number }) => {
+        if (payload && typeof payload.processed === 'number') {
+          store.getState().setThumbnailQueue(payload)
+        }
+      }),
 
       // MCP Server events
       wsClient.on(EventType.MCP_SERVER_CONNECTED, (payload: { id: string; name: string; toolCount: number; tools: any[] }) => {
