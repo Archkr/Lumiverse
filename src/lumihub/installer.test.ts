@@ -138,6 +138,7 @@ describe("LumiHub preset installer metadata", () => {
     secondPayload.presetData.regex_scripts = [{
       name: "Bundled v2",
       find_regex: "v2",
+      folder: "Hub preset",
       disabled: false,
     }];
     const second = await installPreset("request-regex-v2", secondPayload);

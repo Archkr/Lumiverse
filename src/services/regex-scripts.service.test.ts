@@ -1048,7 +1048,14 @@ describe("regex JSON overwrite imports", () => {
         version: "1.0.0",
         presetName: "Legacy folder preset",
       },
-      scripts: [{ name: "Bundled v2", find_regex: "v2", disabled: false }],
+      // Real LumiHub exports preserve the author's original folder on every
+      // script. It must not override the host's dedicated LumiHub folder.
+      scripts: [{
+        name: "Bundled v2",
+        find_regex: "v2",
+        folder: "Legacy folder preset",
+        disabled: false,
+      }],
     });
 
     const bundled = getRegexScriptsByPresetId(USER_ID, "preset-legacy-folder");

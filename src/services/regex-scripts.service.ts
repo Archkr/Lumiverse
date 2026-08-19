@@ -2738,9 +2738,16 @@ export function importPresetBoundRegexScripts(
       continue;
     }
     const before = new Set(getRegexScriptsByPresetId(userId, presetId).map((s) => s.id));
+    // The publisher's folder is only presentation metadata in an exported
+    // bundle. For a LumiHub install, folder placement is host-owned so it
+    // cannot let a same-named local folder be merged into the Hub payload.
+    const folder = normalizeOptionalId(attribution?.folderName) ?? presetName;
     const result = importRegexScripts(userId, {
-      scripts: [preparePresetBoundImportedScript(script, attribution)],
-      folder: normalizeOptionalId(attribution?.folderName) ?? presetName,
+      scripts: [{
+        ...preparePresetBoundImportedScript(script, attribution),
+        folder,
+      }],
+      folder,
       preset_id: presetId,
     });
     imported += result.imported;
