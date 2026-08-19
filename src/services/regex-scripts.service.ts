@@ -2123,10 +2123,13 @@ function chooseAvailableRegexFolder(
   userId: string,
   desiredFolder: string,
   allowedOccupantIds: Set<string>,
+  reserveLumiHubNamespace = false,
 ): string {
   const db = getDb();
   const base = desiredFolder.trim() || "LumiHub preset";
-  const candidates = [base, `${base} · LumiHub`];
+  const candidates = reserveLumiHubNamespace
+    ? [`${base} · LumiHub`]
+    : [base, `${base} · LumiHub`];
 
   for (let suffix = 2; suffix < 1000; suffix++) {
     candidates.push(`${base} · LumiHub (${suffix})`);
@@ -2231,7 +2234,11 @@ export function resolveLumiHubPresetRegexInstallFolder(
       .filter((script) => getLumiHubPresetRegexAttribution(script.metadata)?.id === normalizedHubId)
       .map((script) => script.id),
   );
-  return chooseAvailableRegexFolder(userId, presetName, allowedIds);
+  // The unqualified preset name is user-owned namespace. Even if an older
+  // LumiHub installation is the only current occupant, do not reuse it: a
+  // user can later add local regexes to that folder and the UI groups solely
+  // by folder name. LumiHub's current payload always gets a reserved folder.
+  return chooseAvailableRegexFolder(userId, presetName, allowedIds, true);
 }
 
 export interface InstallLumiHubPresetRegexOptions {

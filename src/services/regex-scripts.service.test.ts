@@ -1022,6 +1022,42 @@ describe("regex JSON overwrite imports", () => {
     expect(mustGetScript(local.id).disabled).toBe(false);
   });
 
+  test("moves a legacy unqualified LumiHub folder into the reserved namespace on update", () => {
+    importPresetBoundRegexScripts(
+      USER_ID,
+      "preset-legacy-folder",
+      "Legacy folder preset",
+      [{ name: "Bundled v1", find_regex: "v1", disabled: false }],
+      { source: "lumihub", hubPresetId: "hub-legacy-folder", presetVersion: "1.0.0" },
+    );
+
+    expect(resolveLumiHubPresetRegexInstallFolder(
+      USER_ID,
+      "preset-legacy-folder",
+      "hub-legacy-folder",
+      "Legacy folder preset",
+    )).toBe("Legacy folder preset · LumiHub");
+
+    installLumiHubPresetRegexScripts(USER_ID, {
+      presetId: "preset-legacy-folder",
+      presetName: "Legacy folder preset",
+      hubPresetId: "hub-legacy-folder",
+      presetVersion: "2.0.0",
+      previous: {
+        hubPresetId: "hub-legacy-folder",
+        version: "1.0.0",
+        presetName: "Legacy folder preset",
+      },
+      scripts: [{ name: "Bundled v2", find_regex: "v2", disabled: false }],
+    });
+
+    const bundled = getRegexScriptsByPresetId(USER_ID, "preset-legacy-folder");
+    expect(bundled.find((script) => script.metadata._lumiverse_lumihub_preset?.version === "1.0.0"))
+      .toMatchObject({ disabled: true, folder: "Legacy folder preset · v1.0.0" });
+    expect(bundled.find((script) => script.metadata._lumiverse_lumihub_preset?.version === "2.0.0"))
+      .toMatchObject({ folder: "Legacy folder preset · LumiHub" });
+  });
+
   test("retroactively attributes legacy preset-owned regexes before archiving them", () => {
     const legacy = createRegexScript(USER_ID, {
       name: "Legacy bundled regex",
@@ -1078,7 +1114,7 @@ describe("regex JSON overwrite imports", () => {
     expect(getRegexScriptsByPresetId(USER_ID, "preset-safe-update")).toHaveLength(1);
     expect(mustGetScript(v1.id)).toMatchObject({
       disabled: false,
-      folder: "Safe update preset",
+      folder: "Safe update preset · LumiHub",
       metadata: { _lumiverse_lumihub_preset: { id: "hub-safe-update", version: "1.0.0" } },
     });
   });
