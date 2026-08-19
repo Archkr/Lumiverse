@@ -57,6 +57,17 @@ await initVapidKeys();
 const db = initDatabase();
 await runMigrations(db);
 
+const {
+  describeImageProcessingRecovery,
+  getImageProcessingRecovery,
+} = await import("./services/images.service");
+const leftoverThumbnails = getImageProcessingRecovery();
+if (leftoverThumbnails.pending > 0) {
+  console.warn(
+    `[startup] ${describeImageProcessingRecovery(leftoverThumbnails)}. Not auto-started — recover from Operator → Image Processing after changing settings if needed.`,
+  );
+}
+
 // Move legacy plaintext Pollinations application keys into the per-user
 // encrypted secret store before the rest of the application begins serving.
 const { migrateLegacyPollinationsAppKeys } = await import("./services/connections.service");

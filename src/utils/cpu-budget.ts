@@ -26,22 +26,29 @@ export function logicalThreadCount(
 }
 
 /**
- * Leave a couple logical threads for the OS / UI when possible.
- * Caps keep a 14-core laptop from treating migration as a render farm.
+ * Leave a growing OS reserve (~12.5%, floor 2) so chat/generation still have
+ * cores. Laptop numbers stay conservative; big hosts get more Sharp/import
+ * workers instead of the old hard 4-thread cap.
  */
 export function deriveWorkerBudget(
   logicalThreads: number = logicalThreadCount(),
-  reserved = 2,
+  reserved?: number,
 ): WorkerBudget {
   const threads = Math.max(1, Math.floor(logicalThreads));
-  const reserve = Math.max(0, Math.min(Math.floor(reserved), threads - 1));
+  const defaultReserved = Math.max(2, Math.floor(threads / 8));
+  const reserve = Math.max(0, Math.min(reserved ?? defaultReserved, Math.max(0, threads - 1)));
   const usable = Math.max(1, threads - reserve);
+  const laptopWorkers = Math.min(6, usable);
+  const hostWorkers = Math.floor(usable / 4);
+  const deferredJobs = usable < 4
+    ? 1
+    : Math.max(2, Math.ceil(usable / 8));
   return {
     logicalThreads: threads,
     reserved: reserve,
-    workerConcurrency: Math.max(1, Math.min(6, usable)),
-    sharpConcurrency: Math.max(1, Math.min(4, usable)),
-    deferredImageConcurrency: Math.max(1, Math.min(2, Math.ceil(usable / 4))),
+    workerConcurrency: Math.max(1, Math.min(16, Math.max(laptopWorkers, hostWorkers))),
+    sharpConcurrency: Math.max(1, Math.min(24, Math.max(Math.min(4, usable), Math.floor(usable / 3)))),
+    deferredImageConcurrency: Math.max(1, Math.min(8, deferredJobs)),
   };
 }
 

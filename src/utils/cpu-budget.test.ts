@@ -15,7 +15,7 @@ describe("cpu-budget", () => {
     expect(logicalThreadCount(() => { throw new Error("unavailable"); })).toBe(1);
   });
 
-  test("reserves threads and caps worker / Sharp / deferred jobs", () => {
+  test("reserves threads and scales Sharp past the laptop cap on big hosts", () => {
     expect(deriveWorkerBudget(14)).toEqual({
       logicalThreads: 14,
       reserved: 2,
@@ -50,6 +50,20 @@ describe("cpu-budget", () => {
       workerConcurrency: 1,
       sharpConcurrency: 1,
       deferredImageConcurrency: 1,
+    });
+    expect(deriveWorkerBudget(36)).toEqual({
+      logicalThreads: 36,
+      reserved: 4,
+      workerConcurrency: 8,
+      sharpConcurrency: 10,
+      deferredImageConcurrency: 4,
+    });
+    expect(deriveWorkerBudget(72)).toEqual({
+      logicalThreads: 72,
+      reserved: 9,
+      workerConcurrency: 15,
+      sharpConcurrency: 21,
+      deferredImageConcurrency: 8,
     });
   });
 

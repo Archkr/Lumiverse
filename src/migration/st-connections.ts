@@ -108,8 +108,8 @@ function parseConnectionRow(row: Record<string, unknown>): ConnectionProfileRow 
     api_url: String(row.api_url ?? ""),
     model: String(row.model ?? ""),
     preset_id: typeof row.preset_id === "string" ? row.preset_id : null,
-    is_default: row.is_default,
-    has_api_key: row.has_api_key,
+    is_default: Boolean(row.is_default),
+    has_api_key: Boolean(row.has_api_key),
     metadata,
   };
 }
@@ -224,7 +224,7 @@ export async function importSTConnections(
         provider: profile.provider,
         api_url: profile.api_url,
         model: profile.model,
-        preset_id: profile.preset_id,
+        preset_id: profile.preset_id ?? undefined,
         is_default: Boolean(profile.is_default),
         metadata: profile.metadata,
         api_key: snapshot.secret ?? "",

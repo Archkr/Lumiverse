@@ -20,7 +20,6 @@ async function applyBaseline(): Promise<void> {
   // auth here, so just disable FK enforcement for the in-memory test DB.
   db.run("PRAGMA foreign_keys = OFF");
   db.run(sql);
-  db.run(await Bun.file(join(import.meta.dir, "..", "db", "migrations", "099_character_library_scope.sql")).text());
 }
 
 function insertChat(userId: string, characterId: string): string {

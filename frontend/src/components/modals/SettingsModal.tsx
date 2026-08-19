@@ -33,7 +33,6 @@ import { useStore } from '@/store'
 import { spindleApi } from '@/api/spindle'
 import { connectionsApi } from '@/api/connections'
 import { embeddingsApi } from '@/api/embeddings'
-import { imagesApi } from '@/api/images'
 import { settingsApi } from '@/api/settings'
 import { notificationSoundsApi } from '@/api/notification-sounds'
 import { unlockNotificationAudio } from '@/lib/notificationAudio'
@@ -2943,132 +2942,6 @@ function WebSearchSettings() {
   )
 }
 
-function ImageOptimizationSettings() {
-  const { t } = useTranslation('settings')
-  const thumbnailSettings = useStore((s) => (s as any).thumbnailSettings as { smallSize?: number, largeSize?: number } | undefined)
-  const setSetting = useStore((s) => s.setSetting)
-
-  const smallSize = thumbnailSettings?.smallSize ?? 300
-  const largeSize = thumbnailSettings?.largeSize ?? 700
-
-  const [rebuilding, setRebuilding] = useState(false)
-  const [rebuildProgress, setRebuildProgress] = useState<{ current: number, total: number } | null>(null)
-  const [rebuildStatus, setRebuildStatus] = useState<string | null>(null)
-
-  const update = (patch: { smallSize?: number, largeSize?: number }) => {
-    setSetting('thumbnailSettings', { smallSize, largeSize, ...patch })
-  }
-
-  const formatRebuildParts = (generated: number, skipped: number, failed: number) => {
-    const parts: string[] = []
-    if (generated > 0) parts.push(t('advanced.rebuildGenerated', { count: generated }))
-    if (skipped > 0) parts.push(t('advanced.rebuildSkipped', { count: skipped }))
-    if (failed > 0) parts.push(t('advanced.rebuildFailedCount', { count: failed }))
-    return parts.join(', ')
-  }
-
-  const handleRebuild = async () => {
-    if (rebuilding) return
-    setRebuilding(true)
-    setRebuildStatus(t('advanced.rebuildStarting'))
-    setRebuildProgress(null)
-    try {
-      const result = await imagesApi.rebuildThumbnails({
-        onProgress: (p) => {
-          setRebuildProgress({ current: p.current, total: p.total })
-          const parts = [`${p.current}/${p.total}`]
-          if (p.generated > 0) parts.push(t('advanced.rebuildGenerated', { count: p.generated }))
-          if (p.skipped > 0) parts.push(t('advanced.rebuildSkipped', { count: p.skipped }))
-          if (p.failed > 0) parts.push(t('advanced.rebuildFailedCount', { count: p.failed }))
-          setRebuildStatus(parts.join(' \u2022 '))
-        },
-      })
-      setRebuildStatus(t('advanced.rebuildDone', {
-        summary: formatRebuildParts(result.generated, result.skipped, result.failed),
-      }))
-    } catch (err: any) {
-      setRebuildStatus(t('advanced.rebuildFailed', {
-        error: err.message || t('advanced.rebuildUnknownError'),
-      }))
-    } finally {
-      setRebuilding(false)
-    }
-  }
-
-  const pct = rebuildProgress && rebuildProgress.total > 0
-    ? Math.round((rebuildProgress.current / rebuildProgress.total) * 100)
-    : 0
-
-  return (
-    <>
-      <p className={styles.placeholder}>
-        {t('advanced.imgOptHelper')}
-      </p>
-
-      <div className={styles.field}>
-        <div className={styles.imgOptSliderHeader}>
-          <label className={styles.fieldLabel}>{t('advanced.smallTier')}</label>
-          <span className={styles.imgOptSliderValue}>{smallSize}px</span>
-        </div>
-        <input
-          type="range"
-          className={styles.imgOptSlider}
-          min={100} max={500} step={50}
-          value={smallSize}
-          onChange={(e) => update({ smallSize: Number(e.target.value) })}
-        />
-        <span className={styles.placeholder} style={{ fontSize: 11 }}>
-          {t('advanced.smallTierHint')}
-        </span>
-      </div>
-
-      <div className={styles.field}>
-        <div className={styles.imgOptSliderHeader}>
-          <label className={styles.fieldLabel}>{t('advanced.largeTier')}</label>
-          <span className={styles.imgOptSliderValue}>{largeSize}px</span>
-        </div>
-        <input
-          type="range"
-          className={styles.imgOptSlider}
-          min={400} max={1200} step={50}
-          value={largeSize}
-          onChange={(e) => update({ largeSize: Number(e.target.value) })}
-        />
-        <span className={styles.placeholder} style={{ fontSize: 11 }}>
-          {t('advanced.largeTierHint')}
-        </span>
-      </div>
-
-      <div className={styles.imgOptRebuild}>
-        <div className={styles.field} style={{ flex: 1 }}>
-          <label className={styles.fieldLabel}>{t('advanced.rebuildCache')}</label>
-          <span className={styles.placeholder} style={{ fontSize: 11 }}>
-            {t('advanced.rebuildCacheHint')}
-          </span>
-        </div>
-        <button
-          type="button"
-          className={clsx(styles.segmentedBtn, styles.segmentedBtnActive)}
-          style={{ padding: '6px 16px', whiteSpace: 'nowrap' }}
-          disabled={rebuilding}
-          onClick={handleRebuild}
-        >
-          {rebuilding ? t('advanced.rebuilding') : t('advanced.rebuildThumbnails')}
-        </button>
-      </div>
-      {rebuilding && rebuildProgress && rebuildProgress.total > 0 && (
-        <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'var(--lumiverse-fill-subtle)', overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', borderRadius: 2, background: 'var(--lumiverse-primary)', transition: 'width 0.2s ease' }} />
-        </div>
-      )}
-      {rebuildStatus && (
-        <span className={styles.placeholder} style={{ fontSize: 11 }}>
-          {rebuildStatus}
-        </span>
-      )}
-    </>
-  )
-}
 
 function AdvancedSettings() {
   const { t } = useTranslation('settings')
@@ -3142,11 +3015,6 @@ function AdvancedSettings() {
   return (
     <div className={styles.settingsSection}>
       <h3 id={sectionAnchorId('advanced', 'general')} className={styles.sectionTitle}>{t('advanced.title')}</h3>
-
-      {/* Image Optimization accordion */}
-      <CollapsibleSection title={t('advanced.imageOptimization')} defaultExpanded={false}>
-        <ImageOptimizationSettings />
-      </CollapsibleSection>
 
       <CollapsibleSection title={t('advanced.spindleLogging')} defaultExpanded={false}>
         <Toggle.Checkbox

@@ -46,19 +46,6 @@ beforeEach(async () => {
   const db = getDb();
   db.run("PRAGMA foreign_keys = OFF");
   db.run(await Bun.file(join(import.meta.dir, "..", "db", "baseline.sql")).text());
-  for (const migration of [
-    "066_spindle_image_ownership.sql",
-    "092_characters_deleting_flag.sql",
-    "096_character_folders.sql",
-    "099_character_library_scope.sql",
-    "102_character_source_filename_index.sql",
-    "103_character_fts_update_columns.sql",
-    "098_world_book_entry_exclude_greeting.sql",
-    "098_world_book_entry_revision.sql",
-    "104_world_book_source_filename_index.sql",
-  ]) {
-    db.run(await Bun.file(join(import.meta.dir, "..", "db", "migrations", migration)).text());
-  }
 
   workDir = mkdtempSync(join(tmpdir(), "lumiverse-st-import-"));
   env.dataDir = join(workDir, "lumiverse-data");

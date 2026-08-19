@@ -18,7 +18,6 @@ async function applyBaseline(): Promise<void> {
   const db = getDb();
   db.run("PRAGMA foreign_keys = OFF");
   db.run(await Bun.file(join(import.meta.dir, "..", "db", "baseline.sql")).text());
-  db.run(await Bun.file(join(import.meta.dir, "..", "db", "migrations", "099_character_library_scope.sql")).text());
 }
 
 /**

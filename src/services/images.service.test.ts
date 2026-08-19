@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, unlinkSync, statSync } from "fs";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import { tmpdir } from "os";
@@ -15,16 +15,20 @@ import {
   deleteImageIfUnreferenced,
   deleteImagesBulk,
   deleteWallpaperLibraryImage,
+  discardImageProcessingQueue,
+  getDeferredImageProcessingStatus,
   getImage,
   getImageFilePath,
+  getImageProcessingRecovery,
   listImages,
-  getDeferredImageProcessingStatus,
   rebuildAllThumbnails,
+  recoverImageProcessingQueue,
   resetDeferredImageProcessingForTests,
   uploadImage,
   uploadImages,
   waitForDeferredImageProcessing,
 } from "./images.service";
+import { recordImageProcessingJob } from "./image-processing-queue";
 import { deriveWorkerBudget, setWorkerBudgetOverride } from "../utils/cpu-budget";
 
 const originalDataDir = env.dataDir;
@@ -565,5 +569,68 @@ describe("deferred image processing", () => {
       total: 2,
     });
     expect(existsSync(join(testDataDir, "images", `${first.id}_thumb_sm_v2.webp`))).toBe(true);
+  });
+
+  test("rebuildAllThumbnails wipes existing thumbs then reattributes them", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const uploaded = await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    await waitForDeferredImageProcessing();
+    const image = uploaded[0]?.image;
+    if (!image) throw new Error("expected uploaded image");
+    const smPath = join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`);
+    const stalePath = join(testDataDir, "images", `${image.id}_thumb_sm.webp`);
+    writeFileSync(stalePath, "stale-legacy-thumb");
+    const before = existsSync(smPath) ? statSync(smPath).mtimeMs : 0;
+    getDb().query("UPDATE images SET has_thumbnail = 1 WHERE id = ?").run(image.id);
+
+    const result = await rebuildAllThumbnails("u1");
+    expect(result).toMatchObject({ total: 1, generated: 1, skipped: 0, failed: 0 });
+    expect(existsSync(stalePath)).toBe(false);
+    expect(existsSync(smPath)).toBe(true);
+    expect(statSync(smPath).mtimeMs).toBeGreaterThanOrEqual(before);
+    expect(getDb().query("SELECT has_thumbnail AS flag FROM images WHERE id = ?").get(image.id)).toEqual({ flag: 1 });
+  });
+
+  test("does not auto-run leftover rows and recover starts them", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const uploaded = await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    await waitForDeferredImageProcessing();
+    const image = uploaded[0]?.image;
+    if (!image) throw new Error("expected uploaded image");
+    unlinkSync(join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`));
+    recordImageProcessingJob("u1", image.id, "process");
+
+    expect(getImageProcessingRecovery()).toEqual({
+      pending: 1,
+      process: 1,
+      rebuild: 0,
+    });
+    expect(existsSync(join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`))).toBe(false);
+
+    recoverImageProcessingQueue();
+    await waitForDeferredImageProcessing();
+    expect(existsSync(join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`))).toBe(true);
+    expect(getImageProcessingRecovery().pending).toBe(0);
+  });
+
+  test("discard leftover rows without starting them", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const uploaded = await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+    await waitForDeferredImageProcessing();
+    const image = uploaded[0]?.image;
+    if (!image) throw new Error("expected uploaded image");
+    recordImageProcessingJob("u1", image.id, "rebuild");
+    expect(getImageProcessingRecovery().pending).toBe(1);
+    expect(discardImageProcessingQueue()).toEqual({ pending: 0, process: 0, rebuild: 0 });
+    expect(getImageProcessingRecovery().pending).toBe(0);
   });
 });

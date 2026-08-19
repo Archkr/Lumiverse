@@ -4,7 +4,7 @@ import { EventType } from "../ws/events";
 import type { FileConnectionConfig, FileSystem } from "../file-connections/types";
 import { LocalFileSystem } from "../file-connections/providers/local";
 import { openFileSystem } from "../file-connections/factory";
-import { applyExternalDeferredImageProcessingStatus } from "../services/images.service";
+import { applyExternalDeferredImageProcessingStatus, setExternalThumbnailWorkActive } from "../services/images.service";
 import { bunCmd } from "../utils/bun-cmd";
 import type { HostToStMigration, StMigrationJob, StMigrationToHost } from "./st-ipc";
 import type { MigrationLogger } from "./st-reader";
@@ -306,7 +306,7 @@ function createStartupError(message: string): Error {
   return err;
 }
 
-function isStartupError(err: unknown): boolean {
+function isStartupError(err: unknown): err is Error {
   return err instanceof Error && err.name === ST_MIGRATION_SUBPROCESS_STARTUP_ERROR_NAME;
 }
 
@@ -328,6 +328,7 @@ async function runIsolatedMigration(job: StMigrationJob, deps?: IsolatedLaunchDe
   const settle = async (error?: string) => {
     if (settled) return;
     settled = true;
+    setExternalThumbnailWorkActive(false);
     if (error) finishMigrationFailure(state, error, logger);
     emitCharacterLibraryChange(state, importedCharacterCount, characterImportAttempted);
     currentMigrationId = null;
@@ -348,6 +349,7 @@ async function runIsolatedMigration(job: StMigrationJob, deps?: IsolatedLaunchDe
         if (typeof value === "string") spawnEnv[key] = value;
       }
       spawnEnv.LUMIVERSE_ST_MIGRATION_CHILD = "1";
+      setExternalThumbnailWorkActive(true);
 
       child = spawn({
         cmd: bunCmd(runtimePath),
