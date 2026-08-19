@@ -48,6 +48,7 @@ import { extname, join, resolve } from "path";
 import { tmpdir } from "os";
 
 type ContentPermission = "characters" | "images" | "media" | "chats" | "world_books" | "databanks" | "personas" | "presets" | "regex_scripts";
+type ContentApiPermission = ContentPermission | "regex_scripts_unrestricted";
 export type SpindleEntityExtensionEntity = worldBooksSvc.EntityExtensionEntity;
 
 export function getEntityExtensionPermission(entity: string): ContentPermission {
@@ -81,17 +82,19 @@ type ActivationProjectionInput = {
 export function canExtensionMutateRegexScript(
   script: { owner_extension_identifier?: unknown; preset_id?: unknown },
   extensionIdentifier: string,
+  hasUnrestrictedAccess = false,
 ): boolean {
-  return script.owner_extension_identifier === extensionIdentifier
-    && script.preset_id == null;
+  return hasUnrestrictedAccess || (script.owner_extension_identifier === extensionIdentifier
+    && script.preset_id == null);
 }
 
 export function prepareSpindleRegexMutation(
   value: unknown,
   extensionIdentifier: string,
+  allowUnownedMutation = false,
 ): {
   input: Record<string, unknown>;
-  context: { extensionIdentifier: string; extensionFolderVersion?: unknown };
+  context: { extensionIdentifier: string; allowUnownedMutation?: boolean; extensionFolderVersion?: unknown };
 } {
   const input = value && typeof value === "object" && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
@@ -103,6 +106,7 @@ export function prepareSpindleRegexMutation(
     input,
     context: {
       extensionIdentifier,
+      ...(allowUnownedMutation ? { allowUnownedMutation: true } : {}),
       ...(hasFolderVersion ? { extensionFolderVersion } : {}),
     },
   };
@@ -152,7 +156,7 @@ export function projectActivatedWorldInfoEntryForRpc(
 
 export type WorkerHostContentApiContext = {
   manifest: { identifier: string };
-  hasPermission: (permission: ContentPermission) => boolean;
+  hasPermission: (permission: ContentApiPermission) => boolean;
   resolveEffectiveUserId: (requestUserId?: string) => string | null;
   enforceScopedUser: (userId: string | null | undefined) => void;
   setEntityExtensionNamespace?: typeof worldBooksSvc.setEntityExtensionNamespace;
@@ -1534,6 +1538,7 @@ export class WorkerHostContentApi {
       const mutation = prepareSpindleRegexMutation(
         this.asBatchRecord(args.input ?? {}, "input"),
         this.manifest.identifier,
+        this.hasUnrestrictedRegexAccess(),
       );
       const script = regexScriptsSvc.updateRegexScript(
         userId,
@@ -2386,7 +2391,11 @@ export class WorkerHostContentApi {
   private toRegexScriptDTO(s: any): RegexScriptDTO {
     return {
       id: s.id,
-      can_mutate: canExtensionMutateRegexScript(s, this.manifest.identifier),
+      can_mutate: canExtensionMutateRegexScript(
+        s,
+        this.manifest.identifier,
+        this.hasUnrestrictedRegexAccess(),
+      ),
       name: s.name,
       script_id: s.script_id || "",
       find_regex: s.find_regex,
@@ -2540,7 +2549,11 @@ export class WorkerHostContentApi {
       if (!resolvedUserId) throw new Error("userId is required for operator-scoped extensions");
       this.enforceScopedUser(resolvedUserId);
 
-      const mutation = prepareSpindleRegexMutation(input, this.manifest.identifier);
+      const mutation = prepareSpindleRegexMutation(
+        input,
+        this.manifest.identifier,
+        this.hasUnrestrictedRegexAccess(),
+      );
       const result = regexScriptsSvc.updateRegexScript(resolvedUserId, scriptId, mutation.input as any, mutation.context);
       if (result === null) throw new Error("Regex script not found");
       if (typeof result === "string") throw new Error(result);
@@ -2561,12 +2574,19 @@ export class WorkerHostContentApi {
 
       const deleted = regexScriptsSvc.deleteRegexScript(resolvedUserId, scriptId, {
         extensionIdentifier: this.manifest.identifier,
+        allowUnownedMutation: this.hasUnrestrictedRegexAccess(),
       });
       if (typeof deleted === "string") throw new Error(deleted);
       this.postToWorker({ type: "response", requestId, result: deleted });
     } catch (err: any) {
       this.postToWorker({ type: "response", requestId, error: err.message });
     }
+  }
+
+  private hasUnrestrictedRegexAccess(): boolean {
+    // Kept as an additive privilege rather than widening `regex_scripts`, so
+    // existing extensions retain the ownership boundary introduced in H13.
+    return this.context.hasPermission("regex_scripts_unrestricted");
   }
 
   // ─── Dry Run (gated: "generation") ──────────────────────────────────

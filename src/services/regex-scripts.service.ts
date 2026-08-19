@@ -104,8 +104,10 @@ const MAX_REGEX_FOLDER_VERSION_LENGTH = 100;
 
 interface RegexMutationContext {
   activePresetId?: string | null;
-  /** When present, restrict this mutation to unbound rows owned by this extension. */
+  /** Identifies the calling extension and applies the default ownership boundary. */
   extensionIdentifier?: string;
+  /** Explicitly-authorized editors may mutate rows outside their extension ownership boundary. */
+  allowUnownedMutation?: boolean;
   /** Present only when a Spindle mutation explicitly supplied folder_version. */
   extensionFolderVersion?: unknown;
 }
@@ -911,7 +913,7 @@ export function updateRegexScript(
   if (extensionIdentifier && (
     existing.owner_extension_identifier !== extensionIdentifier
     || existing.preset_id !== null
-  )) {
+  ) && !context?.allowUnownedMutation) {
     return EXTENSION_REGEX_OWNERSHIP_ERROR;
   }
 
@@ -921,7 +923,17 @@ export function updateRegexScript(
   if (extensionIdentifier) {
     const folderVersionError = validateExtensionFolderVersion(context);
     if (folderVersionError) return folderVersionError;
-    nextInput = applySpindleExtensionRegexAttribution(nextInput, extensionIdentifier, context!, existing);
+    if (existing.owner_extension_identifier === extensionIdentifier) {
+      nextInput = applySpindleExtensionRegexAttribution(nextInput, extensionIdentifier, context!, existing);
+    } else if (nextInput.metadata !== undefined) {
+      // An unrestricted editor may change ordinary metadata, but must not
+      // spoof or erase another extension's host-validated folder attribution.
+      const metadata = isPlainMetadataRecord(nextInput.metadata) ? { ...nextInput.metadata } : {};
+      const attribution = getSpindleExtensionRegexAttribution(existing.metadata);
+      delete metadata[SPINDLE_EXTENSION_REGEX_METADATA_KEY];
+      if (attribution) metadata[SPINDLE_EXTENSION_REGEX_METADATA_KEY] = attribution;
+      nextInput.metadata = metadata;
+    }
     // These links are host-owned. A script that becomes preset-bound through a
     // native flow automatically becomes read-only to its creating extension.
     delete nextInput.pack_id;
@@ -1020,7 +1032,7 @@ export function deleteRegexScript(userId: string, id: string, context?: RegexMut
   if (extensionIdentifier && existing && (
     existing.owner_extension_identifier !== extensionIdentifier
     || existing.preset_id !== null
-  )) {
+  ) && !context?.allowUnownedMutation) {
     return EXTENSION_REGEX_OWNERSHIP_ERROR;
   }
   const result = getDb()

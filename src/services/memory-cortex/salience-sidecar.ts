@@ -418,17 +418,25 @@ const TOOL_ANALYZE_PASSAGE_BATCH: ToolDefinition = {
  * Anthropic: tool_choice { type: "any" } — must use at least one tool
  * OpenAI/compat: tool_choice "required" — must use tools
  * Google: toolConfig { functionCallingConfig: { mode: "ANY" } }
+ * Nano-GPT: tool_choice "auto" — some routed models reject "required"
  */
 const GOOGLE_PROVIDERS = new Set(["google", "google_vertex"]);
 
 export function getToolChoiceParams(provider: string): Record<string, any> {
-  if (GOOGLE_PROVIDERS.has(provider)) {
+  const normalizedProvider = provider.trim().toLowerCase();
+  if (GOOGLE_PROVIDERS.has(normalizedProvider)) {
     return { toolConfig: { functionCallingConfig: { mode: "ANY" } } };
   }
   // Anthropic accepts tool_choice at body level; OpenAI/compat also accept it
   // Both use different formats but the passthrough sends it as-is
-  if (provider === "anthropic") {
+  if (normalizedProvider === "anthropic") {
     return { tool_choice: { type: "any" } };
+  }
+  // Nano-GPT routes requests to many upstream models. Some reject the OpenAI
+  // compatible `required` value, while still honoring the extraction prompt
+  // and tool definitions when `auto` is used.
+  if (normalizedProvider === "nanogpt") {
+    return { tool_choice: "auto" };
   }
   // OpenAI and compatibles
   return { tool_choice: "required" };

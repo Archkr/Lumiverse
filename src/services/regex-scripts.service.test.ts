@@ -247,6 +247,38 @@ describe("extension regex ownership", () => {
       "ai_output",
     )).toBe("");
   });
+
+  test("allows explicitly-authorized editors to mutate protected scripts without taking ownership", () => {
+    const legacy = createRegexScript(USER_ID, { name: "Legacy", find_regex: "legacy" }) as RegexScript;
+    const foreign = createRegexScript(USER_ID, {
+      name: "Foreign",
+      find_regex: "foreign",
+      folder: "Foreign extension",
+    }, {
+      extensionIdentifier: "extension.b",
+      extensionFolderVersion: "2.4.0",
+    }) as RegexScript;
+    const bound = createRegexScript(USER_ID, { name: "Bound", find_regex: "bound" }) as RegexScript;
+    updateRegexScript(USER_ID, bound.id, { preset_id: "preset-1" });
+
+    const context = { extensionIdentifier: "editor.extension", allowUnownedMutation: true };
+    const updatedLegacy = updateRegexScript(USER_ID, legacy.id, { name: "Edited legacy" }, context) as RegexScript;
+    expect(updatedLegacy.name).toBe("Edited legacy");
+    expect(updatedLegacy.owner_extension_identifier).toBeNull();
+
+    const updatedForeign = updateRegexScript(USER_ID, foreign.id, {
+      name: "Edited foreign",
+      metadata: { editor_note: "preserved" },
+    }, context) as RegexScript;
+    expect(updatedForeign.owner_extension_identifier).toBe("extension.b");
+    expect(updatedForeign.metadata.editor_note).toBe("preserved");
+    expect(getSpindleExtensionRegexFolderVersion(updatedForeign)).toBe("2.4.0");
+
+    expect((updateRegexScript(USER_ID, bound.id, { name: "Edited bound" }, context) as RegexScript).name)
+      .toBe("Edited bound");
+    expect(deleteRegexScript(USER_ID, foreign.id, context)).toBe(true);
+    expect(getRegexScript(USER_ID, foreign.id)).toBeNull();
+  });
 });
 
 describe("regex export", () => {

@@ -6,6 +6,8 @@ Read access to the user's regex scripts, CRUD access to scripts created by the c
 
 Extension-created scripts are attributed by the host. An extension cannot update or delete legacy/unattributed scripts, another extension's scripts, or preset-bound scripts. Those scripts remain visible through `list`, `get`, and `getActive` and continue to execute normally.
 
+Extensions whose purpose is to edit the user's complete regex library may also request the privileged `regex_scripts_unrestricted` permission. It is additive: both permissions must be granted. With it, `update` and `delete` may target legacy, card-bound, preset-bound, and other-extension-owned scripts. The host still protects ownership, binding, and trusted folder-version attribution from reassignment.
+
 ## Usage
 
 ```ts
@@ -94,8 +96,8 @@ const active = await spindle.regex_scripts.getActive({
 | `list(options?)` | `Promise<{ data: RegexScriptDTO[], total: number }>` | List scripts with strict scope filtering. Options: `{ scope?, scopeId?, target?, limit?, offset?, userId? }`. Defaults: limit 50, max 200. |
 | `get(scriptId)` | `Promise<RegexScriptDTO \| null>` | Get a script by ID. Returns `null` if not found. |
 | `create(input)` | `Promise<RegexScriptDTO>` | Create a new regex script. `name` and `find_regex` are required. |
-| `update(scriptId, input)` | `Promise<RegexScriptDTO>` | Update an unbound script created by this extension. All fields are optional. Throws for protected scripts. |
-| `delete(scriptId)` | `Promise<boolean>` | Delete an unbound script created by this extension. Throws for protected scripts; returns `true` if deleted. |
+| `update(scriptId, input)` | `Promise<RegexScriptDTO>` | Update an unbound script created by this extension, or any script when `regex_scripts_unrestricted` is also granted. All fields are optional. Throws for protected scripts. |
+| `delete(scriptId)` | `Promise<boolean>` | Delete an unbound script created by this extension, or any script when `regex_scripts_unrestricted` is also granted. Throws for protected scripts; returns `true` if deleted. |
 | `getActive(options)` | `Promise<RegexScriptDTO[]>` | Resolve enabled scripts that would fire for a given target plus character/chat context. Merges global + character + chat scopes and orders them by scope tier then `sort_order`. |
 
 ## RegexScriptListOptionsDTO

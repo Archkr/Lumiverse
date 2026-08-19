@@ -25,6 +25,10 @@ describe("worker regex-script mutation projection", () => {
       owner_extension_identifier: "extension.a",
       preset_id: "preset-1",
     }, "extension.a")).toBe(false);
+    expect(canExtensionMutateRegexScript({
+      owner_extension_identifier: "extension.b",
+      preset_id: "preset-1",
+    }, "extension.a", true)).toBe(true);
   });
 
   test("separates the optional folder version from the persisted script input", () => {
@@ -39,6 +43,10 @@ describe("worker regex-script mutation projection", () => {
     expect(prepareSpindleRegexMutation({ name: "Unversioned script" }, "extension.a")).toEqual({
       input: { name: "Unversioned script" },
       context: { extensionIdentifier: "extension.a" },
+    });
+    expect(prepareSpindleRegexMutation({ name: "Editable script" }, "extension.a", true)).toEqual({
+      input: { name: "Editable script" },
+      context: { extensionIdentifier: "extension.a", allowUnownedMutation: true },
     });
   });
 });

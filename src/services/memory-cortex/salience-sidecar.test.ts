@@ -1,6 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
-import { extractBatchWithSidecar, parseToolCallResults } from "./salience-sidecar";
+import {
+  extractBatchWithSidecar,
+  getToolChoiceParams,
+  parseToolCallResults,
+} from "./salience-sidecar";
+
+describe("getToolChoiceParams", () => {
+  test("uses auto for Nano-GPT sidecars", () => {
+    expect(getToolChoiceParams("nanogpt")).toEqual({ tool_choice: "auto" });
+    expect(getToolChoiceParams("NanoGPT")).toEqual({ tool_choice: "auto" });
+  });
+
+  test("continues forcing tools for other OpenAI-compatible providers", () => {
+    expect(getToolChoiceParams("openai")).toEqual({ tool_choice: "required" });
+  });
+});
 
 describe("parseToolCallResults", () => {
   test("filters low-signal sidecar junk while preserving supported extraction", () => {
