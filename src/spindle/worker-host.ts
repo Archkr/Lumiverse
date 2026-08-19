@@ -47,6 +47,7 @@ import {
   type WorldInfoInterceptorCtxDTO,
   type WorldInfoInterceptorResultDTO,
 } from "./world-info-interceptor";
+import { projectWorldInfoCaptureContext } from "./world-info-capture";
 import { toolRegistry } from "./tool-registry";
 import {
   setPromptRegexOwnedChats,
@@ -2741,7 +2742,11 @@ export class WorkerHost {
           };
         });
 
-        const interceptorContext = context as Omit<InterceptorContextDTO, "signal">;
+        const interceptorContext =
+          projectWorldInfoCaptureContext(
+            context,
+            this.extensionId,
+          ) as unknown as Omit<InterceptorContextDTO, "signal">;
         this.activeInterceptorContexts.set(registrationId, interceptorContext);
         this.postToWorker({
           type: "intercept_request",
