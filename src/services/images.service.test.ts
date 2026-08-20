@@ -24,8 +24,11 @@ import {
   rebuildAllThumbnails,
   recoverImageProcessingQueue,
   resetDeferredImageProcessingForTests,
+  saveImageFromDataUrl,
   uploadImage,
+  uploadImageDeferred,
   uploadImages,
+  uploadOptimizedWebpImage,
   waitForDeferredImageProcessing,
 } from "./images.service";
 import { recordImageProcessingJob } from "./image-processing-queue";
@@ -505,6 +508,73 @@ describe("deferred image processing", () => {
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==",
     "base64",
   );
+
+  test("single deferred uploads infer MIME, preserve ownership, and finish queued processing", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const file = new File([ONE_BY_ONE_PNG], "embedded.png");
+
+    const image = await uploadImageDeferred("u1", file, { owner_character_id: "char-1" });
+
+    expect(image.mime_type).toBe("image/png");
+    expect(image.owner_character_id).toBe("char-1");
+    await waitForDeferredImageProcessing();
+    expect(getImage("u1", image.id)).toMatchObject({
+      width: 1,
+      height: 1,
+      has_thumbnail: true,
+      owner_character_id: "char-1",
+    });
+  });
+
+  test("single deferred uploads recognize supported image extensions when MIME is absent", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const image = await uploadImageDeferred("u1", new File([ONE_BY_ONE_PNG], "embedded.apng"));
+
+    expect(image.mime_type).toBe("image/apng");
+    await waitForDeferredImageProcessing();
+    expect(getImage("u1", image.id)).toMatchObject({ width: 1, height: 1, has_thumbnail: true });
+  });
+
+  test("ordinary uploadImage calls use deferred processing", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const image = await uploadImage(
+      "u1",
+      new File([ONE_BY_ONE_PNG], "avatar.png", { type: "image/png" }),
+      { owner_character_id: "char-1" },
+    );
+
+    await waitForDeferredImageProcessing();
+    expect(getImage("u1", image.id)).toMatchObject({
+      width: 1,
+      height: 1,
+      has_thumbnail: true,
+      owner_character_id: "char-1",
+    });
+  });
+
+  test("data URL and optimized WebP uploads finish through the deferred queue", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const dataUrlImage = await saveImageFromDataUrl(
+      "u1",
+      `data:image/png;base64,${ONE_BY_ONE_PNG.toString("base64")}`,
+      "generated.png",
+    );
+    const webpImage = await uploadOptimizedWebpImage(
+      "u1",
+      new File([ONE_BY_ONE_PNG], "layer.png", { type: "image/png" }),
+      { owner_character_id: "char-1" },
+    );
+
+    await waitForDeferredImageProcessing();
+    expect(getImage("u1", dataUrlImage.id)).toMatchObject({ width: 1, height: 1, has_thumbnail: true });
+    expect(getImage("u1", webpImage.id)).toMatchObject({
+      width: 1,
+      height: 1,
+      has_thumbnail: true,
+      mime_type: "image/webp",
+      owner_character_id: "char-1",
+    });
+  });
 
   test("waitForDeferredImageProcessing drains queued thumbnail work", async () => {
     setWorkerBudgetOverride(deriveWorkerBudget(2));

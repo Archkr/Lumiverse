@@ -7,9 +7,11 @@ import {
   resolveRegenFeedbackPrompt,
 } from "./prompt-assembly.service";
 
-const character = {
+const character: Character = {
   id: "character-1",
   name: "Lumia",
+  avatar_path: null,
+  image_id: null,
   description: "",
   personality: "",
   scenario: "",
@@ -19,9 +21,13 @@ const character = {
   creator_notes: "",
   system_prompt: "",
   post_history_instructions: "",
+  folder: "",
+  tags: [],
   alternate_greetings: [],
   extensions: {},
-} as Character;
+  created_at: 0,
+  updated_at: 0,
+};
 
 const chat: Chat = {
   id: "chat-1",

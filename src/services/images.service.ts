@@ -236,12 +236,20 @@ async function writeImageFile(filepath: string, data: Uint8Array): Promise<void>
 }
 
 const MIME_BY_EXT: Record<string, string> = {
+  ".apng": "image/apng",
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".ico": "image/x-icon",
+  ".jfif": "image/jpeg",
   ".png": "image/png",
+  ".pjp": "image/jpeg",
+  ".pjpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".avif": "image/avif",
   ".svg": "image/svg+xml",
   ".mp4": "video/mp4",
   ".webm": "video/webm",
@@ -410,19 +418,31 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
   const id = crypto.randomUUID();
   const dir = getImagesDir();
 
+  const originalMimeType = inferUploadMimeType(file);
+  const originalFilename = file.name || `upload-${id}`;
+  const isVideo = isLikelyVideoUpload(originalMimeType, originalFilename);
+
+  // Ordinary raster uploads need no request-time transformation. Persist them
+  // immediately and let the bounded/recoverable worker queue derive metadata
+  // and thumbnails. Video uploads stay on the synchronous path because their
+  // response depends on transcoding, sidecars, and poster extraction.
+  if (!isVideo) {
+    emitImageUploadProgress(options, { phase: "received", step: 0, totalSteps: 1 });
+    const image = await uploadImageDeferred(userId, file, options);
+    emitImageUploadProgress(options, { phase: "finalizing", step: 1, totalSteps: 1 });
+    emitImageUploadProgress(options, { phase: "completed", step: 1, totalSteps: 1 });
+    return image;
+  }
+
   const originalBuffer = Buffer.from(await file.arrayBuffer());
   let buffer = Buffer.from(originalBuffer);
-  const originalMimeType = inferUploadMimeType(file);
   let mimeType = originalMimeType;
-  const originalFilename = file.name || `upload-${id}`;
   let storedOriginalFilename = originalFilename;
   let storedExtension = extname(storedOriginalFilename).toLowerCase() || ".bin";
-  const isVideo = isLikelyVideoUpload(mimeType, storedOriginalFilename);
-  const primaryVideoCodec = isVideo ? options?.transcode_video_codec : undefined;
+  const primaryVideoCodec = options?.transcode_video_codec;
   const sidecarVideoCodecs = uniqueVideoCodecs(options?.sidecar_video_codecs)
     .filter((codec) => codec !== primaryVideoCodec);
   const totalProgressSteps = (() => {
-    if (!isVideo) return 1;
     let total = 1; // finalizing
     if (primaryVideoCodec) total += 1;
     total += sidecarVideoCodecs.length;
@@ -464,7 +484,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
 
   emitProgress("received");
 
-  if (isVideo && primaryVideoCodec) {
+  if (primaryVideoCodec) {
     advanceProgress("transcoding_primary", {
       codec: primaryVideoCodec,
       phaseProgressPct: 0,
@@ -483,7 +503,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
       const stripped = await stripAudioFromVideoBuffer(buffer, mimeType, storedOriginalFilename);
       if (stripped) buffer = Buffer.from(stripped);
     }
-  } else if (isVideo && options?.strip_audio) {
+  } else if (options?.strip_audio) {
     // Wallpaper uploads can opt into a best-effort audio-strip pass so iOS gets
     // a truly silent video without making ffmpeg a hard runtime dependency.
     const stripped = await stripAudioFromVideoBuffer(buffer, mimeType, storedOriginalFilename);
@@ -494,7 +514,7 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
   const filepath = join(dir, filename);
   await writeImageFile(filepath, buffer);
 
-  if (isVideo && sidecarVideoCodecs.length > 0) {
+  if (sidecarVideoCodecs.length > 0) {
     for (const codec of sidecarVideoCodecs) {
       advanceProgress("transcoding_variant", {
         codec,
@@ -519,15 +539,11 @@ export async function uploadImage(userId: string, file: File, options?: ImageOwn
     mimeType,
     storedOriginalFilename,
     {
-      onPosterExtractionStarted: isVideo
-        ? () => advanceProgress("extracting_poster")
-        : undefined,
-      onPosterExtractionCompleted: isVideo
-        ? () => {
-            finalizingStarted = true;
-            advanceProgress("finalizing");
-          }
-        : undefined,
+      onPosterExtractionStarted: () => advanceProgress("extracting_poster"),
+      onPosterExtractionCompleted: () => {
+        finalizingStarted = true;
+        advanceProgress("finalizing");
+      },
     },
   );
   if (!finalizingStarted) {
@@ -587,7 +603,7 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
 
   let width: number | null = null;
   let height: number | null = null;
-  let hasThumbnail = false;
+  const hasThumbnail = false;
 
   const webpBuffer = await sharp(inputBuffer)
     .rotate()
@@ -600,17 +616,6 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
     });
 
   await writeImageFile(filepath, webpBuffer);
-
-  const derived = await deriveMediaMetadataAndThumbnails(
-    userId,
-    id,
-    dir,
-    webpBuffer,
-    "image/webp",
-  );
-  width = derived.width ?? width;
-  height = derived.height ?? height;
-  hasThumbnail = derived.hasThumbnail;
 
   const now = Math.floor(Date.now() / 1000);
   const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
@@ -651,13 +656,14 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
     );
 
   const image = getImage(userId, id)!;
+  scheduleDeferredImageProcessing(userId, id, filepath);
   eventBus.emit(EventType.IMAGE_UPLOADED, { image }, userId);
   return image;
 }
 
 /**
  * Save an image from a base64 data URL (e.g. from image generation).
- * Creates the image record, generates thumbnails, and returns the Image entity.
+ * Creates the image record and queues metadata/thumbnail processing.
  */
 export async function saveImageFromDataUrl(
   userId: string,
@@ -671,64 +677,9 @@ export async function saveImageFromDataUrl(
   const mimeType = match[1];
   const base64 = match[2];
   const ext = mimeType === "image/png" ? ".png" : mimeType === "image/jpeg" ? ".jpg" : mimeType === "image/webp" ? ".webp" : ".bin";
-
-  const id = crypto.randomUUID();
-  const filename = `${id}${ext}`;
-  const dir = getImagesDir();
-  const filepath = join(dir, filename);
-
   const buffer = Buffer.from(base64, "base64");
-  await writeImageFile(filepath, buffer);
-
-  const { width, height, hasThumbnail } = await deriveMediaMetadataAndThumbnails(
-    userId,
-    id,
-    dir,
-    buffer,
-    mimeType,
-  );
-
-  const now = Math.floor(Date.now() / 1000);
-  const ownerExtensionIdentifier = normalizeOwnershipValue(options?.owner_extension_identifier);
-  const ownerCharacterId = normalizeOwnershipValue(options?.owner_character_id);
-  const ownerChatId = normalizeOwnershipValue(options?.owner_chat_id);
-  getDb()
-    .query(
-      `INSERT INTO images (
-         id,
-         user_id,
-         filename,
-         original_filename,
-         mime_type,
-         byte_size,
-         width,
-         height,
-         has_thumbnail,
-         owner_extension_identifier,
-         owner_character_id,
-         owner_chat_id,
-         created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      id,
-      userId,
-      filename,
-      originalFilename || `image-gen-${id}${ext}`,
-      mimeType,
-      buffer.byteLength,
-      width,
-      height,
-      hasThumbnail ? 1 : 0,
-      ownerExtensionIdentifier,
-      ownerCharacterId,
-      ownerChatId,
-      now,
-    );
-
-  const image = getImage(userId, id)!;
-  eventBus.emit(EventType.IMAGE_UPLOADED, { image }, userId);
-  return image;
+  const filename = originalFilename || `image-gen-${crypto.randomUUID()}${ext}`;
+  return uploadImageDeferred(userId, new File([buffer], filename, { type: mimeType }), options);
 }
 
 export interface UploadImagesItem {
@@ -862,6 +813,41 @@ export async function uploadImages(
     }
   }
   return results;
+}
+
+/**
+ * Store one ordinary image through the batched/deferred pipeline.
+ *
+ * Use this for request paths that do not need synchronous media transforms.
+ * It keeps Sharp work off the request path while preserving the single-upload
+ * ownership and IMAGE_UPLOADED semantics.
+ */
+export async function uploadImageDeferred(
+  userId: string,
+  file: File,
+  options?: Pick<ImageOwnershipOptions, "owner_extension_identifier" | "owner_character_id" | "owner_chat_id">,
+): Promise<Image> {
+  const [result] = await uploadImages(
+    userId,
+    [{
+      data: new Uint8Array(await file.arrayBuffer()),
+      filename: file.name,
+      mime_type: inferUploadMimeType(file),
+      owner_character_id: options?.owner_character_id,
+      owner_chat_id: options?.owner_chat_id,
+    }],
+    {
+      owner_extension_identifier: options?.owner_extension_identifier,
+      deferProcessing: true,
+    },
+  );
+
+  if (!result?.image) {
+    throw new Error(result?.error || "Image upload failed");
+  }
+
+  eventBus.emit(EventType.IMAGE_UPLOADED, { image: result.image }, userId);
+  return result.image;
 }
 
 function notifyDeferredImageIdle(): void {
