@@ -27,7 +27,7 @@ mock.module("./vectorization-queue.service", () => ({
   },
 }));
 
-const { createEntry, createWorldBook, updateEntry } = await import("./world-books.service");
+const { createEntry, createWorldBook, getWorldBookVectorSummary, updateEntry } = await import("./world-books.service");
 
 const OWNER_ID = "lorebook-edit-vector-owner";
 
@@ -48,6 +48,34 @@ beforeEach(async () => {
 afterEach(() => closeDatabase());
 
 describe("lorebook edit vector side effects", () => {
+  test("baseline indexes authored-order pagination by book", () => {
+    const indexes = getDb().query("PRAGMA index_list('world_book_entries')").all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toContain("idx_wbe_world_book_order");
+  });
+
+  test("vector summary aggregates entry state without materializing entry payloads", () => {
+    const book = createWorldBook(OWNER_ID, { name: "Summary" });
+    const indexed = createEntry(OWNER_ID, book.id, { content: "indexed", vectorized: true })!;
+    const pending = createEntry(OWNER_ID, book.id, { content: "pending", vectorized: true })!;
+    const failed = createEntry(OWNER_ID, book.id, { content: "failed", vectorized: true })!;
+    createEntry(OWNER_ID, book.id, { content: "", vectorized: false });
+    getDb().query("UPDATE world_book_entries SET vector_index_status = 'indexed' WHERE id = ?").run(indexed.id);
+    getDb().query("UPDATE world_book_entries SET vector_index_status = 'pending' WHERE id = ?").run(pending.id);
+    getDb().query("UPDATE world_book_entries SET vector_index_status = 'error' WHERE id = ?").run(failed.id);
+
+    expect(getWorldBookVectorSummary(OWNER_ID, book.id)).toEqual({
+      total: 4,
+      enabled: 3,
+      non_empty: 3,
+      enabled_non_empty: 3,
+      not_enabled: 1,
+      pending: 1,
+      indexed: 1,
+      error: 1,
+    });
+    expect(getWorldBookVectorSummary("different-owner", book.id)).toBeNull();
+  });
+
   test("content edits mark pending and enqueue replacement instead of deleting Lance rows", () => {
     const book = createWorldBook(OWNER_ID, { name: "Edit settle" });
     const entry = createEntry(OWNER_ID, book.id, {

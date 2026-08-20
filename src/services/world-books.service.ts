@@ -1241,30 +1241,23 @@ export async function deleteAutoManagedCharacterWorldBooks(userId: string, chara
 }
 
 export function getWorldBookVectorSummary(userId: string, worldBookId: string): WorldBookVectorSummary | null {
-  const book = getWorldBook(userId, worldBookId);
-  if (!book) return null;
+  const row = getDb().query(
+    `SELECT
+       COUNT(e.id) AS total,
+       COALESCE(SUM(CASE WHEN e.vectorized = 1 THEN 1 ELSE 0 END), 0) AS enabled,
+       COALESCE(SUM(CASE WHEN length(trim(e.content)) > 0 THEN 1 ELSE 0 END), 0) AS non_empty,
+       COALESCE(SUM(CASE WHEN e.vectorized = 1 AND length(trim(e.content)) > 0 THEN 1 ELSE 0 END), 0) AS enabled_non_empty,
+       COALESCE(SUM(CASE WHEN e.vector_index_status = 'not_enabled' THEN 1 ELSE 0 END), 0) AS not_enabled,
+       COALESCE(SUM(CASE WHEN e.vector_index_status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+       COALESCE(SUM(CASE WHEN e.vector_index_status = 'indexed' THEN 1 ELSE 0 END), 0) AS indexed,
+       COALESCE(SUM(CASE WHEN e.vector_index_status = 'error' THEN 1 ELSE 0 END), 0) AS error
+     FROM world_books wb
+     LEFT JOIN world_book_entries e ON e.world_book_id = wb.id
+     WHERE wb.id = ? AND wb.user_id = ?
+     GROUP BY wb.id`,
+  ).get(worldBookId, userId) as WorldBookVectorSummary | null;
 
-  const entries = listEntries(userId, worldBookId);
-  const summary: WorldBookVectorSummary = {
-    total: entries.length,
-    enabled: 0,
-    non_empty: 0,
-    enabled_non_empty: 0,
-    not_enabled: 0,
-    pending: 0,
-    indexed: 0,
-    error: 0,
-  };
-
-  for (const entry of entries) {
-    const hasContent = (entry.content || "").trim().length > 0;
-    if (entry.vectorized) summary.enabled += 1;
-    if (hasContent) summary.non_empty += 1;
-    if (hasContent && entry.vectorized) summary.enabled_non_empty += 1;
-    summary[entry.vector_index_status] += 1;
-  }
-
-  return summary;
+  return row;
 }
 
 export function setWorldBookSemanticActivation(

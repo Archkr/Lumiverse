@@ -1356,6 +1356,9 @@ CREATE INDEX idx_ttsc_user ON tts_connections(user_id);
 
 CREATE INDEX idx_wbe_world_book_id ON world_book_entries(world_book_id);
 
+CREATE INDEX idx_wbe_world_book_order
+  ON world_book_entries(world_book_id, order_value, id);
+
 CREATE INDEX idx_wbe_world_book_vector_index_status
 ON world_book_entries(world_book_id, vector_index_status);
 

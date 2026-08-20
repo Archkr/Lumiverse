@@ -119,6 +119,7 @@ const BASELINE_MIGRATIONS: readonly string[] = [
   "104_world_book_source_filename_index.sql",
   "105_st_migration_source_indexes.sql",
   "106_image_processing_queue.sql",
+  "107_world_book_entry_order_index.sql",
 ];
 
 const BASELINE_SET = new Set(BASELINE_MIGRATIONS);
