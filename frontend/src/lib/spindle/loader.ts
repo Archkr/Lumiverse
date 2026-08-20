@@ -118,6 +118,11 @@ import {
   type FrontendDockPanelOptions,
   type FrontendFloatWidgetOptions,
 } from './frontend-context'
+import {
+  THEME_AUTHORING_HOST_CAPABILITIES,
+  type SpindleThemeAuthoringAPI,
+} from './theme-authoring'
+import { createNativeThemeAuthoringAPI } from './theme-authoring-native'
 import { legacyCtxPermission } from './legacy-ctx-members'
 import type { SpindleSettingsTabHandle, SpindleSettingsTabOptions } from './settings-tab-bridge'
 
@@ -294,6 +299,7 @@ type FrontendExtensionHost = {
 
 type FrontendExtensionContextBase = Omit<SpindleFrontendContext, 'ui' | 'messages' | 'dom'> & {
   host: FrontendExtensionHost
+  theme: SpindleThemeAuthoringAPI
   dom: FrontendExtensionDOM
   ready(): void
   deferReady(): void
@@ -1306,7 +1312,7 @@ async function doLoadFrontendExtension(
     const host = Object.freeze({
       descriptorVersion: 1 as const,
       lumiverseVersion: LUMIVERSE_VERSION,
-      capabilities: SPINDLE_HOST_CAPABILITIES,
+      capabilities: Object.freeze({ ...SPINDLE_HOST_CAPABILITIES, ...THEME_AUTHORING_HOST_CAPABILITIES }),
       extensionInstallationId: extensionId,
       surfaces: createHostSurfaceAPI({
         extensionId,
@@ -1346,6 +1352,10 @@ async function doLoadFrontendExtension(
 
     const baseContext: FrontendExtensionContextBase = {
       host,
+      theme: createNativeThemeAuthoringAPI(
+        assertFrontendActive,
+        (member) => assertCanonicalPermission('app_manipulation', member),
+      ),
       locale,
       dom,
       ready() {

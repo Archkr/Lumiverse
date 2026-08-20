@@ -13,12 +13,14 @@ import {
   type ComponentRegistryJoinEntry,
 } from './componentRegistryJoin'
 
-const cssModulePaths = Object.keys(
-  import.meta.glob('/src/**/*.module.css', { eager: false }),
-)
-const tsxPaths = Object.keys(
-  import.meta.glob('/src/**/*.tsx', { eager: false }),
-)
+// Vite replaces these calls in production. The guard keeps non-Vite host
+// contract tests and SSR-like consumers from evaluating an unavailable API.
+const cssModulePaths = typeof import.meta.glob === 'function'
+  ? Object.keys(import.meta.glob('/src/**/*.module.css', { eager: false }))
+  : []
+const tsxPaths = typeof import.meta.glob === 'function'
+  ? Object.keys(import.meta.glob('/src/**/*.tsx', { eager: false }))
+  : []
 
 export type CSSModuleEntry = Omit<ComponentRegistryJoinEntry, 'cssPath'> & { cssPath: string }
 

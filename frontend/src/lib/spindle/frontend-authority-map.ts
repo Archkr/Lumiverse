@@ -188,6 +188,23 @@ const LEGACY_ROWS: readonly AuthorityRow[] = [
   gated('app_manipulation|ui_panels', { surface: 'legacy_ctx_member', id: 'ctx.ui.requestTabLocation', source: 'ui.requestTabLocation', ctxLeaf: 'ctx.ui.requestTabLocation', gatedBecause: 'Rule-B clause (c): changes placement in a host-managed tab surface' }),
 ]
 
+const THEME_AUTHORING_ROWS: readonly AuthorityRow[] = [
+  free({ surface: 'ctx_member', id: 'ctx.theme.assets.getActiveBundleId', source: 'theme.assets.activeBundleId', ctxLeaf: 'ctx.theme.assets.getActiveBundleId', freeBecause: 'rest: exposes only the active user-scoped theme asset bundle identifier' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.assets.createBundle', source: 'theme.assets.bundleId', ctxLeaf: 'ctx.theme.assets.createBundle', freeBecause: 'pure-host-action: generates an inert bundle UUID without persisting host state' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.assets.list', source: 'theme.assets.read', ctxLeaf: 'ctx.theme.assets.list', freeBecause: 'rest: returns the authenticated user-scoped theme asset projection' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.assets.getBytes', source: 'theme.assets.read', ctxLeaf: 'ctx.theme.assets.getBytes', freeBecause: 'rest: returns authenticated bytes for an existing user-scoped theme asset' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.assets.upload', source: 'theme.assets.upload', ctxLeaf: 'ctx.theme.assets.upload', gatedBecause: 'Rule-B clause (b): persists a new native theme asset' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.assets.update', source: 'theme.assets.update', ctxLeaf: 'ctx.theme.assets.update', gatedBecause: 'Rule-B clause (b): mutates durable native theme asset metadata' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.assets.delete', source: 'theme.assets.delete', ctxLeaf: 'ctx.theme.assets.delete', gatedBecause: 'Rule-B clause (b): destructively removes a durable native theme asset' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.assets.optimizeWebp', source: 'theme.assets.optimizeWebp', ctxLeaf: 'ctx.theme.assets.optimizeWebp', gatedBecause: 'Rule-B clause (b): replaces durable native theme asset content' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.packs.exportDraft', source: 'theme.packs.export', ctxLeaf: 'ctx.theme.packs.exportDraft', freeBecause: 'pure-host-action: snapshots user-scoped assets and encodes bytes without mutating host state' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.packs.importArchive', source: 'theme.packs.import', ctxLeaf: 'ctx.theme.packs.importArchive', gatedBecause: 'Rule-B clause (b): imports archive assets into a durable native bundle' }),
+  gated('app_manipulation', { surface: 'ctx_member', id: 'ctx.theme.packs.installDraft', source: 'theme.packs.install', ctxLeaf: 'ctx.theme.packs.installDraft', gatedBecause: 'Rule-B clause (b): installs and optionally saves durable native theme state' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.catalog.listComponents', source: 'theme.catalog.components', ctxLeaf: 'ctx.theme.catalog.listComponents', freeBecause: 'shipped-twin: returns the sanitized component inventory already exposed by the native Theme Editor' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.catalog.listVariables', source: 'theme.catalog.variables', ctxLeaf: 'ctx.theme.catalog.listVariables', freeBecause: 'shipped-twin: returns the CSS variable reference already exposed by the native Theme Editor' }),
+  free({ surface: 'ctx_member', id: 'ctx.theme.openEditor', source: 'theme.editor.navigation', ctxLeaf: 'ctx.theme.openEditor', freeBecause: 'pure-host-action: opens and focuses an allowlisted native Theme Editor location' }),
+]
+
 export const FRONTEND_AUTHORITY_MAP: readonly AuthorityRow[] = createAuthorityMap([
   ...SELECTOR_ROWS,
   ...settingsAuthorityRows(),
@@ -195,6 +212,7 @@ export const FRONTEND_AUTHORITY_MAP: readonly AuthorityRow[] = createAuthorityMa
   ...GEOMETRY_ROWS,
   ...HOST_ACTION_ROWS,
   ...HOST_SURFACE_ROWS,
+  ...THEME_AUTHORING_ROWS,
   ...LEGACY_ROWS,
 ])
 
