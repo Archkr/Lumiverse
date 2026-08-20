@@ -182,6 +182,7 @@ interface GenerateInput {
   target_character_id?: string;
   regen_feedback?: string;
   regen_feedback_position?: "system" | "user";
+  regen_feedback_format?: string;
   retain_council?: boolean;
   /** Dry-run only: reassemble as if this message were absent from history
    *  (used to reconstruct the prompt that produced an existing assistant turn). */
@@ -1376,6 +1377,7 @@ async function runPromptPipeline(opts: {
   precomputedVectorEntries?: VectorActivatedEntry[];
   regenFeedback?: string;
   regenFeedbackPosition?: "system" | "user";
+  regenFeedbackFormat?: string;
   signal?: AbortSignal;
   isDryRun?: boolean;
 }): Promise<PromptPipelineResult> {
@@ -1459,6 +1461,7 @@ async function runPromptPipeline(opts: {
       precomputedVectorEntries: opts.precomputedVectorEntries,
       regenFeedback: opts.regenFeedback,
       regenFeedbackPosition: opts.regenFeedbackPosition,
+      regenFeedbackFormat: opts.regenFeedbackFormat,
       skipPromptRegex: isPromptRegexChatOwned(opts.chatId, isExtensionRunning),
       signal: opts.signal,
     };
@@ -2883,6 +2886,7 @@ export async function startGeneration(
             precomputedVectorEntries,
             regenFeedback: input.regen_feedback,
             regenFeedbackPosition: input.regen_feedback_position,
+            regenFeedbackFormat: input.regen_feedback_format,
             signal: abortController.signal,
           }),
           abortController.signal,

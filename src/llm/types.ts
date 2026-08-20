@@ -302,6 +302,8 @@ export interface AssemblyContext {
   regenFeedback?: string;
   /** Where to inject regen feedback: 'system' (last system msg) or 'user' (last user msg). */
   regenFeedbackPosition?: "system" | "user";
+  /** Freeform prompt template containing the guarded {{$regenInput}} placeholder. */
+  regenFeedbackFormat?: string;
   /** When true, an extension owns this chat's `target:prompt` regex and the
    *  host skips its own per-message prompt-regex pass. */
   skipPromptRegex?: boolean;

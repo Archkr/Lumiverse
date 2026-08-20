@@ -675,6 +675,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     enabled: false,
     position: 'user',
     includePreviousGeneration: false,
+    format: '[OOC: {{$regenInput}}]',
   },
   swipeGesturesEnabled: true,
   showMessageTokenCount: true,

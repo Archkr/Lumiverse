@@ -1153,6 +1153,19 @@ function ChatSettings() {
             onChange={(checked) => setSetting('regenFeedback', { ...regenFeedback, includePreviousGeneration: checked })}
             label={t('chat.regenIncludePrevious')}
           />
+
+          <div className={styles.field}>
+            <label className={styles.fieldLabel}>{t('chat.regenFormat')}</label>
+            <ExpandableTextarea
+              className={formStyles.textarea}
+              value={regenFeedback.format}
+              onChange={(format) => setSetting('regenFeedback', { ...regenFeedback, format })}
+              placeholder="[OOC: {{$regenInput}}]"
+              rows={4}
+              title={t('chat.regenFormat')}
+            />
+            <p className={styles.helperText}>{t('chat.regenFormatHint')}</p>
+          </div>
         </>
       )}
 

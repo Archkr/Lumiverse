@@ -362,6 +362,8 @@ export interface RegenFeedbackSettings {
   enabled: boolean
   position: RegenFeedbackPosition
   includePreviousGeneration: boolean
+  /** Freeform prompt template. {{$regenInput}} is replaced with the submitted feedback. */
+  format: string
 }
 
 // ---- Reasoning Settings ----

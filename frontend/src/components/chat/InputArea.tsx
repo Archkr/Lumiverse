@@ -2264,6 +2264,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
       if (feedback) {
         genOpts.regen_feedback = feedback
         genOpts.regen_feedback_position = regenFeedback.position
+        genOpts.regen_feedback_format = regenFeedback.format
       }
       const res = await generateApi.start(genOpts)
       if (generationNonceRef.current !== nonce) return
@@ -2278,7 +2279,7 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
       setStreamingError(msg)
       toast.error(msg, { title: t('toast.regenerationFailed') })
     }
-  }, [chatId, isGeneratingInChat, messages, isGroupChat, activeProfileId, activeCharacterId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, regenFeedback.position, retainCouncilForRegens, addMessage, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides, t, te])
+  }, [chatId, isGeneratingInChat, messages, isGroupChat, activeProfileId, activeCharacterId, activePersonaId, activeGenerationAddonStates, getActivePresetForGeneration, regenFeedback.position, regenFeedback.format, retainCouncilForRegens, addMessage, beginStreaming, startStreaming, setStreamingError, consumeOneshotGuides, t, te])
 
   const handleRegenerate = useCallback(() => {
     if (isGeneratingInChat) return

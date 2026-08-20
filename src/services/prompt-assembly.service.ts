@@ -1324,6 +1324,33 @@ async function evaluateHostPromptSource(
   })).text;
 }
 
+export const DEFAULT_REGEN_FEEDBACK_FORMAT = "[OOC: {{$regenInput}}]";
+const REGEN_INPUT_PLACEHOLDER = "{{$regenInput}}";
+
+/**
+ * Resolve macros in a freeform regen-feedback template without treating the
+ * submitted feedback itself as macro source. The placeholder is masked for
+ * the full evaluation and restored only after macro expansion completes.
+ */
+export async function resolveRegenFeedbackPrompt(
+  format: string | undefined,
+  regenInput: string,
+  macroEnv: MacroEnv,
+): Promise<string> {
+  const template = format ?? DEFAULT_REGEN_FEEDBACK_FORMAT;
+  let guard = "\u0000LUMIVERSE_REGEN_INPUT\u0000";
+  while (template.includes(guard) || regenInput.includes(guard)) guard += "_";
+
+  const guardedTemplate = template.split(REGEN_INPUT_PLACEHOLDER).join(guard);
+  const resolved = (
+    await evaluate(guardedTemplate, macroEnv, registry, {
+      phase: "prompt",
+      sourceHint: "prompt_source:regen_feedback",
+    })
+  ).text;
+  return resolved.split(guard).join(regenInput);
+}
+
 async function evaluatePromptBlockContent(
   content: string,
   macroEnv: MacroEnv,
@@ -3764,17 +3791,21 @@ export async function assemblePrompt(
     await applyGuidedGenerations(result, guided, macroEnv, breakdown);
   }
 
-  // Regen feedback injection (user-provided OOC guidance for regeneration)
+  // Regen feedback injection (user-provided guidance for regeneration)
   if (ctx.regenFeedback) {
-    const oocContent = `[OOC: ${ctx.regenFeedback}]`;
+    const feedbackContent = await resolveRegenFeedbackPrompt(
+      ctx.regenFeedbackFormat,
+      ctx.regenFeedback,
+      macroEnv,
+    );
     if (ctx.regenFeedbackPosition === "system") {
       // Append as a system message at the end
-      result.push({ role: "system", content: oocContent });
+      result.push({ role: "system", content: feedbackContent });
       breakdown.push({
         type: "utility",
         name: "Regen Feedback",
         role: "system",
-        content: oocContent,
+        content: feedbackContent,
       });
     } else {
       // Append to the last real chat-history user message so preset-added
@@ -3785,7 +3816,7 @@ export async function assemblePrompt(
           if (typeof result[i].content === "string") {
             result[i] = {
               ...result[i],
-              content: result[i].content + "\n" + oocContent,
+              content: result[i].content + "\n" + feedbackContent,
             };
           } else {
             const parts = [
@@ -3796,10 +3827,10 @@ export async function assemblePrompt(
               const tp = parts[textIdx] as import("../llm/types").LlmTextPart;
               parts[textIdx] = {
                 type: "text",
-                text: tp.text + "\n" + oocContent,
+                text: tp.text + "\n" + feedbackContent,
               };
             } else {
-              parts.unshift({ type: "text", text: oocContent });
+              parts.unshift({ type: "text", text: feedbackContent });
             }
             result[i] = { ...result[i], content: parts };
           }
@@ -3808,19 +3839,19 @@ export async function assemblePrompt(
             type: "utility",
             name: "Regen Feedback",
             role: "user",
-            content: oocContent,
+            content: feedbackContent,
           });
           break;
         }
       }
       // Fallback: if no user message found, add as a user message
       if (!injected) {
-        result.push({ role: "user", content: oocContent });
+        result.push({ role: "user", content: feedbackContent });
         breakdown.push({
           type: "utility",
           name: "Regen Feedback",
           role: "user",
-          content: oocContent,
+          content: feedbackContent,
         });
       }
     }
