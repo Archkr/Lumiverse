@@ -322,7 +322,7 @@ export const SETTINGS_TABS: SettingsTabEntry[] = [
 ]
 
 /** Filter settings tabs based on current user role. */
-export function getVisibleSettingsTabs(userRole?: string): SettingsTabEntry[] {
+export function getVisibleSettingsTabs(userRole?: string, productivityTabPosition?: string): SettingsTabEntry[] {
   const isOwner = userRole === 'owner'
   const isAdmin = isOwner || userRole === 'admin'
 
@@ -333,7 +333,8 @@ export function getVisibleSettingsTabs(userRole?: string): SettingsTabEntry[] {
     return false
   })
 
-  return joinExtensionSettingsTabs(visibleCoreTabs, userRole, SETTINGS_TABS)
+  const pos = productivityTabPosition ?? (typeof useStore !== 'undefined' ? (useStore.getState() as any)?.productivityTabPosition : undefined) ?? 'after-display'
+  return joinExtensionSettingsTabs(visibleCoreTabs, userRole, SETTINGS_TABS, undefined, pos)
 }
 
 /**
