@@ -609,6 +609,24 @@ describe("deferred image processing", () => {
     });
   });
 
+  test("repeated uploads append to one processing queue", async () => {
+    setWorkerBudgetOverride(deriveWorkerBudget(2));
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+
+    await uploadImages("u1", [
+      { data: ONE_BY_ONE_PNG, filename: "a.png", mime_type: "image/png" },
+      { data: ONE_BY_ONE_PNG, filename: "b.png", mime_type: "image/png" },
+      { data: ONE_BY_ONE_PNG, filename: "c.png", mime_type: "image/png" },
+    ], { deferProcessing: true });
+
+    const status = getDeferredImageProcessingStatus();
+    expect(status.total).toBe(3);
+    expect(status.processed + status.remaining).toBe(3);
+    expect(status.active).toBeLessThanOrEqual(1);
+    await waitForDeferredImageProcessing();
+    expect(getDeferredImageProcessingStatus().processed).toBe(3);
+  });
+
   test("rebuildAllThumbnails drains through the deferred Sharp queue", async () => {
     setWorkerBudgetOverride(deriveWorkerBudget(2));
     mkdirSync(join(testDataDir, "images"), { recursive: true });

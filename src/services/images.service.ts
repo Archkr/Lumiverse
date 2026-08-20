@@ -895,11 +895,10 @@ async function processDeferredImage(
   id: string,
   filepath: string,
 ): Promise<void> {
-  const buffer = Buffer.from(await Bun.file(filepath).arrayBuffer());
   let width: number | null = null;
   let height: number | null = null;
   try {
-    const meta = await sharp(buffer).metadata();
+    const meta = await sharp(filepath).metadata();
     width = meta.width ?? null;
     height = meta.height ?? null;
   } catch {
@@ -907,10 +906,20 @@ async function processDeferredImage(
   }
   const dir = getImagesDir();
   const sizes = getThumbnailSettings(userId);
-  const [smOk, lgOk] = await Promise.all([
-    ensureThumbnail(`${id}_sm`, buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-    ensureThumbnail(`${id}_lg`, buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-  ]);
+  // Run tiers sequentially. The outer queue owns concurrency; fanning out here
+  // multiplies native libvips pipelines during bursts of embedded-image imports.
+  const smOk = await ensureThumbnail(
+    `${id}_sm`,
+    filepath,
+    join(dir, `${id}${thumbSuffix("sm")}`),
+    sizes.smallSize,
+  );
+  const lgOk = await ensureThumbnail(
+    `${id}_lg`,
+    filepath,
+    join(dir, `${id}${thumbSuffix("lg")}`),
+    sizes.largeSize,
+  );
   const hasThumb = smOk || lgOk;
   getDb()
     .query("UPDATE images SET width = COALESCE(?, width), height = COALESCE(?, height), has_thumbnail = ? WHERE id = ?")
@@ -971,12 +980,17 @@ function scheduleRebuildThumbnailJob(
         return;
       }
 
-      const buffer = Buffer.from(await Bun.file(originalPath).arrayBuffer());
       const sizes = getThumbnailSettings(userId);
-      const [smOk, lgOk] = await Promise.all([
-        generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-        generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-      ]);
+      const smOk = await generateThumbnail(
+        originalPath,
+        join(dir, `${id}${thumbSuffix("sm")}`),
+        sizes.smallSize,
+      );
+      const lgOk = await generateThumbnail(
+        originalPath,
+        join(dir, `${id}${thumbSuffix("lg")}`),
+        sizes.largeSize,
+      );
 
       if (smOk || lgOk) {
         getDb().query("UPDATE images SET has_thumbnail = 1 WHERE id = ?").run(id);
@@ -1052,12 +1066,17 @@ async function scheduleRecoverRebuildBody(
       if (existsSync(p)) unlinkSync(p);
     }
   }
-  const buffer = Buffer.from(await Bun.file(originalPath).arrayBuffer());
   const sizes = getThumbnailSettings(userId);
-  const [smOk, lgOk] = await Promise.all([
-    generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("sm")}`), sizes.smallSize),
-    generateThumbnail(buffer, join(dir, `${id}${thumbSuffix("lg")}`), sizes.largeSize),
-  ]);
+  const smOk = await generateThumbnail(
+    originalPath,
+    join(dir, `${id}${thumbSuffix("sm")}`),
+    sizes.smallSize,
+  );
+  const lgOk = await generateThumbnail(
+    originalPath,
+    join(dir, `${id}${thumbSuffix("lg")}`),
+    sizes.largeSize,
+  );
   if (smOk || lgOk) {
     getDb().query("UPDATE images SET has_thumbnail = 1 WHERE id = ?").run(id);
     progress.generated++;
