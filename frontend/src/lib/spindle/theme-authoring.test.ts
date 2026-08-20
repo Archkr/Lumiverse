@@ -13,7 +13,7 @@ beforeAll(() => {
   }
 })
 
-function nativeAsset(id: string, bundleId: string, slug = 'portrait.png', sizeBytes = 3): ThemeAsset {
+function nativeAsset(id: string, bundleId: string, slug = 'assets/portrait.png', sizeBytes = 3): ThemeAsset {
   return {
     id,
     bundle_id: bundleId,
@@ -48,7 +48,8 @@ function fixture() {
     async list(bundleId: string) { return [...assets.values()].filter((asset) => asset.bundle_id === bundleId) },
     async upload(file: File, input: { bundleId: string; slug?: string; tags?: string[]; metadata?: Record<string, unknown> }) {
       const id = `uploaded-${++nextId}`
-      const asset = nativeAsset(id, input.bundleId, input.slug ?? file.name, file.size)
+      const requestedSlug = input.slug ?? file.name
+      const asset = nativeAsset(id, input.bundleId, requestedSlug.startsWith('assets/') ? requestedSlug : `assets/${requestedSlug}`, file.size)
       asset.original_filename = file.name
       asset.mime_type = file.type
       asset.tags = [...(input.tags ?? [])]

@@ -3,6 +3,7 @@ import type { ThemeAsset } from '@/types/api'
 import { sanitizeCSS, validateCSS } from '@/lib/cssValidator'
 import { disableImportedThemePackTsx } from '@/lib/componentOverrideSecurity'
 import { componentSelector } from '@/lib/componentRegistryJoin'
+import { toThemeAssetRelativePath } from '@/lib/themeAssetCss'
 import {
   createThemePack,
   decodeThemePackArchive,
@@ -167,7 +168,7 @@ function toPublicAsset(asset: ThemeAsset, client: ThemeAssetClient): SpindleThem
     sizeBytes: asset.byte_size,
     tags: [...(asset.tags ?? [])],
     metadata: { ...(asset.metadata ?? {}) },
-    cssPath: `./assets/${asset.slug}`,
+    cssPath: toThemeAssetRelativePath(asset.slug),
     contentUrl: client.contentUrl(asset.id),
   }
 }
