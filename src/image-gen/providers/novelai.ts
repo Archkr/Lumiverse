@@ -91,6 +91,8 @@ export class NovelAIImageProvider implements ImageProvider {
     apiKeyRequired: true,
     modelListStyle: "static",
     staticModels: [
+      { id: "nai-diffusion-5-full", label: "NAI Diffusion V5 (Full)" },
+      { id: "nai-diffusion-5-curated", label: "NAI Diffusion V5 (Curated)" },
       { id: "nai-diffusion-4-5-full", label: "NAI Diffusion V4.5 (Full)" },
       { id: "nai-diffusion-4-5-curated", label: "NAI Diffusion V4.5 (Curated)" },
       { id: "nai-diffusion-4-full", label: "NAI Diffusion V4 (Full)" },
@@ -228,7 +230,10 @@ export class NovelAIImageProvider implements ImageProvider {
 
   async validateKey(apiKey: string, _apiUrl: string): Promise<boolean> {
     try {
-      const res = await fetch("https://api.novelai.net/user/information", {
+      // Validate against the Image API itself. NovelAI documents this as an
+      // authenticated, non-generation endpoint and accepts persistent API
+      // tokens here; the Primary API is not the service this provider uses.
+      const res = await fetch("https://image.novelai.net/user/information", {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (!res.ok) await throwProviderResponseError(this.displayName, "authentication", res);
