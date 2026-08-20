@@ -5,6 +5,8 @@ import ProductivitySettings from '@/components/settings/ProductivitySettings'
 import { useStore } from '@/store'
 import type { HostSurfaceJsonValue, HostSurfaceRenderContext } from './host-surface-registry'
 import { QuickToolbar } from '@/components/quick-toolbar/QuickToolbar'
+import { readQuickToolbarPlacement } from '@/components/quick-toolbar/quickToolbarDock'
+import { effectiveQuickToolbarDockRequest } from '@/lib/chatSurfaceLayout'
 import { ConnectionsPicker } from '@/components/connections-picker/ConnectionsPicker'
 import LoreIndicator from '@/components/lore-indicator/LoreIndicator'
 import PortraitDock from '@/components/chat/PortraitDock'
@@ -24,6 +26,11 @@ import { setLorebookWorkspaceVisibility } from '@/lib/lorebookWorkspaceVisibilit
 import modalStyles from '@/components/modals/WorldBookEditorModal.module.css'
 
 export const PRODUCTIVITY_HOST_CONTRACT_VERSION = 1
+
+export const CONNECTIONS_PICKER_CONTRACT_SURFACES = [
+  'connections_picker.launcher',
+  'connections_picker.panel',
+] as const
 
 export const PRODUCTIVITY_HOST_SURFACES = [
   'productivity.settings.workspace',
@@ -416,6 +423,7 @@ function StandardProductivityHostSurface({
   stateRef.current = state
   const surfaceRootRef = useRef<HTMLElement | null>(null)
   const [connectionsAnchor, setConnectionsAnchor] = useState<HTMLElement | null>(null)
+  const quickToolbarSettings = useStore((store) => store.quickToolbarSettings)
 
   useLayoutEffect(() => {
     const root = surfaceRootRef.current?.closest<HTMLElement>(
@@ -423,14 +431,14 @@ function StandardProductivityHostSurface({
     )
     if (!root) return
     const dockRequest = surfaceId === 'quick_toolbar.workspace'
-      ? state?.variant === 'v2' ? 'strip' : 'floating'
+      ? effectiveQuickToolbarDockRequest('strip', quickToolbarSettings)
       : surfaceId === 'activated_lore.indicator' ? 'strip' : null
     if (!dockRequest) return
     root.setAttribute('data-dock-request', dockRequest)
     return () => {
       if (root.getAttribute('data-dock-request') === dockRequest) root.removeAttribute('data-dock-request')
     }
-  }, [surfaceId, state?.variant])
+  }, [quickToolbarSettings, surfaceId])
 
   useLayoutEffect(() => {
     if (surfaceId !== 'connections_picker.panel' || typeof document === 'undefined') return
@@ -456,7 +464,7 @@ function StandardProductivityHostSurface({
       content = <ProductivitySettings />
       break
     case 'quick_toolbar.workspace':
-      content = <QuickToolbar />
+      content = readQuickToolbarPlacement(quickToolbarSettings) === 'chat_top_dock' ? <></> : <QuickToolbar />
       break
     case 'connections_picker.launcher':
       content = (

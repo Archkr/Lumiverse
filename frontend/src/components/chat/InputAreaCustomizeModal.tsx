@@ -16,6 +16,7 @@ import {
   Search,
   Sliders,
   UserCircle,
+  Waypoints,
   Wrench,
 } from 'lucide-react'
 import { useStore } from '@/store'
@@ -55,6 +56,7 @@ export const COMPOSER_ACTION_IDS = [
   'oneliner',
   'persona',
   'connections',
+  'connectionsPicker',
   'altFields',
   'addons',
   'guides',
@@ -92,6 +94,7 @@ export const COMPOSER_ACTION_CATALOG: ComposerActionItem[] = [
   { id: 'oneliner', label: 'One-liner', description: 'Generate a one-liner as the user', icon: MessageSquare },
   { id: 'persona', label: 'Persona', description: 'Send as or switch the active persona', icon: UserCircle },
   { id: 'connections', label: 'Connections', description: 'Switch the active connection profile', icon: Link2 },
+  { id: 'connectionsPicker', label: 'Connections Picker', description: 'Open the Waypoints connections picker', icon: Waypoints },
   { id: 'altFields', label: 'Alternate fields', description: 'Bind alternate character fields', icon: Layers },
   { id: 'addons', label: 'Addons', description: 'Persona addons for this chat', icon: IconPlaylistAdd },
   { id: 'guides', label: 'Guides', description: 'Guided generations', icon: Compass },
@@ -324,6 +327,7 @@ export default function InputAreaCustomizeModal({
       COMPOSER_ACTION_CATALOG.map((action) => [action.id, action]),
     )
     for (const action of actionCatalog) {
+      if (action.id === 'lumiverse_suite.connections_picker.open') continue
       const item = composerExtraItem(action)
       if (map.has(item.id)) continue
       map.set(item.id, item)
