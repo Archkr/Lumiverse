@@ -402,16 +402,14 @@ export function reconcileEditAndSendOutbox(now = nowMs()): number {
   for (const raw of rows) {
     const row = rowToOutbox(raw);
     if (row.status === "running" && row.dispatched_at) {
-      if (!invokeIsGenerationActive(row.user_id, row.generation_id)) {
-        markOutbox(row.id, {
-          status: "completed",
-          completed_at: now,
-          lease_owner: null,
-          lease_expires_at: null,
-          terminal_reason: "reconciled",
-        });
-        changed++;
-      }
+      // In-memory pool liveness is ONLY a skip signal: a live generation on
+      // this instance is still in flight, so leave its row alone. Anything
+      // else (crashed generation, cleared pool entry) goes through the SAME
+      // durable verification as startup recovery - persisted-output check
+      // plus attempt/backoff/max_attempts - never a blind completion.
+      if (invokeIsGenerationActive(row.user_id, row.generation_id)) continue;
+      resolveOrphanedRunningRow(row, now);
+      changed++;
       continue;
     }
     if (row.lease_expires_at != null && row.lease_expires_at < now && row.dispatched_at == null) {
@@ -458,6 +456,50 @@ function hasPersistedEditAndSendOutput(row: GenerationOutboxRow): boolean {
   return false;
 }
 
+/**
+ * Durable resolution for a dispatched-but-unfinished running row whose
+ * generating instance is gone. Shared by startup crash recovery and the
+ * periodic reconcile tick: verify persisted output before completing;
+ * otherwise retry with backoff until MAX_ATTEMPTS, then fail terminally.
+ */
+function resolveOrphanedRunningRow(row: GenerationOutboxRow, now: number): void {
+  if (hasPersistedEditAndSendOutput(row)) {
+    markOutbox(row.id, {
+      status: "completed",
+      completed_at: row.completed_at ?? now,
+      lease_owner: null,
+      lease_expires_at: null,
+      terminal_reason: "verified_output",
+      last_error_code: null,
+    });
+    return;
+  }
+
+  const attempts = row.attempt_count + 1;
+  if (attempts >= MAX_ATTEMPTS) {
+    markOutbox(row.id, {
+      status: "failed",
+      lease_owner: null,
+      lease_expires_at: null,
+      attempt_count: attempts,
+      last_error_code: "output_not_verified",
+      terminal_reason: "max_attempts",
+      completed_at: now,
+    });
+    return;
+  }
+
+  markOutbox(row.id, {
+    status: "pending",
+    lease_owner: null,
+    lease_expires_at: null,
+    attempt_count: attempts,
+    next_attempt_at: now + backoffMs(attempts),
+    last_error_code: "output_not_verified",
+    terminal_reason: null,
+  });
+}
+
 export async function recoverEditAndSendOutbox(): Promise<number> {
   const now = nowMs();
   withImmediateTransaction(() => {
@@ -482,51 +524,7 @@ export async function recoverEditAndSendOutbox(): Promise<number> {
       )
       .all() as any[];
     for (const raw of orphaned) {
-      const row = rowToOutbox(raw);
-      if (hasPersistedEditAndSendOutput(row)) {
-        getDb().query(
-          `UPDATE generation_outbox
-           SET status = 'completed',
-               completed_at = COALESCE(completed_at, ?),
-               lease_owner = NULL,
-               lease_expires_at = NULL,
-               terminal_reason = 'verified_output',
-               last_error_code = NULL,
-               updated_at = ?
-           WHERE id = ? AND status = 'running'`,
-        ).run(now, now, row.id);
-        continue;
-      }
-
-      const attempts = row.attempt_count + 1;
-      if (attempts >= MAX_ATTEMPTS) {
-        getDb().query(
-          `UPDATE generation_outbox
-           SET status = 'failed',
-               lease_owner = NULL,
-               lease_expires_at = NULL,
-               attempt_count = ?,
-               last_error_code = 'output_not_verified',
-               terminal_reason = 'max_attempts',
-               completed_at = ?,
-               updated_at = ?
-           WHERE id = ? AND status = 'running'`,
-        ).run(attempts, now, now, row.id);
-        continue;
-      }
-
-      getDb().query(
-        `UPDATE generation_outbox
-         SET status = 'pending',
-             lease_owner = NULL,
-             lease_expires_at = NULL,
-             attempt_count = ?,
-             next_attempt_at = ?,
-             last_error_code = 'output_not_verified',
-             terminal_reason = NULL,
-             updated_at = ?
-         WHERE id = ? AND status = 'running'`,
-      ).run(attempts, now + backoffMs(attempts), now, row.id);
+      resolveOrphanedRunningRow(rowToOutbox(raw), now);
     }
   });
   return dispatchPendingEditAndSendOutbox();

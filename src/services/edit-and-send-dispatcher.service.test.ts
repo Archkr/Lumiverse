@@ -207,9 +207,69 @@ describe("edit-and-send dispatcher", () => {
       status: "running",
       dispatched_at: Date.now() - 1_000,
     });
+    // No active pool entry + no persisted output: durable verification resets
+    // to pending (never a blind completion).
     expect(reconcileEditAndSendOutbox()).toBe(1);
-    expect(getGenerationOutboxById("recon")?.status).toBe("completed");
-    expect(getGenerationOutboxById("recon")?.terminal_reason).toBe("reconciled");
+    const recon = getGenerationOutboxById("recon");
+    expect(recon?.status).toBe("pending");
+    expect(recon?.attempt_count).toBe(1);
+    expect(recon?.last_error_code).toBe("output_not_verified");
+    expect(recon?.next_attempt_at).toBeGreaterThan(Date.now());
+  });
+
+  test("periodic reconcile skips live generations and durably resolves dead ones", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    setEditAndSendGenerationActiveCheck((_userId, generationId) => generationId === "gen-live");
+
+    // Live in-memory generation: skipped entirely, row stays running.
+    insertOutbox({
+      id: "live-row",
+      request_id: "req-live",
+      generation_id: "gen-live",
+      branch_chat_id: "branch-live",
+      status: "running",
+      dispatched_at: Date.now() - 1_000,
+    });
+
+    // Dead pool entry + persisted assistant output -> completed/verified_output.
+    insertOutbox({
+      id: "dead-verified-row",
+      request_id: "req-dead-verified",
+      generation_id: "gen-dead-verified",
+      branch_chat_id: "branch-dead-verified",
+      status: "running",
+      attempt_count: 2,
+      dispatched_at: Date.now() - 2_000,
+    });
+    insertMessage({ id: "asst-dead-verified", chat_id: "branch-dead-verified", created_at: nowSec });
+
+    // Dead pool entry + NO persisted output -> reset to pending, not completed.
+    insertOutbox({
+      id: "dead-lost-row",
+      request_id: "req-dead-lost",
+      generation_id: "gen-dead-lost",
+      branch_chat_id: "branch-dead-lost",
+      status: "running",
+      attempt_count: 3,
+      dispatched_at: Date.now() - 2_000,
+    });
+
+    expect(reconcileEditAndSendOutbox()).toBe(2);
+
+    expect(getGenerationOutboxById("live-row")?.status).toBe("running");
+    expect(getGenerationOutboxById("live-row")?.terminal_reason).toBeNull();
+
+    const verified = getGenerationOutboxById("dead-verified-row");
+    expect(verified?.status).toBe("completed");
+    expect(verified?.terminal_reason).toBe("verified_output");
+
+    const lost = getGenerationOutboxById("dead-lost-row");
+    expect(lost?.status).not.toBe("completed");
+    expect(lost?.status).toBe("pending");
+    expect(lost?.attempt_count).toBe(4);
+    expect(lost?.last_error_code).toBe("output_not_verified");
+    expect(lost?.next_attempt_at).toBeGreaterThan(Date.now());
+    expect(lost?.lease_owner).toBeNull();
   });
 
   test("dispatcher/startup", async () => {

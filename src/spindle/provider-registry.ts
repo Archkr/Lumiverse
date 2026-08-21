@@ -519,10 +519,14 @@ export class ProviderRegistry {
   async invoke(
     key: ProviderKey,
     request: unknown,
-    opts: { callerScope: ProviderScope; correlationId?: string; round?: number } = {
-      callerScope: key.effectiveScope,
-    },
+    opts: { callerScope: ProviderScope; correlationId?: string; round?: number },
   ): Promise<unknown> {
+    // callerScope is REQUIRED: defaulting to the provider's own effectiveScope
+    // would let any internal caller silently self-assert the record's scope
+    // and bypass cross-scope isolation.
+    if (!opts || !opts.callerScope) {
+      throw new Error("provider invoke requires an explicit callerScope");
+    }
     if (opts.callerScope !== key.effectiveScope) {
       // System-scoped providers are visible to every caller scope (mirrors
       // listVisible semantics), so authenticated users may invoke them.
