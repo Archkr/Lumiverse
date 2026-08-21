@@ -68,7 +68,7 @@
   position: absolute;
   z-index: 2;
   left: 50%;
-  bottom: -13px;
+  bottom: -25px;
   margin: 0;
   transform: translateX(-50%);
 }
