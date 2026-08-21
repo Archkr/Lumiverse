@@ -107,6 +107,17 @@ beforeEach(initInstallerTestDb);
 afterEach(() => closeDatabase());
 
 describe("LumiHub preset installer metadata", () => {
+  test("imports a cover URL embedded in the preset payload", async () => {
+    const result = await installPreset("request-cover", installPayload("hub-cover", {
+      name: "Covered preset",
+      blocks: [],
+      coverUrl: "https://cdn.example.test/cover.webp",
+    }));
+
+    expect(result.success).toBe(true);
+    expect(getPreset(USER_ID, result.presetId!)?.metadata.coverUrl).toBe("https://cdn.example.test/cover.webp");
+  });
+
   test("keeps older bundled regexes disabled without touching a same-named local folder", async () => {
     const firstPayload = installPayload("hub-regex-history", {
       name: "Hub preset",
@@ -498,6 +509,28 @@ describe("LumiHub preset installer metadata", () => {
     });
 
     const installed = await installPreset("request-local-lookalike", installPayload("hub-lookalike", {
+      name: "Hub preset",
+      blocks: [],
+    }));
+
+    expect(installed.success).toBe(true);
+    expect(installed.presetId).not.toBe(local.id);
+    const count = getDb().query("SELECT COUNT(*) AS count FROM presets WHERE user_id = ?").get(USER_ID) as { count: number };
+    expect(count.count).toBe(2);
+  });
+
+  test("does not claim a local import that retains the Hub preset id", async () => {
+    const local = createPreset(USER_ID, {
+      name: "Imported local copy",
+      provider: "loom",
+      metadata: {
+        _lumiverse_install_source: "local",
+        _lumiverse_lumihub_id: "hub-local-copy",
+        _lumiverse_preset_version: "1.0.0",
+      },
+    });
+
+    const installed = await installPreset("request-local-id", installPayload("hub-local-copy", {
       name: "Hub preset",
       blocks: [],
     }));

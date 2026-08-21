@@ -425,6 +425,7 @@ async function refreshLoomRegistry() {
       {
         name: preset.name,
         blockCount: preset.block_count,
+        coverUrl: preset.cover_url ?? null,
         updatedAt: preset.updated_at,
         isDefault: false,
       },
@@ -1834,6 +1835,7 @@ export function useWebSocket() {
             [payload.characterId]: {
               name: payload.characterName,
               blockCount: 0,
+              coverUrl: null,
               updatedAt: Math.floor(Date.now() / 1000),
               isDefault: false,
             },

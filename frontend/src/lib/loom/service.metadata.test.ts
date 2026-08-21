@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import type { Preset } from '@/types/api'
 import {
   coerceImportedLoomPreset,
+  createPortableLoomPresetExport,
   marshalPreset,
   marshalUpdate,
+  shouldShowLumiHubPresetBadge,
   unmarshalPreset,
 } from './service'
 
@@ -55,6 +57,65 @@ describe('Loom extension metadata preservation', () => {
       version: 1,
       pipelines: [{ id: 'main' }],
     })
+  })
+
+  test('keeps a cover URL stored inside a wrapped LumiHub preset', () => {
+    const imported = coerceImportedLoomPreset({
+      type: 'lumiverse_preset',
+      preset: {
+        ...unmarshalPreset(rawPreset({})),
+        coverUrl: 'https://cdn.example.test/preset-cover.webp',
+      },
+    }, 'Fallback')
+
+    expect(imported.coverUrl).toBe('https://cdn.example.test/preset-cover.webp')
+    expect(marshalPreset(imported).metadata?.coverUrl).toBe('https://cdn.example.test/preset-cover.webp')
+  })
+
+  test('prefers an explicit wrapper cover URL over the nested preset value', () => {
+    const imported = coerceImportedLoomPreset({
+      type: 'lumiverse_preset',
+      cover_url: 'https://cdn.example.test/wrapper.webp',
+      preset: {
+        ...unmarshalPreset(rawPreset({})),
+        coverUrl: 'https://cdn.example.test/nested.webp',
+      },
+    }, 'Fallback')
+
+    expect(imported.coverUrl).toBe('https://cdn.example.test/wrapper.webp')
+  })
+
+  test('marks file imports as local even when the export carries LumiHub provenance', () => {
+    const imported = coerceImportedLoomPreset({
+      ...unmarshalPreset(rawPreset({
+        _lumiverse_install_source: 'lumihub',
+        _lumiverse_lumihub_id: 'hub-1',
+        _lumiverse_preset_version: '2.0.0',
+      })),
+      blocks: [],
+    }, 'Fallback')
+
+    expect(imported.lumihubMeta?._lumiverse_install_source).toBe('local')
+    expect(shouldShowLumiHubPresetBadge(imported)).toBe(false)
+  })
+
+  test('shows the LumiHub badge for explicit installs and legacy versioned presets only', () => {
+    expect(shouldShowLumiHubPresetBadge({
+      presetVersion: null,
+      lumihubMeta: { _lumiverse_install_source: 'lumihub' },
+    })).toBe(true)
+    expect(shouldShowLumiHubPresetBadge({ presetVersion: '1.0.0', lumihubMeta: null })).toBe(true)
+    expect(shouldShowLumiHubPresetBadge({
+      presetVersion: '1.0.0',
+      lumihubMeta: { _lumiverse_install_source: 'local' },
+    })).toBe(false)
+    expect(shouldShowLumiHubPresetBadge({ presetVersion: null, lumihubMeta: null })).toBe(false)
+  })
+
+  test('removes the local preset id from portable exports', () => {
+    const exported = createPortableLoomPresetExport(unmarshalPreset(rawPreset({})))
+    expect(Object.hasOwn(exported, 'id')).toBe(false)
+    expect(exported.name).toBe('Metadata test')
   })
 
 })

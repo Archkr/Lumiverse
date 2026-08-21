@@ -20,6 +20,23 @@ function initPresetsTestDb(): void {
     engine TEXT NOT NULL DEFAULT 'classic',
     cache_revision INTEGER NOT NULL DEFAULT 0
   )`);
+  getDb().run(`CREATE TABLE settings (
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    PRIMARY KEY (key, user_id)
+  )`);
+  getDb().run(`CREATE TABLE connection_profiles (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    preset_id TEXT
+  )`);
+  getDb().run(`CREATE TABLE regex_scripts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    preset_id TEXT
+  )`);
 }
 
 function insertPreset(id: string, userId: string, cacheRevision = 0): void {
@@ -126,5 +143,35 @@ describe("preset cache validators", () => {
     });
     const row = getDb().query("SELECT metadata, cache_revision FROM presets WHERE id = ?").get("preset-1");
     expect(row).toEqual({ metadata: "{}", cache_revision: 3 });
+  });
+});
+
+describe("preset bulk mutations", () => {
+  test("deletes only selected presets owned by the authenticated user", async () => {
+    insertPreset("one", "u1");
+    insertPreset("two", "u1");
+    insertPreset("foreign", "u2");
+
+    const response = await app.request("http://localhost/bulk-delete", {
+      method: "POST",
+      headers: { "x-test-user": "u1", "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["one", "foreign"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ deleted: ["one"] });
+    expect(getDb().query("SELECT id FROM presets ORDER BY id").all()).toEqual([
+      { id: "foreign" },
+      { id: "two" },
+    ]);
+  });
+
+  test("rejects malformed bulk selections", async () => {
+    const response = await app.request("http://localhost/bulk-delete", {
+      method: "POST",
+      headers: { "x-test-user": "u1", "content-type": "application/json" },
+      body: JSON.stringify({ ids: [] }),
+    });
+    expect(response.status).toBe(400);
   });
 });

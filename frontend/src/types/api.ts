@@ -782,6 +782,7 @@ export interface PresetRegistryItem {
   name: string;
   provider: string;
   block_count: number;
+  cover_url?: string | null;
   updated_at: number;
 }
 

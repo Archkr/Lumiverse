@@ -823,6 +823,7 @@ export interface SpindleSettings {
 export interface LoomRegistryEntry {
   name: string
   blockCount: number
+  coverUrl: string | null
   updatedAt: number
   isDefault: boolean
 }

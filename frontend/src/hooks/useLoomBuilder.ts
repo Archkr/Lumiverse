@@ -27,6 +27,7 @@ import {
   getAvailableMacros,
   exportToSTPreset,
   sanitizeLumiHubSealedBlocksForExport,
+  createPortableLoomPresetExport,
   normalizeCategoryBlockState,
   toggleBlockWithCategoryRules,
   toggleCategoryWithChildren,
@@ -200,6 +201,7 @@ export function useLoomBuilder() {
           {
             name: p.name,
             blockCount: p.block_count,
+            coverUrl: p.cover_url ?? null,
             updatedAt: p.updated_at,
             isDefault: false,
           },
@@ -483,6 +485,36 @@ export function useLoomBuilder() {
     }
   }, [refreshRegistry])
 
+  const bulkDeletePresets = useCallback(async (presetIds: string[]) => {
+    const ids = [...new Set(presetIds)].filter(Boolean)
+    if (ids.length === 0) return []
+    await Promise.all(ids.map((id) => flushPresetForGeneration(id)))
+    const result = await presetsApi.bulkDelete(ids)
+    for (const id of result.deleted) presetSaveCoordinator.remove(id)
+    await refreshRegistry()
+    if (useStore.getState().activeLoomPresetId && result.deleted.includes(useStore.getState().activeLoomPresetId!)) {
+      activePresetRef.current = null
+      useStore.getState().setActiveLoomPreset(null)
+      setActivePreset(null)
+    }
+    try {
+      const res = await connectionsApi.list({ limit: 100 })
+      useStore.getState().setProfiles(res.data)
+    } catch {
+      // Non-fatal; the next profile refresh will pick up cleared references.
+    }
+    return result.deleted
+  }, [refreshRegistry])
+
+  const bulkExportPresets = useCallback(async (presetIds: string[]) => {
+    const ids = [...new Set(presetIds)].filter(Boolean)
+    if (ids.length === 0) return 0
+    await Promise.all(ids.map((id) => flushPresetForGeneration(id)))
+    const prepared = await presetsApi.prepareBulkExport(ids)
+    presetsApi.downloadPreparedExport(prepared.archiveUrl, prepared.filename)
+    return prepared.count
+  }, [])
+
   // Duplicate a preset
   const duplicatePreset = useCallback(async (presetId: string, newName: string) => {
     const selection = beginActiveLoomPresetSelection()
@@ -736,6 +768,8 @@ export function useLoomBuilder() {
     try {
       const fallbackName = fileName?.replace(/\.json$/i, '') || 'Imported Preset'
       const loom = coerceImportedLoomPreset(payload, fallbackName)
+      // marshalPreset deliberately omits loom.id. The create endpoint assigns
+      // a fresh local identity even when an older export still contains one.
       const created = await presetsApi.create(marshalPreset(loom))
       const newLoom = presetSaveCoordinator.hydrate(unmarshalPreset(created))
       await refreshRegistry()
@@ -800,10 +834,13 @@ export function useLoomBuilder() {
   }, [persistImportedPreset])
 
   // Export internal JSON
-  const exportInternal = useCallback(async () => {
-    if (!activePreset) return null
-    const exportPreset = sanitizeLumiHubSealedBlocksForExport(activePreset)
-    const regexExport = await regexApi.exportScripts(undefined, { preset_id: activePreset.id })
+  const exportInternal = useCallback(async (presetId?: string) => {
+    const targetId = presetId ?? activePreset?.id
+    if (!targetId) return null
+    await flushPresetForGeneration(targetId)
+    const source = unmarshalPreset(await presetsApi.get(targetId))
+    const exportPreset = createPortableLoomPresetExport(source)
+    const regexExport = await regexApi.exportScripts(undefined, { preset_id: targetId })
     if (regexExport.scripts.length === 0) return exportPreset
     return {
       ...exportPreset,
@@ -812,7 +849,7 @@ export function useLoomBuilder() {
         regex_scripts: regexExport.scripts,
       },
     }
-  }, [activePreset])
+  }, [activePreset?.id])
 
   // Export as legacy (SillyTavern) JSON
   const exportLegacy = useCallback(() => {
@@ -898,6 +935,8 @@ export function useLoomBuilder() {
     saveBlocks,
     saveLoomValue,
     deletePreset,
+    bulkDeletePresets,
+    bulkExportPresets,
     duplicatePreset,
     renamePreset,
     refreshRegistry,

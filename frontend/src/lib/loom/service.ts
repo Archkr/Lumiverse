@@ -284,6 +284,30 @@ function extractLumihubMeta(meta: Record<string, any>): Record<string, unknown> 
   return Object.keys(bag).length > 0 ? bag : null
 }
 
+/**
+ * New installs carry an authoritative source marker. Older LumiHub presets
+ * predate that marker, so a stored published version remains the compatibility
+ * fallback only when no explicit source has been recorded.
+ */
+export function shouldShowLumiHubPresetBadge(
+  preset: Pick<LoomPreset, 'presetVersion' | 'lumihubMeta'>,
+): boolean {
+  const installSource = preset.lumihubMeta?._lumiverse_install_source
+  if (typeof installSource === 'string') return installSource === 'lumihub'
+  return !!preset.presetVersion
+}
+
+function markPresetAsLocalImport(preset: LoomPreset): LoomPreset {
+  const migrated = migratePreset(preset)
+  migrated.lumihubMeta = {
+    ...(migrated.lumihubMeta ?? {}),
+    // A file import is a local copy even when its export retains attribution.
+    // This prevents it from presenting as, or being updated as, a Hub install.
+    _lumiverse_install_source: 'local',
+  }
+  return migrated
+}
+
 function extractPassthroughMetadata(meta: Record<string, any>): Record<string, unknown> {
   const bag: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(meta)) {
@@ -334,32 +358,41 @@ export function detectImportedPresetKind(data: unknown): 'loom' | 'legacy' | nul
 
 export function coerceImportedLoomPreset(data: unknown, fallbackName: string): LoomPreset {
   if (looksLikeWrappedLumiHubPresetData(data)) {
-    return migratePreset({
+    const wrappedCoverUrl = typeof data.cover_url === 'string'
+      ? data.cover_url
+      : typeof data.coverUrl === 'string'
+        ? data.coverUrl
+        : typeof data.preset.coverUrl === 'string'
+          ? data.preset.coverUrl
+          : typeof (data.preset as any).cover_url === 'string'
+            ? (data.preset as any).cover_url
+            : null
+    return markPresetAsLocalImport({
       ...data.preset,
       name: data.preset.name || fallbackName,
-      coverUrl: typeof data.cover_url === 'string' ? data.cover_url : null,
+      coverUrl: wrappedCoverUrl,
     } as LoomPreset)
   }
 
   if (looksLikeLoomPresetData(data)) {
-    return migratePreset({
+    return markPresetAsLocalImport({
       ...data,
       name: data.name || fallbackName,
     })
   }
 
   if (looksLikeBackendLoomPresetData(data)) {
-    return unmarshalPreset(data)
+    return markPresetAsLocalImport(unmarshalPreset(data))
   }
 
   if (looksLikeLegacyPresetData(data)) {
-    return importFromSTPreset(data, fallbackName)
+    return markPresetAsLocalImport(importFromSTPreset(data, fallbackName))
   }
 
   throw new Error('Unrecognized preset JSON format')
 }
 
-function looksLikeWrappedLumiHubPresetData(data: unknown): data is { preset: LoomPreset; cover_url?: unknown } {
+function looksLikeWrappedLumiHubPresetData(data: unknown): data is { preset: LoomPreset; cover_url?: unknown; coverUrl?: unknown } {
   return isRecord(data)
     && data.type === 'lumiverse_preset'
     && isRecord(data.preset)
@@ -614,6 +647,13 @@ export function sanitizeLumiHubSealedBlocksForExport<T extends LoomPreset>(loom:
       }
     }),
   }
+}
+
+/** Remove the installation-local identity before a Loom preset leaves this library. */
+export function createPortableLoomPresetExport(loom: LoomPreset): Omit<LoomPreset, 'id'> {
+  const sanitized = sanitizeLumiHubSealedBlocksForExport(loom)
+  const { id: _localPresetId, ...portable } = sanitized
+  return portable
 }
 
 function getLumiHubSealedExportKey(block: PromptBlock, manifestKeys: Set<string>): string | null {
@@ -1189,6 +1229,7 @@ export function buildRegistryEntry(preset: LoomPreset): LoomRegistryEntry {
   return {
     name: preset.name,
     blockCount: preset.blocks?.length || 0,
+    coverUrl: preset.coverUrl ?? null,
     updatedAt: preset.updatedAt || Date.now(),
     isDefault: preset.isDefault || false,
   }

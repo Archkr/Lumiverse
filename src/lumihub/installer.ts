@@ -688,6 +688,12 @@ export async function installPreset(
     const incomingSamplerOverrides = isPlainObject(p.samplerOverrides) ? p.samplerOverrides : {};
     const incomingCustomBody = isPlainObject(p.customBody) ? p.customBody : {};
     const incomingPromptVariables = isPlainObject(p.promptVariables) ? p.promptVariables : {};
+    const coverUrl =
+      typeof exported.cover_url === "string" ? exported.cover_url
+      : typeof exported.coverUrl === "string" ? exported.coverUrl
+      : typeof p.coverUrl === "string" ? p.coverUrl
+      : typeof p.cover_url === "string" ? p.cover_url
+      : null;
     const samplerOverrides = existing && isPlainObject(existing.parameters?.samplerOverrides)
       ? existing.parameters.samplerOverrides
       : incomingSamplerOverrides;
@@ -727,7 +733,7 @@ export async function installPreset(
         lastProfileKey: typeof p.lastProfileKey === "string" ? p.lastProfileKey : null,
         promptVariables,
         compatibility: isPlainObject(exported.compatibility) ? exported.compatibility : {},
-        coverUrl: typeof exported.cover_url === "string" ? exported.cover_url : null,
+        coverUrl,
         _lumiverse_install_source: "lumihub",
         _lumiverse_lumihub_id: payload.presetId,
         _lumiverse_preset_version: presetVersion,
