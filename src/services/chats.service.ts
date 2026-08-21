@@ -2531,7 +2531,7 @@ export function appendMessageAttachment(
     .query("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?")
     .run(JSON.stringify(normalizedExtra), messageId, existing.chat_id);
 
-  const updated: Message = { ...existing, extra: normalizedExtra };
+  const updated: Message = { ...existing, extra: projectActiveSwipeExtra(normalizedExtra, existing.swipe_id) };
   eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
   return updated;
 }
@@ -2609,7 +2609,7 @@ export function removeMessageAttachment(
   // message and the orphan can be GC'd manually.
   cleanupAudioAttachments(userId, removed);
 
-  const updated: Message = { ...existing, extra: normalizedExtra };
+  const updated: Message = { ...existing, extra: projectActiveSwipeExtra(normalizedExtra, existing.swipe_id) };
   eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
   return updated;
 }
