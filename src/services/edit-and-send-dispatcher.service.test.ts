@@ -295,11 +295,21 @@ describe("edit-and-send dispatcher", () => {
       lease_expires_at: Date.now() - 5_000,
       attempt_count: 8,
     });
-    expect(reconcileEditAndSendOutbox()).toBe(1);
+    // Both the stale claim AND the zombie pending row are swept to failed.
+    expect(reconcileEditAndSendOutbox()).toBe(2);
     const stale = getGenerationOutboxById("exhausted-stale");
     expect(stale?.status).toBe("failed");
     expect(stale?.terminal_reason).toBe("max_attempts");
     expect(stale?.lease_owner).toBeNull();
+
+    // Zombie pending rows with exhausted attempts transition to failed too —
+    // they were previously unclaimable and stuck in 'pending' forever.
+    const zombie = getGenerationOutboxById("exhausted-pending");
+    expect(zombie?.status).toBe("failed");
+    expect(zombie?.terminal_reason).toBe("max_attempts");
+    expect(zombie?.completed_at).toBeNumber();
+    expect(zombie?.lease_owner).toBeNull();
+    expect(zombie?.lease_expires_at).toBeNull();
 
     // A fresh pending row is still claimable after the gate.
     insertOutbox({
@@ -310,6 +320,21 @@ describe("edit-and-send dispatcher", () => {
       attempt_count: 0,
     });
     expect(claimNextEditAndSendOutbox()?.id).toBe("fresh-after-gate");
+  });
+
+  test("reconcile zombie sweep preserves an existing terminal_reason", async () => {
+    insertOutbox({
+      id: "zombie-reasoned",
+      request_id: "req-zombie-reasoned",
+      generation_id: "gen-zombie-reasoned",
+      status: "pending",
+      attempt_count: 9,
+      terminal_reason: "duplicate_generation_id",
+    });
+    expect(reconcileEditAndSendOutbox()).toBe(1);
+    const row = getGenerationOutboxById("zombie-reasoned");
+    expect(row?.status).toBe("failed");
+    expect(row?.terminal_reason).toBe("duplicate_generation_id");
   });
 
   test("dispatcher/startup", async () => {

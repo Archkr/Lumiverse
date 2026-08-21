@@ -402,13 +402,28 @@ export function cancelEditAndSendOutbox(
 }
 
 export function reconcileEditAndSendOutbox(now = nowMs()): number {
+  // Zombie sweep: pending rows whose attempts are exhausted are unclaimable
+  // (claimNextEditAndSendOutbox filters attempt_count >= MAX_ATTEMPTS), so
+  // without this they would sit in 'pending' forever. Fail them terminally.
+  const failedZombies = getDb().query(
+    `UPDATE generation_outbox
+     SET status = 'failed',
+         terminal_reason = COALESCE(terminal_reason, 'max_attempts'),
+         completed_at = COALESCE(completed_at, ?),
+         lease_owner = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
+     WHERE status = 'pending'
+       AND attempt_count >= ?`,
+  ).run(now, now, MAX_ATTEMPTS).changes;
+
   const rows = getDb()
     .query(
       `SELECT * FROM generation_outbox
        WHERE status IN ('claimed', 'running')`,
     )
     .all() as any[];
-  let changed = 0;
+  let changed = failedZombies;
   for (const raw of rows) {
     const row = rowToOutbox(raw);
     if (row.status === "running" && row.dispatched_at) {
