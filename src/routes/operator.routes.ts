@@ -38,6 +38,7 @@ import {
 import { InvalidSettingError } from "../services/settings.service";
 import {
   parseExtensionSecretKey,
+  providerRegistry,
 } from "../spindle/provider-registry";
 import {
   putSecret,
@@ -248,7 +249,12 @@ app.put("/broker-origins", async (c) => {
     return c.json({ error: "Payload must be { origins: string[] }" }, 400);
   }
   try {
+    // Applied here rather than inside setApprovedBrokerOrigins so the service
+    // stays a pure persistence layer; the operator route is the seam that
+    // pushes the live allowlist into the running singleton registry so
+    // enforcement is immediate without a WorkerHost rebuild or restart.
     const configured = setApprovedBrokerOrigins(origins);
+    providerRegistry.configure({ approvedBrokerOrigins: configured });
     return c.json({ configured });
   } catch (err) {
     if (err instanceof InvalidBrokerOriginError) {
