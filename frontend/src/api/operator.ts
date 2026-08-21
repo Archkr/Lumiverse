@@ -306,10 +306,20 @@ export interface TrustedHostsUpdateResponse {
   baseline: TrustedHostEntry[]
 }
 
+export interface BrokerOriginsResponse {
+  configured: string[]
+}
+
+export interface BrokerOriginsUpdateResponse {
+  configured: string[]
+}
+
 export const operatorApi = {
   getStatus: () => get<OperatorStatus>('/operator/status'),
   getTrustedHosts: (fresh = false) => get<TrustedHostsResponse>('/operator/trusted-hosts', fresh ? { fresh: 1 } : undefined),
   putTrustedHosts: (hosts: string[]) => put<TrustedHostsUpdateResponse>('/operator/trusted-hosts', { hosts }),
+  getBrokerOrigins: () => get<BrokerOriginsResponse>('/operator/broker-origins'),
+  putBrokerOrigins: (origins: string[]) => put<BrokerOriginsUpdateResponse>('/operator/broker-origins', { origins }),
   getDatabase: () => get<OperatorDatabaseStatus>('/operator/database'),
   getSharp: () => get<OperatorSharpStatus>('/operator/sharp'),
   putSharp: (settings: SharpSettings) => put<OperatorSharpStatus>('/operator/sharp', settings),
