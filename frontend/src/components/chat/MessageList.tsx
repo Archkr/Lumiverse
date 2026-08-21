@@ -56,6 +56,7 @@ const MOBILE_RANGE_WARM_MS = 1200
 const INITIAL_RANGE_WARM_DELAY_MS = 300
 const USER_CONTROLLED_ROW_RESIZE_SETTLE_MS = 450
 const PROGRAMMATIC_CONTENT_REFLOW_SETTLE_MS = 1500
+const SWIPE_VARIANT_REFLOW_SETTLE_MS = 1500
 const MIN_FORCED_SCROLL_DURATION_MS = 180
 const MAX_FORCED_SCROLL_DURATION_MS = 700
 
@@ -262,6 +263,8 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
   const recentCollapsibleToggleUntilRef = useRef(0)
   const recentCollapsibleToggleTimerRef = useRef<number | null>(null)
   const programmaticReflowUntilByMessageIdRef = useRef<Map<string, number>>(new Map())
+  const previousSwipeIdByMessageIdRef = useRef<Map<string, number>>(new Map())
+  const swipeVariantReflowUntilByMessageIdRef = useRef<Map<string, number>>(new Map())
   const findHighlightTimerRef = useRef<number | null>(null)
   const focusedFindRequestRef = useRef(0)
   const keyboardRepinTimersRef = useRef<number[]>([])
@@ -357,6 +360,8 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     recentCollapsibleToggleMessageIdRef.current = null
     recentCollapsibleToggleUntilRef.current = 0
     programmaticReflowUntilByMessageIdRef.current.clear()
+    previousSwipeIdByMessageIdRef.current.clear()
+    swipeVariantReflowUntilByMessageIdRef.current.clear()
     if (recentCollapsibleToggleTimerRef.current != null) {
       window.clearTimeout(recentCollapsibleToggleTimerRef.current)
       recentCollapsibleToggleTimerRef.current = null
@@ -411,6 +416,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     if (!shouldAnimate && !shouldRetargetActiveAnimation) {
       cancelForcedScroll()
       el.scrollTop = targetOffset
+      markProgrammaticScroll(el)
       return
     }
 
@@ -431,6 +437,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     const startOffset = el.scrollTop
     if (Math.abs(targetOffset - startOffset) < 1) {
       el.scrollTop = targetOffset
+      markProgrammaticScroll(el)
       return
     }
 
@@ -449,12 +456,14 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
       const nextOffset = animation.startOffset
         + (animation.targetOffset - animation.startOffset) * easeOutQuart(progress)
       el.scrollTop = nextOffset
+      markProgrammaticScroll(el)
 
       if (progress >= 1) {
         // A temporarily stale scrollHeight can clamp this write. TanStack's
         // reconcile loop will issue the corrected destination again once the
         // virtual container has its final measured size.
         el.scrollTop = animation.targetOffset
+        markProgrammaticScroll(el)
         forcedScrollAnimationRef.current = null
         return
       }
@@ -464,7 +473,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
 
     forcedScrollAnimationRef.current = animation
     animation.rafId = requestAnimationFrame(tick)
-  }, [cancelForcedScroll])
+  }, [cancelForcedScroll, markProgrammaticScroll])
 
   const warmMobileRange = useCallback((duration = MOBILE_RANGE_WARM_MS) => {
     setMobileRangeWarm(true)
@@ -554,6 +563,27 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
 
     return items
   }, [displayMode, isCoarsePointer, isGroupChat, isNudgeLoopActive, loadingOlder, lumiaOOCStyle, streamingError, visibleMessages])
+
+  // ResizeObserver reports a swipe replacement after commit. Remember that
+  // semantic change across the short async measurement window so the resize
+  // predicate can distinguish it from an image/widget reflow in the same row.
+  useLayoutEffect(() => {
+    const previous = previousSwipeIdByMessageIdRef.current
+    const next = new Map<string, number>()
+    const now = performance.now()
+
+    for (const message of visibleMessages) {
+      next.set(message.id, message.swipe_id)
+      if (previous.has(message.id) && previous.get(message.id) !== message.swipe_id) {
+        swipeVariantReflowUntilByMessageIdRef.current.set(
+          message.id,
+          now + SWIPE_VARIANT_REFLOW_SETTLE_MS,
+        )
+      }
+    }
+
+    previousSwipeIdByMessageIdRef.current = next
+  }, [visibleMessages])
 
   useEffect(() => {
     measuredRowHeightsRef.current = new Map()
@@ -854,6 +884,10 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
         ? programmaticReflowUntilByMessageIdRef.current.get(row.message.id) ?? 0
         : 0
       const isProgrammaticContentReflow = performance.now() <= programmaticReflowUntil
+      const swipeVariantReflowUntil = row?.type === 'message'
+        ? swipeVariantReflowUntilByMessageIdRef.current.get(row.message.id) ?? 0
+        : 0
+      const isSwipeVariantChange = performance.now() <= swipeVariantReflowUntil
       return shouldAdjustMessageListScrollOnResize({
         delta,
         itemStart: item.start,
@@ -863,6 +897,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
         hasMeasuredSize: instance.itemSizeCache.has(item.key),
         isPinned: isPinnedRef.current,
         isStreamingTail,
+        isSwipeVariantChange,
         isFocusedEditableRow,
         isUserToggledCollapsibleRow,
         isProgrammaticContentReflow,
