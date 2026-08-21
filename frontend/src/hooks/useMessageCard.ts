@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect, useLayoutEffect } from 'react'
+import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { useStore } from '@/store'
@@ -63,6 +63,7 @@ export function useMessageCard(message: Message, chatId: string) {
   const beginMessageEdit = useStore((s) => s.beginMessageEdit)
   const updateMessageEditDraft = useStore((s) => s.updateMessageEditDraft)
   const clearMessageEdit = useStore((s) => s.clearMessageEdit)
+  const setEditingMessageId = useStore((s) => s.setEditingMessageId)
   const updateMessage = useStore((s) => s.updateMessage)
   const addToast = useStore((s) => s.addToast)
   const isEditing = editingMessageId === message.id
