@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { JSDOM } from 'jsdom'
-import { act, createElement } from 'react'
+import { act, createElement, useSyncExternalStore } from 'react'
 import type { Root } from 'react-dom/client'
 import type { Message } from '@/types/api'
 
@@ -17,9 +17,34 @@ const generateUUID = mock(() => 'req-fixed')
 const addToast = mock(() => {})
 const updateMessage = mock((id: string, next: Message) => {
   storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, ...next } : m))
+  notifyStore()
 })
+
+const storeListeners = new Set<() => void>()
+let storeVersion = 0
+function notifyStore(): void {
+  storeVersion++
+  for (const listener of storeListeners) listener()
+}
 const setEditingMessageId = mock((id: string | null) => {
   storeState.editingMessageId = id
+  notifyStore()
+})
+const clearMessageEdit = mock(() => {
+  storeState.editingMessageId = null
+  storeState.messageEditDraft = null
+  notifyStore()
+})
+const beginMessageEdit = mock((draft: MessageEditDraft) => {
+  storeState.editingMessageId = draft.messageId
+  storeState.messageEditDraft = { ...draft, dirty: false, focusRequested: true }
+  notifyStore()
+})
+const updateMessageEditDraft = mock((patch: Partial<MessageEditDraft>) => {
+  storeState.messageEditDraft = storeState.messageEditDraft
+    ? { ...storeState.messageEditDraft, ...patch, dirty: true }
+    : null
+  notifyStore()
 })
 
 function msg(partial: Partial<Message> & Pick<Message, 'id' | 'is_user'>): Message {
@@ -43,9 +68,24 @@ function msg(partial: Partial<Message> & Pick<Message, 'id' | 'is_user'>): Messa
 const user = msg({ id: 'user-1', is_user: true, content: 'hello' })
 const assistant = msg({ id: 'asst-1', is_user: false, content: 'hi', index_in_chat: 1 })
 
+type MessageEditDraft = {
+  chatId: string
+  messageId: string
+  content: string
+  reasoning?: string
+  showReasoningEditor?: boolean
+  hadReasoning?: boolean
+  dirty?: boolean
+  focusRequested?: boolean
+}
+
 const storeState = {
   editingMessageId: 'user-1' as string | null,
+  messageEditDraft: null as MessageEditDraft | null,
   setEditingMessageId,
+  clearMessageEdit,
+  beginMessageEdit,
+  updateMessageEditDraft,
   updateMessage,
   addToast,
   removeMessage: mock(() => {}),
@@ -53,6 +93,7 @@ const storeState = {
   activeCharacterId: 'char-1',
   characters: [] as Array<{ id: string; name: string }>,
   isStreaming: false,
+  totalChatLength: 1,
   messages: [user] as Message[],
   activePersonaId: null as string | null,
   personas: [] as Array<{ id: string; name: string }>,
@@ -79,8 +120,21 @@ const storeState = {
   getActivePresetForGeneration: () => 'preset-1',
 }
 
+let storeSnapshot = { v: -1, state: storeState }
+function getStoreSnapshot(): { v: number; state: typeof storeState } {
+  if (storeSnapshot.v !== storeVersion) storeSnapshot = { v: storeVersion, state: storeState }
+  return storeSnapshot
+}
+
 const useStoreMock = Object.assign(
-  <T,>(selector: (state: typeof storeState) => T): T => selector(storeState),
+  <T,>(selector: (state: typeof storeState) => T): T => selector(useSyncExternalStore(
+    (listener) => {
+      storeListeners.add(listener)
+      return () => { storeListeners.delete(listener) }
+    },
+    getStoreSnapshot,
+    getStoreSnapshot,
+  ).state),
   { getState: () => storeState },
 )
 
@@ -182,8 +236,12 @@ describe('useMessageCard edit-and-send', () => {
     addToast.mockClear()
     updateMessage.mockClear()
     setEditingMessageId.mockClear()
+    clearMessageEdit.mockClear()
+    beginMessageEdit.mockClear()
+    updateMessageEditDraft.mockClear()
     storeState.isStreaming = false
     storeState.editingMessageId = 'user-1'
+    storeState.messageEditDraft = null
     storeState.messages = [user]
     editAndSend.mockResolvedValue({
       message: { ...user, content: 'rewritten' },
