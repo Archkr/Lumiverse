@@ -851,6 +851,10 @@ export const PRIVILEGED_PERMISSIONS = new Set([
   "images",
   "web_search",
   "unsafe_eval",
+  "providers.embedding.register",
+  "providers.tts.register",
+  "providers.stt.register",
+  "providers.sidecar.register",
 ]);
 
 function grantRequestedPermissionsByDefault(
@@ -1627,10 +1631,6 @@ export function grantPermission(
 
   const db = getDb();
   const grantScope = resolveGrantScope(ext, scope);
-  // PATCH leftover: UNIQUE(extension_id, permission) still blocks operator+user
-  // grants of the same permission. A later migration should replace it with
-  // UNIQUE(extension_id, permission, scope). Until then persist scope when the
-  // column exists and never UPDATE an existing row so scopes do not clobber.
   if (extensionGrantsHaveScopeColumn()) {
     db.run(
       `INSERT OR IGNORE INTO extension_grants (id, extension_id, permission, scope) VALUES (?, ?, ?, ?)`,

@@ -2875,6 +2875,19 @@ export class WorkerHost {
   }
 
   private handleProviderRegister(msg: Extract<RuntimeWorkerToHost, { type: "provider_register" }>): void {
+    const providerKind = (msg as unknown as { kind?: string }).kind ?? "";
+    const permission = `providers.${providerKind}.register` as ManagedSpindlePermission;
+    if (!providerKind || !this.hasPermission(permission)) {
+      console.warn(
+        `[Spindle:${this.manifest.identifier}] ${PERMISSION_DENIED_PREFIX} ${permission} - Provider registration permission not granted`,
+      );
+      this.postToWorker({
+        type: "permission_denied",
+        permission,
+        operation: "provider_register",
+      });
+      return;
+    }
     try {
       providerRegistry.handleWorkerMessage(msg, this.providerHostContext());
     } catch (err: any) {
@@ -2885,6 +2898,19 @@ export class WorkerHost {
   }
 
   private handleProviderUnregister(msg: Extract<RuntimeWorkerToHost, { type: "provider_unregister" }>): void {
+    const providerKind = (msg as unknown as { kind?: string }).kind ?? "";
+    const permission = `providers.${providerKind}.register` as ManagedSpindlePermission;
+    if (!providerKind || !this.hasPermission(permission)) {
+      console.warn(
+        `[Spindle:${this.manifest.identifier}] ${PERMISSION_DENIED_PREFIX} ${permission} - Provider registration permission not granted`,
+      );
+      this.postToWorker({
+        type: "permission_denied",
+        permission,
+        operation: "provider_unregister",
+      });
+      return;
+    }
     try {
       providerRegistry.handleWorkerMessage(msg, this.providerHostContext());
     } catch (err: any) {
