@@ -107,6 +107,29 @@ const {
 } = await import("./services/trusted-hosts.service");
 loadTrustedHosts();
 
+// Load the operator-approved broker origin allowlist and push it into the
+// provider registry so extension broker URLs are validated at registration.
+// The initial configure above runs before the owner is seeded, so origins
+// must be attached here once getFirstUserId() can resolve the setting.
+const {
+  load: loadApprovedBrokerOrigins,
+  getApprovedBrokerOrigins,
+} = await import("./services/broker-origins.service");
+loadApprovedBrokerOrigins();
+try {
+  const { providerRegistry } = await import("./spindle/provider-registry");
+  const { getSecret } = await import("./services/secrets.service");
+  providerRegistry.configure({
+    getSecret,
+    approvedBrokerOrigins: getApprovedBrokerOrigins(),
+  });
+} catch (err) {
+  console.error("[startup] provider registry broker origin hook failed:", err);
+}
+if (getApprovedBrokerOrigins().length === 0) {
+  console.log("[startup] Broker origin allowlist empty — broker URLs may target any http(s) origin");
+}
+
 runStartupDatabaseMaintenance(db, getDatabasePath(), getFirstUserId());
 startDatabaseMonitor(() => db, getDatabasePath());
 startAutomaticDatabaseMaintenance(

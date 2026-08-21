@@ -246,6 +246,96 @@ describe("provider broker security", () => {
     ).toThrow(/http or https/);
   });
 
+  test("registration is allowed when the origin is listed in the allowlist", () => {
+    const { registry } = brokerRegistry({ approvedBrokerOrigins: ["https://approved.test"] });
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "transcribe",
+        broker: { kind: "stt", url: "https://approved.test/stt" },
+      }, {
+        installationId: "inst-a",
+        installScope: "user",
+        authenticatedSubject: "alice",
+      }),
+    ).not.toThrow();
+  });
+
+  test("port mismatch is rejected against the approved origin", () => {
+    const { registry } = brokerRegistry({ approvedBrokerOrigins: ["https://approved.test:8443"] });
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "transcribe",
+        broker: { kind: "stt", url: "https://approved.test/stt" },
+      }, {
+        installationId: "inst-a",
+        installScope: "user",
+        authenticatedSubject: "alice",
+      }),
+    ).toThrow(/origin is not approved/);
+  });
+
+  test("allowlist matching is case-insensitive", () => {
+    const { registry } = brokerRegistry({ approvedBrokerOrigins: ["https://APPROVED.test:8443"] });
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "transcribe",
+        broker: { kind: "stt", url: "https://approved.TEST:8443/stt" },
+      }, {
+        installationId: "inst-a",
+        installScope: "user",
+        authenticatedSubject: "alice",
+      }),
+    ).not.toThrow();
+  });
+
+  test("enforcement survives a mid-life configure() update of the allowlist", () => {
+    const { registry } = brokerRegistry();
+    const base = {
+      installationId: "inst-a",
+      installScope: "user" as const,
+      authenticatedSubject: "alice",
+    };
+
+    // Empty allowlist starts permissive.
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "before",
+        broker: { kind: "stt", url: "https://anything.test/stt" },
+      }, base),
+    ).not.toThrow();
+
+    // Tightening the allowlist applies to subsequent registrations.
+    registry.configure({ approvedBrokerOrigins: ["https://approved.test"] });
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "after",
+        broker: { kind: "stt", url: "https://anything.test/stt" },
+      }, base),
+    ).toThrow(/origin is not approved/);
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "after-ok",
+        broker: { kind: "stt", url: "https://approved.test/stt" },
+      }, base),
+    ).not.toThrow();
+
+    // Loosening back to empty restores permissive behavior.
+    registry.configure({ approvedBrokerOrigins: [] });
+    expect(() =>
+      registry.register({
+        kind: "stt",
+        id: "loosened",
+        broker: { kind: "stt", url: "https://other.test/stt" },
+      }, base),
+    ).not.toThrow();
+  });
+
   test("allowlistKey must match an approved broker configuration", () => {
     const approved = brokerRegistry({ approvedAllowlistKeys: ["sidecar"] }).registry;
     const base = {

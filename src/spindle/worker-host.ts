@@ -81,6 +81,7 @@ import {
   type ProviderWorkerToHost,
 } from "./provider-registry";
 import { getSecret } from "../services/secrets.service";
+import { getApprovedBrokerOrigins } from "../services/broker-origins.service";
 import {
   readSharedRpcEndpoint,
   registerSharedRpcRequestEndpoint,
@@ -966,7 +967,7 @@ export class WorkerHost {
       enforceScopedUser: (userId) => this.enforceScopedUser(userId),
       post: (message) => this.postToWorker(message),
     });
-    providerRegistry.configure({ getSecret });
+    providerRegistry.configure({ getSecret, approvedBrokerOrigins: getApprovedBrokerOrigins() });
     providerRegistry.attachWorker(this.extensionId, (message) => {
       this.postToWorker(message);
     });

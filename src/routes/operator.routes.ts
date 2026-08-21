@@ -9,6 +9,11 @@ import {
   setTrustedHosts,
 } from "../services/trusted-hosts.service";
 import {
+  getApprovedBrokerOrigins,
+  InvalidBrokerOriginError,
+  setApprovedBrokerOrigins,
+} from "../services/broker-origins.service";
+import {
   getSharpSettingsStatus,
   putSharpSettings,
 } from "../services/sharp-settings.service";
@@ -220,6 +225,33 @@ app.put("/trusted-hosts", async (c) => {
     return c.json({ configured, baseline: getTrustedHostsSnapshot().baseline });
   } catch (err) {
     if (err instanceof InvalidTrustedHostError) {
+      return c.json({ error: err.message }, 400);
+    }
+    return c.json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
+  }
+});
+
+// ── Approved broker origins ────────────────────────────────────────────────
+
+/**
+ * Operator allowlist for Spindle extension broker URLs. An empty list is
+ * permissive — registration accepts any http(s) origin.
+ */
+app.get("/broker-origins", (c) => {
+  return c.json({ configured: getApprovedBrokerOrigins() });
+});
+
+app.put("/broker-origins", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const origins = Array.isArray(body?.origins) ? body.origins : null;
+  if (!origins) {
+    return c.json({ error: "Payload must be { origins: string[] }" }, 400);
+  }
+  try {
+    const configured = setApprovedBrokerOrigins(origins);
+    return c.json({ configured });
+  } catch (err) {
+    if (err instanceof InvalidBrokerOriginError) {
       return c.json({ error: err.message }, 400);
     }
     return c.json({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
