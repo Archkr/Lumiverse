@@ -93,6 +93,39 @@ describe('carry-forward match replacement', () => {
   })
 })
 
+describe('associative regex action captures', () => {
+  test('empties an optional named capture that did not participate in the match', () => {
+    const output = applyDisplayRegex(
+      '<choice>North</choice>',
+      [script({
+        find_regex: '<choice>(?<label>[^<]+)</choice>(?:<req>(?<req>[^<]*)</req>)?',
+        replace_string: '<button data-req="$<req>" data-regex-action="choose">$<label><small>$<req></small></button>',
+        actions: [{
+          id: 'choose',
+          type: 'send',
+          multi_select: false,
+          cost: '1',
+          limit: '3',
+          title: '$<label>',
+          subtitle: '$<req>',
+          content: 'Choose $<label>$<req>',
+        }],
+      })],
+      { isUser: false, depth: 0 },
+    )
+
+    expect(output).toContain('data-req=""')
+    expect(output).not.toContain('$<req>')
+    const encoded = output.match(/data-lumiverse-regex-action="([^"]+)"/)?.[1]
+    expect(encoded).toBeTruthy()
+    expect(JSON.parse(decodeURIComponent(encoded!))).toMatchObject({
+      title: 'North',
+      subtitle: '',
+      content: 'Choose North',
+    })
+  })
+})
+
 describe('display regex performance reporting', () => {
   test('reports recovery for a fast run of a display flagged script', () => {
     const recovered: Array<{ elapsedMs: number }> = []

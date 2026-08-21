@@ -1458,7 +1458,7 @@ export function substituteRegexCaptures(
   groups: (string | undefined)[],
   offset: number,
   input: string,
-  namedGroups?: Record<string, string>,
+  namedGroups?: Record<string, string | undefined>,
 ): string {
   return substituteRegexCapturesCore(template, fullMatch, groups, offset, input, namedGroups);
 }

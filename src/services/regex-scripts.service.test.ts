@@ -1413,6 +1413,40 @@ describe("regex match actions", () => {
 });
 
 describe("associative regex actions", () => {
+  test("renders omitted optional named captures as empty action attributes", async () => {
+    const created = createRegexScript(USER_ID, {
+      name: "Optional requirement",
+      find_regex: "<choice>(?<label>[^<]+)</choice>(?:<req>(?<req>[^<]*)</req>)?",
+      replace_string: '<button data-req="$<req>" data-regex-action="choose">$<label></button>',
+      placement: ["ai_output"],
+      target: ["display"],
+      actions: [{
+        id: "choose",
+        type: "send",
+        multi_select: false,
+        cost: "1",
+        limit: "3",
+        title: "$<label>",
+        subtitle: "",
+        content: "Choose $<label>",
+      }],
+    });
+    expect(typeof created).not.toBe("string");
+
+    const output = await applyRegexScripts(
+      "<choice>North</choice>",
+      [created as RegexScript],
+      "ai_output",
+      undefined,
+      undefined,
+      undefined,
+      { source: "display_backend" },
+    );
+
+    expect(output).toContain('data-req=""');
+    expect(output).not.toContain("$<req>");
+  });
+
   test("persists actions and resolves their capture templates per replacement", async () => {
     const created = createRegexScript(USER_ID, {
       name: "Choices",

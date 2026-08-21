@@ -45,7 +45,7 @@ export interface CollectedMatch {
   fullMatch: string;
   index: number;
   groups: (string | undefined)[];
-  namedGroups?: Record<string, string>;
+  namedGroups?: Record<string, string | undefined>;
 }
 
 export interface CaptureReplacement {
@@ -67,7 +67,7 @@ export function substituteRegexCaptures(
   groups: (string | undefined)[],
   offset: number,
   input: string,
-  namedGroups?: Record<string, string>,
+  namedGroups?: Record<string, string | undefined>,
 ): string {
   return substituteRegexCapturesFromArrayLike(
     template,
@@ -87,7 +87,7 @@ function substituteRegexCapturesFromArrayLike(
   groupOffset: number,
   offset: number,
   input: string,
-  namedGroups?: Record<string, string>,
+  namedGroups?: Record<string, string | undefined>,
 ): string {
   const groupCount = groups.length - groupOffset;
   return template.replace(
@@ -102,7 +102,13 @@ function substituteRegexCapturesFromArrayLike(
         if (idx >= 1 && idx <= groupCount) return groups[idx - 1 + groupOffset] ?? "";
         return token;
       }
-      if (name !== undefined && namedGroups) return namedGroups[name] ?? token;
+      if (name !== undefined && namedGroups) {
+        // A name defined by the pattern but absent from this match substitutes
+        // empty (native String#replace semantics). Only a name the pattern does
+        // not define at all is left untouched, so typos still surface.
+        if (Object.prototype.hasOwnProperty.call(namedGroups, name)) return namedGroups[name] ?? "";
+        return token;
+      }
       return token;
     },
   );

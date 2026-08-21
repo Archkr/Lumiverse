@@ -8,7 +8,7 @@ interface DisplayRegexMatch {
   fullMatch: string
   groups: Array<string | undefined>
   offset: number
-  namedGroups?: Record<string, string>
+  namedGroups?: Record<string, string | undefined>
 }
 
 interface ResolvedRegexAction extends RegexAction {
@@ -175,7 +175,7 @@ function substituteRegexCaptures(
   groups: Array<string | undefined>,
   offset: number,
   input: string,
-  namedGroups?: Record<string, string>,
+  namedGroups?: Record<string, string | undefined>,
 ): string {
   return template.replace(/\$(?:(\$)|(&)|(`)|(')|(\d{1,2})|<([^>]*)>)/g, (token, dollar, amp, backtick, quote, digits, name) => {
     if (dollar !== undefined) return '$'
@@ -187,7 +187,13 @@ function substituteRegexCaptures(
       if (idx >= 1 && idx <= groups.length) return groups[idx - 1] ?? ''
       return token
     }
-    if (name !== undefined && namedGroups) return namedGroups[name] ?? token
+    if (name !== undefined && namedGroups) {
+      // Optional named groups remain keys on the groups object even when they
+      // do not participate in this match. Those values substitute to empty;
+      // only genuinely unknown capture names remain literal.
+      if (Object.prototype.hasOwnProperty.call(namedGroups, name)) return namedGroups[name] ?? ''
+      return token
+    }
     return token
   })
 }
@@ -205,7 +211,7 @@ function collectRegexMatches(
 
   searchable.replace(regex, (fullMatch, ...args) => {
     const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
-    const namedGroups = hasNamedGroups ? args.pop() as Record<string, string> : undefined
+    const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
     args.pop() as string
     const offset = args.pop() as number
     const groups = args as Array<string | undefined>
@@ -522,7 +528,7 @@ export function applyDisplayRegex(
       } else if (script.substitute_macros === 'raw') {
         result = replaceWithinRegexSearchWindow(result, regex, findRegex, script.flags, replaceString, (fullMatch, ...args) => {
           const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
-          const namedGroups = hasNamedGroups ? args.pop() as Record<string, string> : undefined
+          const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
           const input = args.pop() as string
           const offset = args.pop() as number
           const groups = args as Array<string | undefined>

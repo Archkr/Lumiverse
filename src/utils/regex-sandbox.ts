@@ -39,7 +39,7 @@ export interface SandboxMatch {
   fullMatch: string;
   index: number;
   groups: (string | undefined)[];
-  namedGroups?: Record<string, string>;
+  namedGroups?: Record<string, string | undefined>;
 }
 
 export interface SandboxCaptureReplacement {
