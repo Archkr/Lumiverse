@@ -128,9 +128,9 @@
       "enabled": "摺疊較長的助理訊息",
       "enabledHint": "適用於所有聊天顯示模式，包括回覆產生期間。",
       "height": "摺疊高度",
-      "compact": "緊湊（300px）",
-      "comfortable": "舒適（500px）",
-      "tall": "較高（800px）"
+      "compact": "緊湊",
+      "comfortable": "舒適",
+      "tall": "較高"
     },
     "modalWidth": {
       "title": "彈窗寬度",

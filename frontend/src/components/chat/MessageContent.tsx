@@ -1,5 +1,6 @@
 import { useMemo, useRef, useLayoutEffect, useState, useEffect, useCallback, useSyncExternalStore, useDeferredValue } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ChevronDown } from 'lucide-react'
 import { marked } from 'marked'
 import { highlightCode } from '@/lib/codeHighlight'
 import { processMarkdownInHtmlIsland } from './htmlIslandMarkdown'
@@ -2173,13 +2174,16 @@ export default function MessageContent({
         {longMessageEligible && longMessageOverflowing && (
           <button
             type="button"
-            className={styles.longMessageToggle}
+            className={clsx(styles.longMessageToggle, longMessageExpanded && styles.longMessageToggleExpanded)}
             onClick={handleLongMessageToggle}
             aria-expanded={longMessageExpanded}
             aria-controls={`long-message-body-${messageId}`}
             data-long-message-toggle="true"
           >
-            {longMessageExpanded ? t('messageContent.showLess') : t('messageContent.readMore')}
+            <span className={styles.longMessageTogglePill}>
+              <span>{longMessageExpanded ? t('messageContent.showLess') : t('messageContent.readMore')}</span>
+              <ChevronDown className={styles.longMessageToggleIcon} size={15} strokeWidth={2.25} aria-hidden="true" />
+            </span>
           </button>
         )}
       </div>

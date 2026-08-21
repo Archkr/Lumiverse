@@ -128,9 +128,9 @@
       "enabled": "Réduire les longs messages de l’assistant",
       "enabledHint": "S’applique à tous les modes d’affichage, y compris pendant la génération d’une réponse.",
       "height": "HAUTEUR RÉDUITE",
-      "compact": "Compacte (300 px)",
-      "comfortable": "Confortable (500 px)",
-      "tall": "Haute (800 px)"
+      "compact": "Compacte",
+      "comfortable": "Confortable",
+      "tall": "Haute"
     },
     "modalWidth": {
       "title": "Largeur modale",

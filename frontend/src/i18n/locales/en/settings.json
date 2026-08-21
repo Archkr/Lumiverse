@@ -134,9 +134,9 @@
       "enabled": "Collapse long assistant messages",
       "enabledHint": "Applies in every chat display mode, including while a reply is generating.",
       "height": "COLLAPSED HEIGHT",
-      "compact": "Compact (300px)",
-      "comfortable": "Comfortable (500px)",
-      "tall": "Tall (800px)"
+      "compact": "Compact",
+      "comfortable": "Comfortable",
+      "tall": "Tall"
     },
     "modalWidth": {
       "title": "Modal Width",

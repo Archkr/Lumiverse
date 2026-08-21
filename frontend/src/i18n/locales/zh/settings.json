@@ -44,9 +44,9 @@
       "enabled": "折叠较长的助手消息",
       "enabledHint": "适用于所有聊天显示模式，包括回复生成期间。",
       "height": "折叠高度",
-      "compact": "紧凑（300px）",
-      "comfortable": "舒适（500px）",
-      "tall": "较高（800px）"
+      "compact": "紧凑",
+      "comfortable": "舒适",
+      "tall": "较高"
     },
     "modalWidth": {
       "title": "弹窗宽度",

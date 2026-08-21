@@ -128,9 +128,9 @@
       "enabled": "長いアシスタントメッセージを折りたたむ",
       "enabledHint": "返信の生成中を含む、すべてのチャット表示モードに適用されます。",
       "height": "折りたたみ時の高さ",
-      "compact": "コンパクト（300px）",
-      "comfortable": "標準（500px）",
-      "tall": "高め（800px）"
+      "compact": "コンパクト",
+      "comfortable": "標準",
+      "tall": "高め"
     },
     "modalWidth": {
       "title": "モーダル幅",
