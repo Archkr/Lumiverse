@@ -112,6 +112,15 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
     return url;
   }
 
+  /** Resolve the request URL separately from model/auth endpoints so providers
+   * can route opt-in chat features without changing their stable API base. */
+  protected chatCompletionsUrl(
+    apiUrl: string,
+    _request: GenerationRequest,
+  ): string {
+    return `${this.baseUrl(apiUrl)}/chat/completions`;
+  }
+
   /** Override to add provider-specific headers (e.g. OpenRouter's HTTP-Referer). */
   protected extraHeaders(_apiKey: string): Record<string, string> {
     return {};
@@ -136,7 +145,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
     apiUrl: string,
     request: GenerationRequest
   ): Promise<GenerationResponse> {
-    const url = `${this.baseUrl(apiUrl)}/chat/completions`;
+    const url = this.chatCompletionsUrl(apiUrl, request);
     const body = this.buildBody(request, false);
 
     const res = await fetchWithPreflightAbort(url, {
@@ -200,7 +209,7 @@ export abstract class OpenAICompatibleProvider implements LlmProvider {
     apiUrl: string,
     request: GenerationRequest
   ): AsyncGenerator<StreamChunk, void, unknown> {
-    const url = `${this.baseUrl(apiUrl)}/chat/completions`;
+    const url = this.chatCompletionsUrl(apiUrl, request);
     const body = this.buildBody(request, true);
 
     const res = await fetchWithPreflightAbort(url, {

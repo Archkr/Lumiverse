@@ -477,10 +477,8 @@ export interface AssemblyResult {
    *  The generate service must prepend this to the LLM response content since the model
    *  continues *after* the prefill (it's not included in the model's output). */
   assistantPrefill?: string;
-  /**
-   * A Moonshot/Kimi Partial Mode prefix for `reasoning_content`. The generation
-   * service surfaces this before the provider's streamed reasoning tail.
-   */
+  /** A provider-native `reasoning_content` prefix. The generation service
+   * surfaces this before the provider's streamed reasoning tail. */
   assistantReasoningPrefill?: string;
   /** Summary of all world info entries activated during this assembly. */
   activatedWorldInfo?: ActivatedWorldInfoEntry[];

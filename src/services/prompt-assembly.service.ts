@@ -4023,13 +4023,13 @@ export async function assemblePrompt(
     if (resolvedPrefill) prefillParts.push(resolvedPrefill);
   }
 
-  // Moonshot/Kimi Partial Mode can continue an explicitly supplied reasoning
-  // prefix via the assistant message's `reasoning_content`. Keep it separate
-  // from the visible assistant prefix: Kimi does not include this text in
-  // `content`, and the generation service displays it in the reasoning pane.
+  // Moonshot/Kimi Partial Mode and DeepSeek Chat Prefix Completion can continue
+  // an explicitly supplied reasoning prefix via the assistant message's
+  // `reasoning_content`. Keep it separate from the visible assistant prefix;
+  // the generation service displays it in the reasoning pane.
   if (
     ctx.generationType !== "continue" &&
-    connection?.provider === "moonshot" &&
+    (connection?.provider === "moonshot" || connection?.provider === "deepseek") &&
     completionSettings.reasoningPrefill
   ) {
     const resolvedReasoningPrefill = await evaluateHostPromptSource(
@@ -7853,7 +7853,10 @@ async function onelinerImpersonation(
     }
   }
 
-  if (connection?.provider === "moonshot" && completionSettings.reasoningPrefill) {
+  if (
+    (connection?.provider === "moonshot" || connection?.provider === "deepseek") &&
+    completionSettings.reasoningPrefill
+  ) {
     const resolvedReasoningPrefill = await evaluateHostPromptSource(
       completionSettings.reasoningPrefill,
       macroEnv,
