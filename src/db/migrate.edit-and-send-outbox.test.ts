@@ -347,11 +347,11 @@ describe("103 edit and send outbox migration", () => {
       expect(schema.outbox.map((column) => column.name)).toEqual(expected.outboxColumns);
 
       const baseline = await Bun.file(join(import.meta.dir, "baseline.sql")).text();
-      // 103 is post-baseline. Duplicating it into baseline.sql is forbidden
-      // by the lane contract, so this assertion compares migrated schema to
-      // the 103 DDL rather than to baseline.sql.
-      expect(baseline.includes("edit_and_send_requests")).toBe(false);
-      expect(baseline.includes("generation_outbox")).toBe(false);
+      // 103 is squashed into baseline.sql (folded-baseline lane): fresh
+      // databases receive its DDL from the bootstrap and record the migration
+      // as applied via BASELINE_MIGRATIONS.
+      expect(baseline.includes("edit_and_send_requests")).toBe(true);
+      expect(baseline.includes("generation_outbox")).toBe(true);
       expect(
         db.query("SELECT name FROM _migrations WHERE name = ?").get(MIGRATION_103),
       ).toEqual({ name: MIGRATION_103 });
