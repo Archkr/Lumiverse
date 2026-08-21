@@ -31,6 +31,12 @@ import { useStore } from '@/store'
 import i18n from '@/i18n'
 import { useDisplayRegex } from '@/hooks/useDisplayRegex'
 import {
+  getLongMessageCollapseHeight,
+  isLongMessageCollapseEligible,
+  isLongMessageOverflowing,
+  longMessageExpansionKey,
+} from '@/lib/longMessageCollapse'
+import {
   REGEX_SELECTIONS_CHANGED_EVENT,
   dispatchRegexAction,
   getRegexBlockSelectionCost,
@@ -1536,10 +1542,34 @@ export default function MessageContent({
   const blocks = useMemo(() => parseOOC(renderContent), [renderContent])
   const oocEnabled = useStore((s) => s.oocEnabled)
   const lumiaOOCStyle = useStore((s) => s.lumiaOOCStyle)
+  const longMessageCollapseEnabled = useStore((s) => s.longMessageCollapseEnabled)
+  const longMessageCollapsePreset = useStore((s) => s.longMessageCollapsePreset)
+  const expansionKey = chatId && messageId ? longMessageExpansionKey(chatId, messageId) : null
+  const longMessageExpanded = useStore((s) => (
+    expansionKey ? s.expandedLongMessageKeys.includes(expansionKey) : false
+  ))
+  const setLongMessageExpanded = useStore((s) => s.setLongMessageExpanded)
+  const longMessageEligible = isLongMessageCollapseEligible({
+    enabled: longMessageCollapseEnabled,
+    isUser,
+    chatId,
+    messageId,
+  })
+  const longMessageMaxHeight = getLongMessageCollapseHeight(longMessageCollapsePreset)
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentBodyRef = useRef<HTMLDivElement>(null)
   const prevTextLenRef = useRef(0)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [regexSelectionVersion, setRegexSelectionVersion] = useState(0)
+  const [longMessageOverflowing, setLongMessageOverflowing] = useState(false)
+
+  const measureLongMessageOverflow = useCallback(() => {
+    const body = contentBodyRef.current
+    const next = longMessageEligible
+      && !!body
+      && isLongMessageOverflowing(Math.max(body.scrollHeight, body.offsetHeight), longMessageMaxHeight)
+    setLongMessageOverflowing((current) => current === next ? current : next)
+  }, [longMessageEligible, longMessageMaxHeight])
 
   useEffect(() => {
     const refresh = () => setRegexSelectionVersion((version) => version + 1)
@@ -1870,6 +1900,7 @@ export default function MessageContent({
       pendingRaf = window.requestAnimationFrame(() => {
         pendingRaf = 0
         if (cancelled) return
+        measureLongMessageOverflow()
         notifyMessageContentLayout(container)
       })
     }
@@ -1888,7 +1919,7 @@ export default function MessageContent({
     let observer: ResizeObserver | null = null
     if (isStreaming) {
       observer = new ResizeObserver(scheduleLayoutNotify)
-      observer.observe(container)
+      observer.observe(contentBodyRef.current ?? container)
 
       mutationObserver = new MutationObserver(scheduleLayoutNotify)
       mutationObserver.observe(container, { childList: true, subtree: true, attributes: true, characterData: true })
@@ -1918,37 +1949,37 @@ export default function MessageContent({
     // layout events already notify MessageList via scheduleLayoutNotify(), so
     // re-creating observers on every renderContent change is unnecessary and
     // causes observer churn during fast streaming.
-  }, [isStreaming])
+  }, [isStreaming, measureLongMessageOverflow])
 
   // While streaming, ratchet the content container's min-height upward so that
   // transient DOM shrinkage (unclosed tags snapping shut, image placeholders
   // collapsing, etc.) cannot make the virtualized row height oscillate. The
   // lock is applied directly to the DOM to avoid React re-render thrash.
   useLayoutEffect(() => {
-    const container = containerRef.current
-    if (!container) return
+    const contentBody = contentBodyRef.current
+    if (!contentBody) return
 
     if (!isStreaming) {
-      container.style.minHeight = ''
+      contentBody.style.minHeight = ''
       return
     }
 
     // offsetHeight is zoom-invariant under Lumiverse's body-level CSS zoom,
     // whereas getBoundingClientRect() would return scaled pixels and the lock
     // would be applied twice.
-    let maxHeight = container.offsetHeight
-    container.style.minHeight = `${maxHeight}px`
+    let maxHeight = contentBody.offsetHeight
+    contentBody.style.minHeight = `${maxHeight}px`
 
     const updateMinHeight = () => {
-      const h = container.offsetHeight
+      const h = contentBody.offsetHeight
       if (h > maxHeight) {
         maxHeight = h
-        container.style.minHeight = `${h}px`
+        contentBody.style.minHeight = `${h}px`
       }
     }
 
     const observer = new ResizeObserver(updateMinHeight)
-    observer.observe(container)
+    observer.observe(contentBody)
 
     return () => observer.disconnect()
   }, [isStreaming])
@@ -2023,6 +2054,23 @@ export default function MessageContent({
 
     return elements
   }, [blocks, oocEnabled, lumiaOOCStyle, isStreaming])
+
+  useLayoutEffect(() => {
+    measureLongMessageOverflow()
+  }, [measureLongMessageOverflow, renderContent, renderedBlocks])
+
+  const handleLongMessageToggle = useCallback(() => {
+    if (!chatId || !messageId) return
+    const container = containerRef.current
+    dispatchCollapsibleToggleLayoutEvent(container)
+    setLongMessageExpanded(chatId, messageId, !longMessageExpanded)
+    window.requestAnimationFrame(() => {
+      const current = containerRef.current
+      if (!current) return
+      measureLongMessageOverflow()
+      dispatchMessageContentLayout(current)
+    })
+  }, [chatId, longMessageExpanded, measureLongMessageOverflow, messageId, setLongMessageExpanded])
 
   // Highlight rendered text nodes instead of rewriting the source Markdown or
   // sanitized HTML. This preserves formatting, display regexes, OOC layouts,
@@ -2108,8 +2156,32 @@ export default function MessageContent({
         ref={containerRef}
         className={clsx(styles.content, isUser ? styles.contentUser : styles.contentChar)}
       >
-        {renderedBlocks}
-        <SpindleMessageWidgets messageId={messageId} />
+        <div
+          id={longMessageEligible ? `long-message-body-${messageId}` : undefined}
+          className={clsx(
+            styles.longMessageViewport,
+            longMessageEligible && !longMessageExpanded && styles.longMessageViewportConstrained,
+            longMessageEligible && !longMessageExpanded && longMessageOverflowing && styles.longMessageViewportOverflowing,
+          )}
+          style={longMessageEligible && !longMessageExpanded ? { maxHeight: longMessageMaxHeight } : undefined}
+        >
+          <div ref={contentBodyRef} className={styles.longMessageBody}>
+            {renderedBlocks}
+            <SpindleMessageWidgets messageId={messageId} />
+          </div>
+        </div>
+        {longMessageEligible && longMessageOverflowing && (
+          <button
+            type="button"
+            className={styles.longMessageToggle}
+            onClick={handleLongMessageToggle}
+            aria-expanded={longMessageExpanded}
+            aria-controls={`long-message-body-${messageId}`}
+            data-long-message-toggle="true"
+          >
+            {longMessageExpanded ? t('messageContent.showLess') : t('messageContent.readMore')}
+          </button>
+        )}
       </div>
       <ImageLightbox src={lightboxSrc} onClose={handleLightboxClose} />
     </>

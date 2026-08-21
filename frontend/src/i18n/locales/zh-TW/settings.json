@@ -122,6 +122,16 @@
     "saving": "保存中…"
   },
   "display": {
+    "longMessages": {
+      "title": "長訊息",
+      "helper": "將較長的助理回覆限制在舒適的高度，直到你將其展開。",
+      "enabled": "摺疊較長的助理訊息",
+      "enabledHint": "適用於所有聊天顯示模式，包括回覆產生期間。",
+      "height": "摺疊高度",
+      "compact": "緊湊（300px）",
+      "comfortable": "舒適（500px）",
+      "tall": "較高（800px）"
+    },
     "modalWidth": {
       "title": "彈窗寬度",
       "helper": "限制所有彈窗的最大寬度，影響設置、編輯器及其他浮層面板。",

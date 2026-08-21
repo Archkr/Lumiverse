@@ -122,6 +122,16 @@
     "saving": "Enregistrement..."
   },
   "display": {
+    "longMessages": {
+      "title": "Messages longs",
+      "helper": "Limitez la hauteur des longues réponses de l’assistant jusqu’à leur développement.",
+      "enabled": "Réduire les longs messages de l’assistant",
+      "enabledHint": "S’applique à tous les modes d’affichage, y compris pendant la génération d’une réponse.",
+      "height": "HAUTEUR RÉDUITE",
+      "compact": "Compacte (300 px)",
+      "comfortable": "Confortable (500 px)",
+      "tall": "Haute (800 px)"
+    },
     "modalWidth": {
       "title": "Largeur modale",
       "helper": "Contraindre la largeur maximale de toutes les boîtes de dialogue modales. Affecte les paramètres, les éditeurs et autres panneaux contextuels.",

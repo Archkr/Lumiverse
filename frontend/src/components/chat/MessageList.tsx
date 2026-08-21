@@ -15,7 +15,8 @@ import GroupChatProgressBar from './GroupChatProgressBar'
 import GroupChatMemberBar from './GroupChatMemberBar'
 import { shouldAdjustMessageListScrollOnResize } from './messageListScrollAdjust'
 import { shouldPinMessageListTail } from './messageListPinning'
-import { COLLAPSIBLE_TOGGLE_LAYOUT_EVENT } from './collapsibleLayout'
+import { COLLAPSIBLE_TOGGLE_LAYOUT_EVENT, isCollapsibleToggleElement } from './collapsibleLayout'
+import { getLongMessageCollapseHeight, longMessageExpansionKey } from '@/lib/longMessageCollapse'
 import {
   MESSAGE_CONTENT_LAYOUT_EVENT,
   shouldPreserveScrollAnchorForLayout,
@@ -140,7 +141,7 @@ function getFocusedEditableMessageId(root: HTMLElement | null) {
 function getFocusedCollapsibleToggleMessageId(root: HTMLElement | null) {
   const active = document.activeElement
   if (!root || !active || !root.contains(active)) return null
-  if (!(active instanceof Element) || !active.matches('[data-reasoning-toggle], summary')) return null
+  if (!(active instanceof Element) || !isCollapsibleToggleElement(active)) return null
   return active.closest<HTMLElement>('[data-message-id]')?.dataset.messageId ?? null
 }
 
@@ -489,6 +490,11 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
   const regeneratingMessageId = useStore((s) => s.regeneratingMessageId)
   const streamingGenerationType = useStore((s) => s.streamingGenerationType)
   const displayMode = useStore((s) => s.chatDisplayMode)
+  const longMessageCollapseEnabled = useStore((s) => s.longMessageCollapseEnabled)
+  const longMessageCollapsePreset = useStore((s) => s.longMessageCollapsePreset)
+  const expandedLongMessageKeys = useStore((s) => s.expandedLongMessageKeys)
+  const expandedLongMessageKeySet = useMemo(() => new Set(expandedLongMessageKeys), [expandedLongMessageKeys])
+  const longMessageCollapseHeight = getLongMessageCollapseHeight(longMessageCollapsePreset)
   const styleMode = useStore((s) => {
     const claims = s.chatStyleModes[chatId]
     return claims && Object.keys(claims).length > 0 ? 'extension-relaxed' as const : undefined
@@ -520,6 +526,11 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
       const message = visibleMessages[index]
       const content = message.swipes?.[message.swipe_id] ?? message.content ?? ''
       const attachmentCount = message.extra?.attachments?.length ?? 0
+      const longMessageVariant = longMessageCollapseEnabled && !message.is_user
+        ? expandedLongMessageKeySet.has(longMessageExpansionKey(chatId, message.id))
+          ? 'long-expanded'
+          : `long-${longMessageCollapsePreset}`
+        : 'long-off'
       const measureKey = [
         'message',
         message.id,
@@ -531,6 +542,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
         message.extra?.reasoning ? 'reasoning' : 'no-reasoning',
         message.extra?.hidden ? 'hidden' : 'visible',
         lumiaOOCStyle,
+        longMessageVariant,
       ].join(':')
 
       // Key intentionally excludes content AND swipe_id: folding either in
@@ -562,7 +574,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     items.push({ type: 'bottom', key: 'bottom' })
 
     return items
-  }, [displayMode, isCoarsePointer, isGroupChat, isNudgeLoopActive, loadingOlder, lumiaOOCStyle, streamingError, visibleMessages])
+  }, [chatId, displayMode, expandedLongMessageKeySet, isCoarsePointer, isGroupChat, isNudgeLoopActive, loadingOlder, longMessageCollapseEnabled, longMessageCollapsePreset, lumiaOOCStyle, streamingError, visibleMessages])
 
   // ResizeObserver reports a swipe replacement after commit. Remember that
   // semantic change across the short async measurement window so the resize
@@ -589,7 +601,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     measuredRowHeightsRef.current = new Map()
     lastMeasuredByMessageIdRef.current = new Map()
     averageMeasuredHeightRef.current = null
-  }, [displayMode, isCoarsePointer, lumiaOOCStyle])
+  }, [displayMode, isCoarsePointer, longMessageCollapseEnabled, longMessageCollapsePreset, lumiaOOCStyle])
 
   useEffect(() => {
     setInitialRangeWarm(false)
@@ -833,11 +845,18 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
       extensionTagFloor,
     )
     const average = averageMeasuredHeightRef.current
+    const blendedEstimate = average ? (contentEstimate * 0.7 + average * 0.3) : contentEstimate
+    const isCollapsedLongMessage = longMessageCollapseEnabled
+      && !message.is_user
+      && !expandedLongMessageKeySet.has(longMessageExpansionKey(chatId, message.id))
+    const collapseAwareEstimate = isCollapsedLongMessage
+      ? Math.min(blendedEstimate, base + longMessageCollapseHeight + 36 + mediaHeight + audioHeight)
+      : blendedEstimate
 
     // Blend content heuristics with the measured chat average so unknown rows
     // near the loaded tail don't all start from the same poor fixed estimate.
-    return clampEstimate(average ? (contentEstimate * 0.7 + average * 0.3) : contentEstimate)
-  }, [isBubble, lumiaOOCStyle])
+    return clampEstimate(collapseAwareEstimate)
+  }, [chatId, expandedLongMessageKeySet, isBubble, longMessageCollapseEnabled, longMessageCollapseHeight, lumiaOOCStyle])
 
   const rangeExtractor = useCallback((range: Range) => {
     const indexes = new Set(defaultRangeExtractor(range))
@@ -1090,6 +1109,16 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     ))
     if (targetIndex === -1) return
 
+    const targetItem = virtualListItems[targetIndex]
+    if (targetItem?.type === 'message' && longMessageCollapseEnabled && !targetItem.message.is_user) {
+      const store = useStore.getState()
+      const key = longMessageExpansionKey(chatId, findTarget.id)
+      if (!store.expandedLongMessageKeys.includes(key)) {
+        store.setLongMessageExpanded(chatId, findTarget.id, true)
+        return
+      }
+    }
+
     focusedFindRequestRef.current = findTarget.requestId
     cancelInitialScrollToEnd()
     suppressKeyboardRepin(1200)
@@ -1112,7 +1141,9 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
   }, [
     beginForcedScroll,
     cancelInitialScrollToEnd,
+    chatId,
     findTarget,
+    longMessageCollapseEnabled,
     markUserUnpinned,
     rowVirtualizer,
     suppressKeyboardRepin,

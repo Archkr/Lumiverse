@@ -13,6 +13,58 @@
 
 .contentChar {}
 
+.longMessageViewport {
+  position: relative;
+}
+
+.longMessageViewportConstrained {
+  overflow: hidden;
+}
+
+.longMessageViewportOverflowing::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 72px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--long-message-fade-color, var(--lumiverse-bg, #0a0a0c)));
+}
+
+.longMessageBody {
+  display: flow-root;
+  min-width: 0;
+}
+
+.longMessageToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--lcs-radius-xs);
+  background: transparent;
+  color: var(--lumiverse-primary-text, var(--lumiverse-primary));
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.35;
+  transition: background var(--lumiverse-transition-fast), color var(--lumiverse-transition-fast);
+}
+
+.longMessageToggle:hover {
+  background: var(--lumiverse-fill-subtle, rgba(255, 255, 255, 0.04));
+}
+
+.longMessageToggle:focus-visible {
+  outline: 2px solid var(--lumiverse-primary);
+  outline-offset: 2px;
+}
+
 .findMatch {
   padding: 0 1px;
   border-radius: 2px;

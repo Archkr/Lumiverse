@@ -261,3 +261,29 @@ describe('legacy input settings migration', () => {
     expect(rows.get('chatDisplayMode')).toBe('bubble')
   })
 })
+
+describe('long message collapse settings', () => {
+  test('defaults to enabled with the comfortable height preset', () => {
+    const initial = store()
+    expect(initial.longMessageCollapseEnabled).toBe(true)
+    expect(initial.longMessageCollapsePreset).toBe('comfortable')
+  })
+
+  test('persists and restores the enable flag and height preset', async () => {
+    const rows = new Map<string, unknown>()
+    database(rows)
+    const first = store()
+
+    first.setSetting('longMessageCollapseEnabled', false)
+    first.setSetting('longMessageCollapsePreset', 'tall')
+    await flushSettingsNow()
+
+    expect(rows.get('longMessageCollapseEnabled')).toBe(false)
+    expect(rows.get('longMessageCollapsePreset')).toBe('tall')
+
+    const restored = store()
+    await restored.loadSettings()
+    expect(restored.longMessageCollapseEnabled).toBe(false)
+    expect(restored.longMessageCollapsePreset).toBe('tall')
+  })
+})

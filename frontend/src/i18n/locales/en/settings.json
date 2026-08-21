@@ -128,6 +128,16 @@
     "saving": "Saving..."
   },
   "display": {
+    "longMessages": {
+      "title": "Long Messages",
+      "helper": "Limit long assistant replies to a comfortable height until you expand them.",
+      "enabled": "Collapse long assistant messages",
+      "enabledHint": "Applies in every chat display mode, including while a reply is generating.",
+      "height": "COLLAPSED HEIGHT",
+      "compact": "Compact (300px)",
+      "comfortable": "Comfortable (500px)",
+      "tall": "Tall (800px)"
+    },
     "modalWidth": {
       "title": "Modal Width",
       "helper": "Constrain the maximum width of all modal dialogs. Affects settings, editors, and other popover panels.",
