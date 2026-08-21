@@ -146,7 +146,7 @@ describe("provider registry invocations", () => {
       correlationId: "late-1",
       round: 1,
       result: { leaked: true },
-    })).toBe(false);
+    }, { installationId: "inst-a", installScope: "user", installedByUserId: "alice" })).toBe(false);
     await expect(pending).rejects.toThrow(/aborted/);
   });
 });

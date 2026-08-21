@@ -129,7 +129,7 @@ describe("runtime transport provider RPC", () => {
       correlationId: "round-1",
       round: 1,
       result: { stale: true },
-    })).toBe(false);
+    }, { installationId: "inst-a", installScope: "user", installedByUserId: "alice" })).toBe(false);
 
     expect(registry.handleProviderResult({
       type: "provider_result",
@@ -137,7 +137,7 @@ describe("runtime transport provider RPC", () => {
       correlationId: "round-1",
       round: 2,
       result: { audio: new Uint8Array([9, 8, 7]) },
-    })).toBe(true);
+    }, { installationId: "inst-a", installScope: "user", installedByUserId: "alice" })).toBe(true);
 
     return expect(pending).resolves.toEqual({ audio: new Uint8Array([9, 8, 7]) });
   });

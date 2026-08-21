@@ -613,13 +613,13 @@ export class ProviderRegistry {
 
   handleProviderResult(
     message: ProviderResultMessage,
-    host?: HostScopeContext & { installationId: string },
+    host: HostScopeContext & { installationId: string },
   ): boolean {
     const pending = this.invocations.get(message.correlationId);
     if (!pending) return false;
     // Cross-installation guard: results are only applied when they originate
     // from the same installation that owns the pending invocation.
-    if (host && host.installationId !== pending.installationId) {
+    if (host.installationId !== pending.installationId) {
       this.clearTimer(pending);
       this.invocations.delete(message.correlationId);
       pending.reject(new Error("provider result rejected: installation mismatch"));
