@@ -514,7 +514,7 @@ export function normalizeCortexModelEndpoint(
 
 /** Secondary first, then extra `fallbacks`, de-duplicated by connection id. */
 export function listCortexFallbackEndpoints(
-  pair: Pick<CortexModelFallbackPair, "secondary" | "fallbacks"> | null | undefined,
+  pair: Partial<Pick<CortexModelFallbackPair, "secondary" | "fallbacks">> | null | undefined,
 ): CortexModelEndpoint[] {
   const extras: CortexModelEndpoint[] = [];
   const seen = new Set<string>();

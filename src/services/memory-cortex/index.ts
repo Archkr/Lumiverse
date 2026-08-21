@@ -1387,6 +1387,7 @@ export function scheduleProcessChunk(
       sidecarConnectionId,
       descriptionAliases,
       undefined,
+      false,
       signal,
     ),
   });

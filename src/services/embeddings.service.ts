@@ -352,6 +352,11 @@ export interface EmbeddingConfigWithStatus extends EmbeddingConfig {
   fallbackProfileIds: string[];
 }
 
+/** Statused except provider_profiles secrets, resolved later by withEmbeddingSecretStatus. */
+type EmbeddingConfigPreStatus = Omit<EmbeddingConfigWithStatus, "provider_profiles"> & {
+  provider_profiles?: Partial<Record<EmbeddingProvider, EmbeddingProviderProfile>>;
+};
+
 export interface EmbeddingModelsPreviewInput {
   provider?: EmbeddingProvider;
   api_url?: string;
@@ -652,10 +657,6 @@ const PROVIDER_DEFAULT_URL: Record<EmbeddingProvider, string> = {
   google_vertex: "https://aiplatform.googleapis.com",
 };
 
-const VALID_EMBEDDING_PROVIDERS: EmbeddingProvider[] = [
-  "openai-compatible", "openai", "openrouter", "electronhub", "bananabread", "nanogpt", "google_vertex",
-];
-
 function isKnownEmbeddingProvider(provider: string): provider is EmbeddingProvider {
   return VALID_EMBEDDING_PROVIDERS.includes(provider as EmbeddingProvider);
 }
@@ -870,7 +871,7 @@ function normalizeConfig(input: any): EmbeddingConfig {
   const vertex_project = normalizeOptionalString(input?.vertex_project);
 
   const rawProfiles = Array.isArray(input?.connectionProfiles) ? input.connectionProfiles : [];
-  let connectionProfiles = rawProfiles
+  let connectionProfiles: EmbeddingConnectionProfile[] = rawProfiles
     .filter((profile: unknown) => profile && typeof profile === "object")
     .map((profile: any) => stripProfileSecrets(profile));
 
@@ -1653,7 +1654,7 @@ const NVIDIA_NIM_EMBEDDING_MODELS = [
 
 type EmbeddingInputType = "query" | "passage";
 
-function nvidiaNimNeedsInputType(cfg: Pick<EmbeddingConfig, "provider" | "model">): boolean {
+function nvidiaNimNeedsInputType(cfg: { provider: string; model: string }): boolean {
   return cfg.provider === "nvidia-nim" && [
     "nvidia/llama-nemotron-embed-1b-v2",
     "nvidia/nv-embedqa-e5-v5",
@@ -2015,7 +2016,7 @@ function readRawEmbeddingConfig(userId: string): EmbeddingConfig {
 
 async function withEmbeddingSecretStatus(
   userId: string,
-  config: EmbeddingConfig,
+  config: EmbeddingConfigPreStatus,
   inherited = false,
 ): Promise<EmbeddingConfigWithStatus> {
   const profiles = config.provider_profiles ?? {};
@@ -2084,7 +2085,7 @@ async function toConfigWithStatus(
   userId: string,
   cfg: EmbeddingConfig,
   inherited?: boolean,
-): Promise<EmbeddingConfigWithStatus> {
+): Promise<EmbeddingConfigPreStatus> {
   const profiles = await Promise.all((cfg.connectionProfiles ?? []).map(async (profile) => ({
     ...stripProfileSecrets(profile),
     hasSecret: await hasProfileSecret(userId, profile),
@@ -2151,8 +2152,9 @@ export async function updateEmbeddingConfig(
   }
 
   const current = readRawEmbeddingConfig(userId);
-  const incomingProfiles = Array.isArray(input.connectionProfiles)
-    ? input.connectionProfiles.map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
+  type IncomingProfile = EmbeddingConnectionProfile & { api_key?: string | null; hasSecret?: boolean };
+  const incomingProfiles: IncomingProfile[] | undefined = Array.isArray(input.connectionProfiles)
+    ? (input.connectionProfiles as IncomingProfile[]).map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
     : undefined;
   const patched = applyLegacyConnectionPatch(current, {
     ...current,
@@ -2524,7 +2526,7 @@ async function requestEmbeddingsWithDriver(
 async function requestEmbeddings(
   userId: string,
   texts: string[],
-  options?: { omitDimensions?: boolean; signal?: AbortSignal },
+  options?: { omitDimensions?: boolean; signal?: AbortSignal; inputType?: EmbeddingInputType },
 ): Promise<number[][]> {
   // Resolve which user's settings + API key actually drive this call. In gate
   // mode non-owners inherit the owner's config and use the owner's key.
@@ -3408,7 +3410,6 @@ export const __test__ = {
   hasProfileSecret,
   resolveProfileSecret,
   embeddingProfileSecretKey,
-  normalizeConfig,
   persistableConfig,
   profileToDriverConfig,
   stripProfileSecrets,
