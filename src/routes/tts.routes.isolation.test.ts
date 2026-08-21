@@ -61,6 +61,17 @@ describe("tts routes multi-tenant isolation", () => {
     expect(getTtsProviderList(BOB).some((p) => p.name === "alice-ext-tts")).toBe(false);
   });
 
+  test("absent userId falls back to system-only visibility, not a full-registry sweep", () => {
+    providerRegistry.register({ kind: "tts", id: "alice-sweep-tts" }, aliceHost);
+    providerRegistry.register({ kind: "tts", id: "sys-fallback-tts" }, systemHost);
+
+    const anonymousNames = getTtsProviderList().map((p) => p.name);
+    expect(anonymousNames).toContain("sys-fallback-tts");
+    expect(anonymousNames).not.toContain("alice-sweep-tts");
+    expect(getTtsProvider("alice-sweep-tts")).toBeUndefined();
+    expect(getTtsProvider("alice-sweep-tts", ALICE)).toBeDefined();
+  });
+
   test("another user cannot resolve or invoke alice's provider", async () => {
     providerRegistry.register({ kind: "tts", id: "alice-private-tts" }, aliceHost);
 

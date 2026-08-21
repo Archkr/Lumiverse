@@ -103,8 +103,13 @@ function registrySttProvider(record: RegisteredProvider): SttProviderInfo {
 }
 
 function visibleSttRecords(userId?: string): RegisteredProvider[] {
-  const scopes = userId ? [`user:${userId}` as const, "system" as const] : undefined;
-  const records = scopes ? providerRegistry.listVisible([...scopes]) : providerRegistry.getProviders();
+  // Absent userId resolves SYSTEM-scope providers ONLY — never an all-scopes
+  // sweep across other users' records. Every production caller passes the
+  // authenticated user id explicitly; tests may pass "system" semantics.
+  const scopes: readonly (`user:${string}` | "system")[] = userId
+    ? [`user:${userId}` as const, "system" as const]
+    : ["system" as const];
+  const records = providerRegistry.listVisible(scopes);
   const extra: RegisteredProvider[] = [];
   for (const record of records) {
     try {

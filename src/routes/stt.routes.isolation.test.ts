@@ -67,11 +67,22 @@ describe("stt routes multi-tenant isolation", () => {
 
     expect(getProvider("alice-private-stt", ALICE)).not.toBeNull();
     expect(getProvider("alice-private-stt", BOB)).toBeNull();
-    expect(getProvider("alice-private-stt")).not.toBeNull();
+    // Absent userId resolves system scope ONLY — never an all-users sweep.
+    expect(getProvider("alice-private-stt")).toBeNull();
 
     expect(getProvider("openai", BOB)).not.toBeNull();
     expect(getProvider("sys-shared-stt", BOB)).not.toBeNull();
     expect(getProvider("sys-shared-stt", ALICE)).not.toBeNull();
+  });
+
+  test("absent userId falls back to system-only visibility, not a full-registry sweep", () => {
+    providerRegistry.register({ kind: "stt", id: "alice-sweep-stt" }, aliceHost);
+    providerRegistry.register({ kind: "stt", id: "sys-fallback-stt" }, systemHost);
+
+    const anonymousList = listProviders().map((provider) => provider.id);
+    expect(anonymousList).toContain("sys-fallback-stt");
+    expect(anonymousList).not.toContain("alice-sweep-stt");
+    expect(listProviders(ALICE).map((provider) => provider.id)).toContain("alice-sweep-stt");
   });
 
   test("denied or unloaded installations disappear from every user's listing", async () => {

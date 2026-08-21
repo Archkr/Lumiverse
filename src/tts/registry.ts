@@ -48,10 +48,13 @@ function ttsDenied(record: RegisteredProvider): boolean {
 }
 
 function visibleTtsRecords(userId?: string): RegisteredProvider[] {
-  const scopes = userId ? ([`user:${userId}`, "system"] as const) : undefined;
-  const records = scopes
-    ? providerRegistry.listVisible([...scopes])
-    : providerRegistry.getProviders();
+  // Absent userId resolves SYSTEM-scope providers ONLY — never an all-scopes
+  // sweep across other users' records. Every production caller passes the
+  // authenticated user id explicitly; tests may pass "system" semantics.
+  const scopes: readonly (`user:${string}` | "system")[] = userId
+    ? [`user:${userId}`, "system"]
+    : ["system"];
+  const records = providerRegistry.listVisible(scopes);
   const extra: RegisteredProvider[] = [];
   try {
     for (const record of records) {
