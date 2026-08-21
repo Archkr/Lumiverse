@@ -77,4 +77,97 @@ describe("provider secret resolution", () => {
     expect(envelopeContainsSecrets(response)).toBe(false);
     expect(JSON.stringify(outbound)).not.toContain("super-secret-token");
   });
+
+  test("system-scoped install resolves secrets via the reserved system principal", async () => {
+    const order: string[] = [];
+    let resolvedBeforeFetch = false;
+    const registry = new ProviderRegistry({
+      getSecret: async (userId, key) => {
+        order.push(`secret:${userId}:${key}`);
+        return "system-token";
+      },
+      fetch: async (_url, options) => {
+        resolvedBeforeFetch = order.includes("secret:__system__:extension:inst-sys:embedding-key");
+        order.push("fetch");
+        const headers = new Headers(options?.headers);
+        expect(headers.get("Authorization")).toBe("Bearer system-token");
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    registry.register({
+      kind: "embedding",
+      id: "sys-embed",
+      broker: {
+        kind: "embedding",
+        url: "https://provider.test/embed",
+        secretKey: "extension:inst-sys:embedding-key",
+      },
+    }, {
+      installationId: "inst-sys",
+      installScope: "system",
+    });
+
+    const request: BrokerRequest = {
+      kind: "embedding",
+      url: "https://provider.test/embed",
+      secretKey: "extension:inst-sys:embedding-key",
+      headers: { Accept: "application/json" },
+      body: { text: "hello" },
+      correlationId: "sys-secret-1",
+    };
+
+    // No human subject on a system-scope host: the host-side principal
+    // selection falls back to the reserved system principal, never any
+    // request-supplied field.
+    const prepared = registry.prepareBroker(request, {
+      installScope: "system",
+      installationId: "inst-sys",
+    });
+
+    expect(order).toEqual([]);
+    expect(prepared.authenticatedSubject).toBe("__system__");
+    expect(prepared.workerView.secretKey).toBeUndefined();
+
+    const response = await registry.completeBroker(prepared);
+    expect(resolvedBeforeFetch).toBe(true);
+    expect(order).toEqual(["secret:__system__:extension:inst-sys:embedding-key", "fetch"]);
+    expect(response.ok).toBe(true);
+  });
+
+  test("system-scoped invoke path resolves via the reserved system principal", async () => {
+    const lookups: string[] = [];
+    const registry = new ProviderRegistry({
+      getSecret: async (userId, key) => {
+        lookups.push(`secret:${userId}:${key}`);
+        return "system-token";
+      },
+      fetch: async (_url, options) => {
+        const headers = new Headers(options?.headers);
+        expect(headers.get("Authorization")).toBe("Bearer system-token");
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    registry.attachWorker("inst-sys", () => {});
+    registry.register({
+      kind: "sidecar",
+      id: "tools",
+      broker: {
+        kind: "sidecar",
+        url: "https://provider.test/v1",
+        secretKey: "extension:inst-sys:api-key",
+      },
+    }, {
+      installationId: "inst-sys",
+      installScope: "system",
+    });
+
+    await registry.invoke(
+      { effectiveScope: "system", installationId: "inst-sys", kind: "sidecar", id: "tools" },
+      { input: "hello" },
+      { callerScope: "system", correlationId: "sys-invoke-1" },
+    );
+
+    expect(lookups).toEqual(["secret:__system__:extension:inst-sys:api-key"]);
+  });
 });

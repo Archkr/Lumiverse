@@ -31,6 +31,13 @@ import {
   installSmartctl,
 } from "../services/smartctl.service";
 import { InvalidSettingError } from "../services/settings.service";
+import {
+  parseExtensionSecretKey,
+} from "../spindle/provider-registry";
+import {
+  putSecret,
+  SYSTEM_SECRET_PRINCIPAL,
+} from "../services/secrets.service";
 
 const app = new Hono();
 const CHECKPOINT_MODES = new Set(["PASSIVE", "FULL", "RESTART", "TRUNCATE"]);
@@ -174,6 +181,26 @@ app.post("/database/maintenance", async (c) => {
 });
 
 // ── Trusted hosts ───────────────────────────────────────────────────────────
+
+/**
+ * Operator provisioning for system-scope Spindle extension brokers. Secrets
+ * are stored under the reserved SYSTEM_SECRET_PRINCIPAL so system-scoped
+ * brokers can resolve them host-side. Keys must be namespaced to a single
+ * installation: `extension:<installationId>:<name>`.
+ */
+app.put("/spindle-secrets/:key", async (c) => {
+  const key = c.req.param("key");
+  if (!parseExtensionSecretKey(key)) {
+    return c.json(
+      { error: "key must be namespaced as extension:<installationId>:<name>" },
+      400,
+    );
+  }
+  const body = await c.req.json().catch(() => null);
+  if (!body?.value) return c.json({ error: "value is required" }, 400);
+  await putSecret(SYSTEM_SECRET_PRINCIPAL, key, body.value);
+  return c.json({ success: true });
+});
 
 app.get("/trusted-hosts", async (c) => {
   const snapshot = getTrustedHostsSnapshot();

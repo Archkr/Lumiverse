@@ -119,6 +119,83 @@ describe("provider broker security", () => {
     ).toThrow(/does not match installation/);
   });
 
+  test("user-scoped install with forged subject fields resolves under its own userId, never __system__", async () => {
+    const lookups: Array<{ userId: string; key: string }> = [];
+    const { registry, fetchedUrls } = brokerRegistry({
+      getSecret: async (userId, key) => {
+        lookups.push({ userId, key });
+        return "user-token";
+      },
+      fetch: async (url) => {
+        fetchedUrls.push(url);
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    // Forged request payload fields claim the system principal; the host must
+    // ignore them and resolve under the authenticated user's own subject.
+    const request: BrokerRequest = {
+      kind: "embedding",
+      url: "https://provider.test/embed",
+      secretKey: "extension:inst-a:embedding-key",
+      userId: "__system__",
+      owner: "__system__",
+      correlationId: "forged-1",
+    };
+    const prepared = registry.prepareBroker(request, {
+      installScope: "user",
+      authenticatedSubject: "alice",
+      installedByUserId: "alice",
+      installationId: "inst-a",
+    });
+
+    expect(prepared.authenticatedSubject).toBe("alice");
+    await registry.completeBroker(prepared);
+    expect(lookups).toEqual([{ userId: "alice", key: "extension:inst-a:embedding-key" }]);
+    expect(lookups.every((l) => l.userId !== "__system__")).toBe(true);
+    expect(fetchedUrls).toEqual(["https://provider.test/embed"]);
+  });
+
+  test("system scope rejects unnamespaced and cross-installation secretKeys", () => {
+    const { registry } = brokerRegistry();
+    const systemHost = { installScope: "system" as const, installationId: "inst-sys" };
+    expect(() =>
+      registry.prepareBroker({
+        kind: "sidecar",
+        url: "https://provider.test/v1",
+        secretKey: "openai_api_key",
+        correlationId: "sys-sec-1",
+      }, systemHost),
+    ).toThrow(/authorization denied/);
+    expect(() =>
+      registry.prepareBroker({
+        kind: "sidecar",
+        url: "https://provider.test/v1",
+        secretKey: "extension:inst-other:api-key",
+        correlationId: "sys-sec-2",
+      }, systemHost),
+    ).toThrow(/does not match installation/);
+  });
+
+  test("missing system-principal secret row reports provider secret is not available", async () => {
+    const lookups: Array<{ userId: string; key: string }> = [];
+    const { registry, fetchedUrls } = brokerRegistry({
+      getSecret: async (userId, key) => {
+        lookups.push({ userId, key });
+        return null;
+      },
+    });
+    const prepared = registry.prepareBroker({
+      kind: "sidecar",
+      url: "https://provider.test/v1",
+      secretKey: "extension:inst-sys:api-key",
+      correlationId: "sys-miss-1",
+    }, { installScope: "system" as const, installationId: "inst-sys" });
+    await expect(registry.completeBroker(prepared)).rejects.toThrow(/provider secret is not available/);
+    expect(lookups).toEqual([{ userId: "__system__", key: "extension:inst-sys:api-key" }]);
+    expect(fetchedUrls).toEqual([]);
+  });
+
   test("invoke cannot override the registration-time broker url", async () => {
     const { registry, fetchedUrls } = brokerRegistry();
     registry.register({

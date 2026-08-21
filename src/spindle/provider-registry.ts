@@ -1,4 +1,5 @@
 import { safeFetch, type SafeFetchOptions } from "../utils/safe-fetch";
+import { SYSTEM_SECRET_PRINCIPAL } from "../services/secrets.service";
 
 export const PROVIDER_DESC_MAX_BYTES = 64 * 1024;
 export const PROVIDER_REQUEST_MAX_BYTES = 256 * 1024;
@@ -891,9 +892,13 @@ export class ProviderRegistry {
       throw new Error("authenticated subject is required");
     }
     if (scope === "system") {
+      // System-scoped brokers have no human subject. They resolve secrets via
+      // the reserved system principal so operator-provisioned rows under
+      // SYSTEM_SECRET_PRINCIPAL ("__system__") are reachable host-side.
+      // A human fallback (e.g. an operator subject captured at install time)
+      // still wins so existing behavior is preserved.
       const fallback = host.authenticatedSubject || host.installedByUserId;
-      if (!fallback) throw new Error("authenticated subject is required");
-      return fallback;
+      return fallback || SYSTEM_SECRET_PRINCIPAL;
     }
     return subject;
   }

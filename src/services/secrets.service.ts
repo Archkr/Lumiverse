@@ -9,6 +9,15 @@ interface SecretRow {
   updated_at: number;
 }
 
+/**
+ * Reserved principal for system-scope Spindle extension brokers. Real user
+ * ids are UUIDs, so this principal is unreachable through normal login.
+ * Operators provision system broker secrets under it explicitly via the
+ * operator secrets route; system-scoped brokers resolve their credentials
+ * from these rows host-side at request time.
+ */
+export const SYSTEM_SECRET_PRINCIPAL = "__system__";
+
 let _cachedKey: CryptoKey | null = null;
 const warnedUnreadableSecrets = new Set<string>();
 
