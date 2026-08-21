@@ -40,8 +40,8 @@
   "display": {
     "longMessages": {
       "title": "长消息",
-      "helper": "将较长的助手回复限制在舒适的高度，直到你将其展开。",
-      "enabled": "折叠较长的助手消息",
+      "helper": "将较长的消息限制在舒适的高度，直到你将其展开。",
+      "enabled": "折叠较长的消息",
       "enabledHint": "适用于所有聊天显示模式，包括回复生成期间。",
       "height": "折叠高度",
       "compact": "紧凑",

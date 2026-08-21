@@ -40,8 +40,8 @@
   "display": {
     "longMessages": {
       "title": "Messaggi lunghi",
-      "helper": "Limita le risposte lunghe dell’assistente a un’altezza comoda finché non vengono espanse.",
-      "enabled": "Comprimi i messaggi lunghi dell’assistente",
+      "helper": "Limita i messaggi lunghi a un’altezza comoda finché non vengono espansi.",
+      "enabled": "Comprimi i messaggi lunghi",
       "enabledHint": "Si applica a tutte le modalità di chat, anche durante la generazione di una risposta.",
       "height": "ALTEZZA COMPRESSA",
       "compact": "Compatta",

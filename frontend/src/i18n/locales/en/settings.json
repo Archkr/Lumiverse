@@ -130,8 +130,8 @@
   "display": {
     "longMessages": {
       "title": "Long Messages",
-      "helper": "Limit long assistant replies to a comfortable height until you expand them.",
-      "enabled": "Collapse long assistant messages",
+      "helper": "Limit long messages to a comfortable height until you expand them.",
+      "enabled": "Collapse long messages",
       "enabledHint": "Applies in every chat display mode, including while a reply is generating.",
       "height": "COLLAPSED HEIGHT",
       "compact": "Compact",
