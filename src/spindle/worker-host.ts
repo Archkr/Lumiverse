@@ -2462,7 +2462,7 @@ export class WorkerHost {
         this.handleProviderUnregister(msg);
         break;
       case "provider_result":
-        providerRegistry.handleProviderResult(msg);
+        providerRegistry.handleProviderResult(msg, { installationId: this.extensionId });
         break;
       default:
         // Fail fast for unrecognized message types so the worker's

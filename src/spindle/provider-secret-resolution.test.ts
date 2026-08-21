@@ -15,7 +15,7 @@ describe("provider secret resolution", () => {
         return "super-secret-token";
       },
       fetch: async (_url, options) => {
-        resolvedBeforeFetch = order.includes("secret:alice:embedding-key");
+        resolvedBeforeFetch = order.includes("secret:alice:extension:inst-a:embedding-key");
         order.push("fetch");
         const headers = new Headers(options?.headers);
         expect(headers.get("Authorization")).toBe("Bearer super-secret-token");
@@ -34,7 +34,7 @@ describe("provider secret resolution", () => {
       broker: {
         kind: "embedding",
         url: "https://provider.test/embed",
-        secretKey: "embedding-key",
+        secretKey: "extension:inst-a:embedding-key",
       },
     }, {
       installationId: "inst-a",
@@ -45,7 +45,7 @@ describe("provider secret resolution", () => {
     const request: BrokerRequest = {
       kind: "embedding",
       url: "https://provider.test/embed",
-      secretKey: "embedding-key",
+      secretKey: "extension:inst-a:embedding-key",
       headers: { Accept: "application/octet-stream" },
       body: new Uint8Array([1, 2, 3]),
       binary: true,
@@ -58,6 +58,7 @@ describe("provider secret resolution", () => {
       installScope: "user",
       authenticatedSubject: "alice",
       installedByUserId: "alice",
+      installationId: "inst-a",
     });
 
     expect(order).toEqual([]);
@@ -70,7 +71,7 @@ describe("provider secret resolution", () => {
 
     const response = await registry.completeBroker(prepared);
     expect(resolvedBeforeFetch).toBe(true);
-    expect(order).toEqual(["secret:alice:embedding-key", "fetch"]);
+    expect(order).toEqual(["secret:alice:extension:inst-a:embedding-key", "fetch"]);
     expect(response.ok).toBe(true);
     expect(response.body).toEqual(new Uint8Array([7, 7, 7]));
     expect(envelopeContainsSecrets(response)).toBe(false);

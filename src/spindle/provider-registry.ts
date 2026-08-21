@@ -27,6 +27,12 @@ export type ProviderProvenance = {
 export type ProviderBrokerSpec = {
   url: string;
   method?: string;
+  /**
+   * Secret reference resolved host-side at request time. Must be namespaced
+   * to the registering installation: `extension:<installationId>:<name>`.
+   * Global or user-scoped keys (e.g. `openai_api_key`) are rejected with an
+   * authorization error before any network request is made.
+   */
   secretKey?: string;
   headers?: Record<string, string>;
   kind?: ProviderBrokerKind;
@@ -56,6 +62,12 @@ export type BrokerRequest = {
   headers?: Record<string, string>;
   body?: unknown;
   secretKey?: string;
+  /**
+   * Host-approved broker configuration key. When supplied it must match a
+   * key approved via `approvedAllowlistKeys`; unapproved keys are rejected
+   * with an authorization error.
+   */
+  allowlistKey?: string;
   userId?: string;
   owner?: string;
   binary?: boolean;
@@ -81,6 +93,8 @@ export type PreparedBroker = {
   body: unknown;
   binary: boolean;
   secretKey: string | null;
+  /** Installation that owns the registered broker this request dispatches to. */
+  installationId?: string;
   authenticatedSubject: string;
   correlationId: string;
   round: number;
@@ -163,10 +177,37 @@ export type ProviderRegistryDeps = {
   fetch?: (url: string, options?: SafeFetchOptions) => Promise<Response>;
   now?: () => number;
   timeoutMs?: number;
+  /**
+   * Operator/user-approved broker origins. When non-empty, broker URLs are
+   * validated against this allowlist at registration time.
+   */
+  approvedBrokerOrigins?: Iterable<string>;
+  /** Host-approved broker configuration keys accepted as `allowlistKey`. */
+  approvedAllowlistKeys?: Iterable<string>;
 };
 
 const SECRET_HEADER = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-access-token)$/i;
 const SECRET_FIELD = /^(secret|secretkey|secretref|apikey|api_key|authorization|token|password|bearer|access_token|refresh_token)$/i;
+
+const EXTENSION_SECRET_PREFIX = "extension:";
+
+/**
+ * Broker secret keys must be namespaced to the registering installation
+ * (`extension:<installationId>:<name>`). Global or user-scoped secret keys
+ * are never resolvable through the broker path.
+ */
+export function parseExtensionSecretKey(
+  secretKey: string,
+): { installationId: string; name: string } | null {
+  if (!secretKey.startsWith(EXTENSION_SECRET_PREFIX)) return null;
+  const rest = secretKey.slice(EXTENSION_SECRET_PREFIX.length);
+  const separator = rest.indexOf(":");
+  if (separator <= 0 || separator === rest.length - 1) return null;
+  const installationId = rest.slice(0, separator);
+  const name = rest.slice(separator + 1);
+  if (!installationId.trim() || !name.trim()) return null;
+  return { installationId, name };
+}
 
 type PendingInvocation = {
   correlationId: string;
@@ -319,12 +360,20 @@ export class ProviderRegistry {
   private fetchImpl: NonNullable<ProviderRegistryDeps["fetch"]>;
   private now: () => number;
   private timeoutMs: number;
+  private approvedBrokerOrigins: ReadonlySet<string>;
+  private approvedAllowlistKeys: ReadonlySet<string>;
 
   constructor(deps: ProviderRegistryDeps = {}) {
     this.getSecret = deps.getSecret;
     this.fetchImpl = deps.fetch ?? ((url, options) => safeFetch(url, options));
     this.now = deps.now ?? (() => Date.now());
     this.timeoutMs = deps.timeoutMs ?? PROVIDER_INVOKE_TIMEOUT_MS;
+    this.approvedBrokerOrigins = new Set(
+      [...(deps.approvedBrokerOrigins ?? [])].map((origin) => origin.trim().toLowerCase()),
+    );
+    this.approvedAllowlistKeys = new Set(
+      [...(deps.approvedAllowlistKeys ?? [])].map((key) => key.trim()),
+    );
   }
 
   configure(deps: ProviderRegistryDeps): void {
@@ -332,6 +381,16 @@ export class ProviderRegistry {
     if (deps.fetch) this.fetchImpl = deps.fetch;
     if (deps.now) this.now = deps.now;
     if (typeof deps.timeoutMs === "number") this.timeoutMs = deps.timeoutMs;
+    if (deps.approvedBrokerOrigins) {
+      this.approvedBrokerOrigins = new Set(
+        [...deps.approvedBrokerOrigins].map((origin) => origin.trim().toLowerCase()),
+      );
+    }
+    if (deps.approvedAllowlistKeys) {
+      this.approvedAllowlistKeys = new Set(
+        [...deps.approvedAllowlistKeys].map((key) => key.trim()),
+      );
+    }
   }
 
   reset(): void {
@@ -362,9 +421,12 @@ export class ProviderRegistry {
     const id = normalizeId(descriptor.id, "id");
     const installationId = normalizeId(host.installationId, "installationId");
     const effectiveScope = deriveEffectiveScope(host);
-    assertByteLimit(descriptor.description ?? null, PROVIDER_DESC_MAX_BYTES, "provider description");
+    assertByteLimit(descriptor, PROVIDER_DESC_MAX_BYTES, "provider descriptor");
     if (descriptor.broker) {
       this.assertBrokerSpec(descriptor.broker);
+      if (descriptor.broker.secretKey !== undefined) {
+        this.assertSecretAuthorized(descriptor.broker.secretKey, installationId);
+      }
     }
 
     const key: ProviderKey = { effectiveScope, installationId, kind, id };
@@ -472,6 +534,7 @@ export class ProviderRegistry {
         authenticatedSubject: this.subjectFromScope(key.effectiveScope),
         installScope: this.installScopeFromScope(key.effectiveScope),
         installedByUserId: this.subjectFromScope(key.effectiveScope),
+        installationId: key.installationId,
       });
       return this.completeBroker(prepared);
     }
@@ -499,17 +562,28 @@ export class ProviderRegistry {
       };
       this.invocations.set(correlationId, pending);
       pending.timer = setTimeout(() => {
+        pending.timer = null;
         this.abort(correlationId, "provider invoke timed out");
       }, this.timeoutMs);
 
-      this.postToInstallation(key.installationId, {
-        type: "provider_invoke",
-        phase: "invoke",
-        correlationId,
-        round,
-        key,
-        request: redacted,
-      });
+      let dispatched = false;
+      try {
+        this.postToInstallation(key.installationId, {
+          type: "provider_invoke",
+          phase: "invoke",
+          correlationId,
+          round,
+          key,
+          request: redacted,
+        });
+        dispatched = true;
+      } finally {
+        if (!dispatched) {
+          this.clearTimer(pending);
+          this.invocations.delete(correlationId);
+          reject(new Error("failed to dispatch provider invoke to worker"));
+        }
+      }
     });
   }
 
@@ -519,7 +593,10 @@ export class ProviderRegistry {
     if (pending.abortSent) return false;
     pending.abortSent = true;
     pending.aborted = true;
+    // Tear down all tracking state before rejecting so timed-out or
+    // cancelled invocations never leak entries or timers.
     this.clearTimer(pending);
+    this.invocations.delete(correlationId);
     const record = this.providers.get(pending.key);
     if (record) {
       this.postToInstallation(record.key.installationId, {
@@ -534,9 +611,20 @@ export class ProviderRegistry {
     return true;
   }
 
-  handleProviderResult(message: ProviderResultMessage): boolean {
+  handleProviderResult(
+    message: ProviderResultMessage,
+    host?: HostScopeContext & { installationId: string },
+  ): boolean {
     const pending = this.invocations.get(message.correlationId);
     if (!pending) return false;
+    // Cross-installation guard: results are only applied when they originate
+    // from the same installation that owns the pending invocation.
+    if (host && host.installationId !== pending.installationId) {
+      this.clearTimer(pending);
+      this.invocations.delete(message.correlationId);
+      pending.reject(new Error("provider result rejected: installation mismatch"));
+      return false;
+    }
     if (pending.aborted) {
       this.invocations.delete(message.correlationId);
       return false;
@@ -566,7 +654,10 @@ export class ProviderRegistry {
     return true;
   }
 
-  prepareBroker(request: BrokerRequest, host: HostScopeContext): PreparedBroker {
+  prepareBroker(
+    request: BrokerRequest,
+    host: HostScopeContext & { installationId?: string },
+  ): PreparedBroker {
     if (!isBrokerKind(request.kind)) {
       throw new Error(`unsupported broker kind: ${request.kind}`);
     }
@@ -575,6 +666,11 @@ export class ProviderRegistry {
     if (!url) throw new Error("broker url is required");
     const authenticatedSubject = this.requireSubject(host);
     const headers = redactHeaders(request.headers);
+    const secretKey = typeof request.secretKey === "string" && request.secretKey.trim()
+      ? request.secretKey.trim()
+      : null;
+    this.assertSecretAuthorized(secretKey, host.installationId);
+    this.assertAllowlistKeyAuthorized(request.allowlistKey);
     const prepared: PreparedBroker = {
       kind: request.kind,
       url,
@@ -582,9 +678,8 @@ export class ProviderRegistry {
       headers,
       body: request.body,
       binary: request.binary === true,
-      secretKey: typeof request.secretKey === "string" && request.secretKey.trim()
-        ? request.secretKey.trim()
-        : null,
+      secretKey,
+      installationId: host.installationId,
       authenticatedSubject,
       correlationId: request.correlationId,
       round: request.round ?? 1,
@@ -606,6 +701,7 @@ export class ProviderRegistry {
   }
 
   async completeBroker(prepared: PreparedBroker): Promise<BrokerResponse> {
+    this.assertSecretAuthorized(prepared.secretKey, prepared.installationId);
     const headers: Record<string, string> = { ...prepared.headers };
     if (prepared.secretKey) {
       if (!this.getSecret) {
@@ -671,7 +767,7 @@ export class ProviderRegistry {
       case "provider_unregister":
         return this.unregister({ kind: message.kind, id: message.id }, host);
       case "provider_result":
-        return this.handleProviderResult(message);
+        return this.handleProviderResult(message, host);
       default:
         return false;
     }
@@ -683,6 +779,25 @@ export class ProviderRegistry {
     }
     if (spec.kind && !isBrokerKind(spec.kind)) {
       throw new Error(`unsupported broker kind: ${spec.kind}`);
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(spec.url);
+    } catch {
+      throw new Error(`broker url is not a valid URL: ${spec.url}`);
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error(`broker url must use http or https: ${spec.url}`);
+    }
+    if (parsed.username || parsed.password) {
+      throw new Error("broker url must not embed credentials");
+    }
+    if (this.approvedBrokerOrigins.size > 0) {
+      const origin = parsed.origin.toLowerCase();
+      if (!this.approvedBrokerOrigins.has(origin)) {
+        throw new Error(`broker url origin is not approved: ${origin}`);
+      }
     }
   }
 
@@ -696,6 +811,30 @@ export class ProviderRegistry {
     };
   }
 
+  private assertSecretAuthorized(secretKey: string | null, installationId: string | undefined): void {
+    if (!secretKey) return;
+    const parsed = parseExtensionSecretKey(secretKey);
+    if (!parsed) {
+      throw new Error(
+        `broker secret authorization denied: secretKey must be namespaced as extension:<installationId>:<name>, got unnamespaced or global key`,
+      );
+    }
+    if (!installationId || parsed.installationId !== installationId) {
+      throw new Error(
+        `broker secret authorization denied: secretKey installation "${parsed.installationId}" does not match installation "${installationId ?? "(unknown)"}"`,
+      );
+    }
+  }
+
+  private assertAllowlistKeyAuthorized(allowlistKey: string | undefined): void {
+    if (allowlistKey === undefined || allowlistKey === null || allowlistKey === "") return;
+    if (!this.approvedAllowlistKeys.has(allowlistKey.trim())) {
+      throw new Error(
+        `broker authorization denied: allowlistKey "${allowlistKey}" is not an approved broker configuration`,
+      );
+    }
+  }
+
   private brokerRequestFromInvoke(
     record: RegisteredProvider,
     request: unknown,
@@ -706,7 +845,9 @@ export class ProviderRegistry {
     const kind = (broker.kind ?? record.key.kind) as ProviderBrokerKind;
     return {
       kind,
-      url: typeof payload.url === "string" ? payload.url : broker.url,
+      // Destination is immutable: always the registration-time broker URL.
+      // Per-invocation `payload.url` overrides are never honoured.
+      url: broker.url,
       method: typeof payload.method === "string" ? payload.method : broker.method,
       headers: {
         ...broker.headers,
