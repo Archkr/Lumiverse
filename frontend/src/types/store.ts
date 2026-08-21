@@ -326,6 +326,10 @@ export interface UISlice {
   // Transient highlight target for navigation feedback (e.g. greeting switch)
   highlightedMessageId: string | null
   setHighlightedMessageId: (id: string | null) => void
+
+  // Session-only expansion state for height-collapsed assistant messages.
+  expandedLongMessageKeys: string[]
+  setLongMessageExpanded: (chatId: string, messageId: string, expanded: boolean) => void
 }
 
 // ---- OOC Style Type ----
@@ -666,6 +670,8 @@ export interface LorebookEditorSettings {
 }
 
 // ---- Settings Slice ----
+export type LongMessageCollapsePreset = 'compact' | 'comfortable' | 'tall'
+
 export interface SettingsSlice {
   settingsLoaded: boolean
   /** Full persisted settings loaded; startup settings intentionally set only `settingsLoaded`. */
@@ -679,6 +685,8 @@ export interface SettingsSlice {
   personasPerPage: number
   messagesPerPage: number
   chatDisplayMode: 'minimal' | 'immersive' | 'bubble'
+  longMessageCollapseEnabled: boolean
+  longMessageCollapsePreset: LongMessageCollapsePreset
   minimalUseFullAvatar: boolean
   bubbleUserAlign: 'left' | 'right'
   bubbleDisableHover: boolean
