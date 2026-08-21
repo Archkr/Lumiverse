@@ -191,6 +191,36 @@ interface GenerateInput {
   signal?: AbortSignal;
 }
 
+/**
+ * Resolve the connection used by a chat generation. A chat-scoped binding is
+ * authoritative over the caller's active/global connection. If the bound
+ * profile was deleted, fall back to the requested/default profile so an old
+ * metadata reference cannot make the chat unusable.
+ */
+function resolveChatGenerationConnection(
+  userId: string,
+  metadata: Record<string, any> | null | undefined,
+  requestedConnectionId?: string,
+): ConnectionProfile {
+  const boundId = typeof metadata?.connection_profile_id === "string"
+    ? metadata.connection_profile_id.trim()
+    : "";
+  const boundConnection = boundId
+    ? connectionsSvc.resolveConnection(userId, boundId)
+    : null;
+  const connection = boundConnection
+    ?? connectionsSvc.resolveConnection(userId, requestedConnectionId);
+
+  if (!connection) {
+    throw new Error("No connection profile found. Configure a default connection or select one for this chat.");
+  }
+
+  const modelOverride = boundConnection && typeof metadata?.connection_model === "string"
+    ? metadata.connection_model.trim()
+    : "";
+  return modelOverride ? { ...connection, model: modelOverride } : connection;
+}
+
 /** Lifecycle context passed from startGeneration → runGeneration */
 interface GenerationLifecycle {
   /** User-authored messages that immediately preceded this generation. */
@@ -1356,6 +1386,7 @@ async function runPromptPipeline(opts: {
   userId: string;
   chatId: string;
   connectionId?: string;
+  model?: string;
   presetId?: string;
   forcePresetId?: boolean;
   personaId?: string;
@@ -1746,7 +1777,7 @@ async function runPromptPipeline(opts: {
     opts.userId,
     effectiveConnection,
     effectiveConnection.provider,
-    effectiveConnection.model || undefined,
+    opts.model || effectiveConnection.model || undefined,
     parameters,
     undefined,
     !!opts.inputMessages,
@@ -1920,11 +1951,15 @@ export async function startGeneration(
     await abortChatBackground(input.userId, input.chat_id);
     checkAborted();
 
-    const connection = resolveConnection(input.userId, input.connection_id);
-    input.connection_id = connection.id;
     // Loaded before preset resolution: no-preset temp chats bypass the preset
     // requirement entirely (assertUsablePreset would otherwise reject them).
     const chat = chatsSvc.getChat(input.userId, input.chat_id);
+    const connection = resolveChatGenerationConnection(
+      input.userId,
+      chat?.metadata,
+      input.connection_id,
+    );
+    input.connection_id = connection.id;
     const isNoPresetChat = isNoPresetChatMetadata(chat?.metadata);
     if (isNoPresetChat) {
       input.preset_id = undefined;
@@ -2860,6 +2895,7 @@ export async function startGeneration(
             userId: input.userId,
             chatId: input.chat_id,
             connectionId: input.connection_id,
+            model: connection.model,
             presetId: input.preset_id,
             forcePresetId: input.force_preset_id,
             personaId: input.persona_id,
@@ -3207,7 +3243,11 @@ export async function dryRunGeneration(
     }
   }
 
-  const connection = resolveConnection(input.userId, input.connection_id);
+  const connection = resolveChatGenerationConnection(
+    input.userId,
+    dryRunChat?.metadata,
+    input.connection_id,
+  );
   input.connection_id = connection.id;
   if (!isNoPresetChat) {
     presetsSvc.assertUsablePreset(
@@ -3240,6 +3280,7 @@ export async function dryRunGeneration(
     userId: input.userId,
     chatId: input.chat_id,
     connectionId: input.connection_id,
+    model: connection.model,
     presetId: input.preset_id,
     forcePresetId: input.force_preset_id,
     personaId: input.persona_id,
