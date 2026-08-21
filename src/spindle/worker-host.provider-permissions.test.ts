@@ -145,6 +145,36 @@ describe("worker-host provider register permission enforcement", () => {
     expect(providerRegistry.list("operator:op-1")).toHaveLength(0);
   });
 
+  test("invalid or missing provider kind gets a clean invalid-request denial, not a malformed permission string", () => {
+    seedExtension("ext.a", "user", "alice", [
+      { permission: "providers.embedding.register", scope: "user:alice" },
+    ]);
+
+    const host = new WorkerHost("inst-a", manifest("ext.a"), extensionInfo("ext.a", "user", "alice"));
+    const posted = attachRuntime(host);
+
+    handle(host, { type: "provider_register", phase: "register", kind: "", id: "foo" });
+    handle(host, { type: "provider_register", phase: "register", kind: "bogus", id: "foo" } as never);
+    handle(host, { type: "provider_unregister", phase: "unregister", kind: "", id: "foo" });
+
+    for (const message of posted) {
+      const m = message as { permission?: string };
+      expect(m.permission).not.toBe("providers..register");
+      expect(m.permission).not.toMatch(/\.\./);
+    }
+    const denials = posted.filter(
+      (message) => (message as { type?: string }).type === "permission_denied",
+    ) as Array<{ permission: string; operation: string }>;
+    expect(denials).toHaveLength(3);
+    expect(denials.every((d) => d.permission === "providers.register")).toBe(true);
+    expect(denials.map((d) => d.operation)).toEqual([
+      "provider_register",
+      "provider_register",
+      "provider_unregister",
+    ]);
+    expect(providerRegistry.list("user:alice")).toHaveLength(0);
+  });
+
   test("denies provider_unregister without the grant and keeps the registration intact", () => {
     seedExtension("ext.a", "user", "alice", [
       { permission: "providers.tts.register", scope: "user:alice" },

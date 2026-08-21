@@ -95,7 +95,7 @@ export type PreparedBroker = {
   binary: boolean;
   secretKey: string | null;
   /** Installation that owns the registered broker this request dispatches to. */
-  installationId?: string;
+  installationId: string;
   authenticatedSubject: string;
   correlationId: string;
   round: number;
@@ -657,7 +657,7 @@ export class ProviderRegistry {
 
   prepareBroker(
     request: BrokerRequest,
-    host: HostScopeContext & { installationId?: string },
+    host: HostScopeContext & { installationId: string },
   ): PreparedBroker {
     if (!isBrokerKind(request.kind)) {
       throw new Error(`unsupported broker kind: ${request.kind}`);
@@ -665,6 +665,11 @@ export class ProviderRegistry {
     assertByteLimit(request, PROVIDER_REQUEST_MAX_BYTES, "provider request");
     const url = typeof request.url === "string" ? request.url.trim() : "";
     if (!url) throw new Error("broker url is required");
+    // Defense-in-depth: re-run the registration-time structural checks
+    // (scheme, no embedded credentials, approved origin format) on the
+    // dispatch path so a tampered or hand-crafted BrokerRequest cannot
+    // bypass what register() would have rejected.
+    this.assertBrokerSpec({ kind: request.kind, url });
     const authenticatedSubject = this.requireSubject(host);
     const headers = redactHeaders(request.headers);
     const secretKey = typeof request.secretKey === "string" && request.secretKey.trim()
@@ -895,8 +900,13 @@ export class ProviderRegistry {
       // System-scoped brokers have no human subject. They resolve secrets via
       // the reserved system principal so operator-provisioned rows under
       // SYSTEM_SECRET_PRINCIPAL ("__system__") are reachable host-side.
-      // A human fallback (e.g. an operator subject captured at install time)
-      // still wins so existing behavior is preserved.
+      //
+      // LEGACY FALLBACK PRECEDENCE: system-effective installs that recorded an
+      // installedByUserId (pre-multi-tenant rows) resolve their secrets under
+      // that HUMAN principal, not "__system__". During migration both
+      // namespaces may be consulted for the same installation: new
+      // operator-provisioned secrets live under "__system__", while legacy
+      // rows keep resolving from the recorded user id until re-provisioned.
       const fallback = host.authenticatedSubject || host.installedByUserId;
       return fallback || SYSTEM_SECRET_PRINCIPAL;
     }

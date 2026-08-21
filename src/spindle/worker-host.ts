@@ -77,6 +77,7 @@ import { WorkerHostPresentationApi } from "./worker-host-presentation-api";
 import { createRuntimeTransport, type RuntimeTransport } from "./runtime-transport";
 import {
   providerRegistry,
+  PROVIDER_BROKER_KINDS,
   type ProviderHostToWorker,
   type ProviderWorkerToHost,
 } from "./provider-registry";
@@ -2875,10 +2876,30 @@ export class WorkerHost {
     };
   }
 
+  private isValidProviderKind(kind: string): boolean {
+    return (PROVIDER_BROKER_KINDS as readonly string[]).includes(kind);
+  }
+
+  /** Invalid/missing kinds must not build a malformed `providers..register` permission string. */
+  private denyInvalidProviderKind(kind: unknown, operation: "provider_register" | "provider_unregister"): void {
+    console.warn(
+      `[Spindle:${this.manifest.identifier}] invalid provider kind ${JSON.stringify(kind ?? null)} for ${operation}`,
+    );
+    this.postToWorker({
+      type: "permission_denied",
+      permission: "providers.register",
+      operation,
+    });
+  }
+
   private handleProviderRegister(msg: Extract<RuntimeWorkerToHost, { type: "provider_register" }>): void {
-    const providerKind = (msg as unknown as { kind?: string }).kind ?? "";
+    const providerKind = msg.kind;
+    if (!this.isValidProviderKind(providerKind)) {
+      this.denyInvalidProviderKind(providerKind, "provider_register");
+      return;
+    }
     const permission = `providers.${providerKind}.register` as ManagedSpindlePermission;
-    if (!providerKind || !this.hasPermission(permission)) {
+    if (!this.hasPermission(permission)) {
       console.warn(
         `[Spindle:${this.manifest.identifier}] ${PERMISSION_DENIED_PREFIX} ${permission} - Provider registration permission not granted`,
       );
@@ -2899,9 +2920,13 @@ export class WorkerHost {
   }
 
   private handleProviderUnregister(msg: Extract<RuntimeWorkerToHost, { type: "provider_unregister" }>): void {
-    const providerKind = (msg as unknown as { kind?: string }).kind ?? "";
+    const providerKind = msg.kind;
+    if (!this.isValidProviderKind(providerKind)) {
+      this.denyInvalidProviderKind(providerKind, "provider_unregister");
+      return;
+    }
     const permission = `providers.${providerKind}.register` as ManagedSpindlePermission;
-    if (!providerKind || !this.hasPermission(permission)) {
+    if (!this.hasPermission(permission)) {
       console.warn(
         `[Spindle:${this.manifest.identifier}] ${PERMISSION_DENIED_PREFIX} ${permission} - Provider registration permission not granted`,
       );
