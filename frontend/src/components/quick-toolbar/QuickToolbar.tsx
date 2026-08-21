@@ -1324,7 +1324,7 @@ function QuickToolbarNative() {
               const context = cardContext[action.id]
               return (
                 <div className={styles.overflowRow} key={id}>
-                  <button type="button" className={styles.overflowAction} onClick={() => { action.run(); setOverflowOpen(false) }} title={context ? `${action.label} â€” ${context}` : action.label}>
+                  <button type="button" className={styles.overflowAction} onClick={() => { action.run(); setOverflowOpen(false) }} title={context ? `${action.label} — ${context}` : action.label}>
                     <Icon size={16} aria-hidden="true" />
                     <span>
                       <strong>{action.label}</strong>
