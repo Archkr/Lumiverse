@@ -2647,41 +2647,6 @@ function EmbeddingsSettings() {
                 </div>
               )}
 
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>{t('embeddings.model')}</label>
-                  <ModelCombobox
-                    value={cfg.model}
-                    onChange={(value) => update({ model: value })}
-                    models={models}
-                    modelLabels={modelLabels}
-                    loading={modelsLoading}
-                    onRefresh={fetchModels}
-                    autoRefreshOnFocus
-                    refreshKey={`${cfg.provider}:${cfg.api_url}`}
-                    placeholder={t('embeddings.modelPlaceholder')}
-                    emptyMessage={t('embeddings.noModels')}
-                    browseHint={t('embeddings.browseHint')}
-                    disabled={inherited}
-                  />
-                </div>
-              </div>
-
-              {canEditApiUrl ? (
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>{t('embeddings.apiUrl')}</label>
-                  <input className={styles.select} value={cfg.api_url} onChange={(e) => update({ api_url: e.target.value })} disabled={inherited} />
-                  <span className={styles.helperText}>{t('embeddings.apiUrlPathHint')}</span>
-                  {cfg.provider === 'bananabread' && (
-                    <span className={styles.helperText}>{t('embeddings.bananabreadHint')}</span>
-                  )}
-                </div>
-              ) : (
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>{t('embeddings.apiEndpoint')}</label>
-                  <span className={styles.helperText}>{t('embeddings.apiEndpointDefault', { url: defaultApiUrl })}</span>
-                </div>
-              )}
-
               <div className={styles.settingsGridTwo}>
                 <div className={styles.field}>
                   <label className={styles.fieldLabel}>{t('embeddings.dimensionsOptional')}</label>

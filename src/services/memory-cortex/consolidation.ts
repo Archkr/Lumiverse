@@ -347,8 +347,8 @@ export async function maybeConsolidate(
    *  feeding it to the consolidation LLM or extractive scorer. */
   extraScaffoldTags?: string[],
   sidecarOptions?: ConsolidationSidecarOptions,
-): Promise<void> {
-  if (!config.enabled) return;
+): Promise<boolean> {
+  if (!config.enabled) return false;
 
   const db = getDb();
 
@@ -362,7 +362,7 @@ export async function maybeConsolidate(
     )
     .get(chatId) as { count: number } | null;
 
-  if (!countRow || countRow.count < config.chunkThreshold) return;
+  if (!countRow || countRow.count < config.chunkThreshold) return false;
 
   // Only fetch the batch we actually need
   const batch = db
@@ -375,6 +375,7 @@ export async function maybeConsolidate(
        LIMIT ?`,
     )
     .all(chatId, config.chunksPerConsolidation) as any[];
+  if (batch.length === 0) return false;
 
   let summary: string;
   let title: string | null = null;
@@ -382,7 +383,7 @@ export async function maybeConsolidate(
   const resolvedSidecar = resolveConsolidationSidecarOptions(
     userId, sidecarConnectionId, sidecarTimeoutMs, sidecarOptions,
   );
-  if (resolvedSidecar.signal?.aborted) return;
+  if (resolvedSidecar.signal?.aborted) return false;
 
   if (config.useSidecar && generateRawFn) {
     const decision = await generateConsolidationSummary(
@@ -401,7 +402,7 @@ export async function maybeConsolidate(
       } else {
         console.warn("[memory-cortex] Consolidation sidecar exhausted, skip persist");
       }
-      return;
+      return false;
     }
 
     if (decision.result && !decision.useExtractive) {
@@ -475,6 +476,7 @@ export async function maybeConsolidate(
     userId, chatId, config, generateRawFn, sidecarConnectionId, sidecarTimeoutMs,
     samplingParameters, extraScaffoldTags, resolvedSidecar,
   );
+  return true;
 }
 
 /**
