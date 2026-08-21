@@ -25,15 +25,19 @@
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0,
-    #000 calc(100% - 42px),
-    rgba(0, 0, 0, 0.42) calc(100% - 16px),
+    #000 calc(100% - 82px),
+    rgba(0, 0, 0, 0.88) calc(100% - 64px),
+    rgba(0, 0, 0, 0.46) calc(100% - 38px),
+    rgba(0, 0, 0, 0.1) calc(100% - 16px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
     #000 0,
-    #000 calc(100% - 42px),
-    rgba(0, 0, 0, 0.42) calc(100% - 16px),
+    #000 calc(100% - 82px),
+    rgba(0, 0, 0, 0.88) calc(100% - 64px),
+    rgba(0, 0, 0, 0.46) calc(100% - 38px),
+    rgba(0, 0, 0, 0.1) calc(100% - 16px),
     transparent 100%
   );
 }
@@ -51,11 +55,11 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--lumiverse-primary-text, var(--lumiverse-primary));
+  color: var(--lumiverse-text-dim);
   cursor: pointer;
   font: inherit;
-  font-size: calc(12px * var(--lumiverse-font-scale, 1));
-  font-weight: 600;
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  font-weight: 500;
   line-height: 1.35;
   letter-spacing: 0.01em;
 }
@@ -64,7 +68,7 @@
   position: absolute;
   z-index: 2;
   left: 50%;
-  bottom: 3px;
+  bottom: -9px;
   margin: 0;
   transform: translateX(-50%);
 }
@@ -73,34 +77,28 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 27px;
-  padding: 3px 4px 3px 11px;
-  border: 1px solid var(--lumiverse-border-hover);
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
-    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 92%, var(--lumiverse-primary) 8%);
-  box-shadow:
-    0 3px 12px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  backdrop-filter: blur(var(--lcs-glass-soft-blur, 6px));
+  gap: 5px;
+  min-height: 30px;
+  padding: 2px 3px 2px 9px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 9px;
+  background: var(--lumiverse-fill-heavy);
   transition:
     transform var(--lumiverse-transition-fast),
     border-color var(--lumiverse-transition-fast),
     background var(--lumiverse-transition-fast),
-    box-shadow var(--lumiverse-transition-fast);
+    color var(--lumiverse-transition-fast);
 }
 
 .longMessageToggleIconFrame {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--lumiverse-primary-015);
-  color: var(--lumiverse-primary-text, var(--lumiverse-primary));
-  transition: background var(--lumiverse-transition-fast);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  transition: background var(--lumiverse-transition-fast), color var(--lumiverse-transition-fast);
 }
 
 .longMessageToggleIcon {
@@ -113,19 +111,13 @@
 }
 
 .longMessageToggle:hover .longMessageTogglePill {
-  transform: translateY(-1px);
-  border-color: var(--lumiverse-primary-050);
-  background:
-    linear-gradient(180deg, var(--lumiverse-primary-010), transparent),
-    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 86%, var(--lumiverse-primary) 14%);
-  box-shadow:
-    0 5px 14px rgba(0, 0, 0, 0.22),
-    0 0 12px var(--lumiverse-primary-010),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-color: var(--lumiverse-border-hover);
+  background: var(--lumiverse-fill-heavy);
+  color: var(--lumiverse-text);
 }
 
 .longMessageToggle:hover .longMessageToggleIconFrame {
-  background: var(--lumiverse-primary-020);
+  background: var(--lumiverse-fill-subtle);
 }
 
 .longMessageToggle:active .longMessageTogglePill {
@@ -138,7 +130,7 @@
 
 .longMessageToggle:focus-visible .longMessageTogglePill {
   outline: 2px solid var(--lumiverse-primary);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
