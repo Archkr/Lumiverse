@@ -855,6 +855,13 @@ app.get("/config", (c) => {
   return c.json(memoryCortex.getCortexConfig(userId));
 });
 
+/** GET /providers — Configured sidecar endpoints plus live registry sidecars. */
+app.get("/providers", (c) => {
+  const userId = c.get("userId");
+  const config = memoryCortex.getCortexConfig(userId);
+  return c.json({ providers: memoryCortex.listCortexSidecarProviders({ userId, config }) });
+});
+
 /** PUT /config — Update cortex configuration (partial merge) */
 app.put("/config", async (c) => {
   const userId = c.get("userId");
@@ -1003,7 +1010,10 @@ app.get("/health", async (c) => {
     }
   })();
 
-  const sidecarConnectionId = config.sidecar?.connectionProfileId || null;
+  const sidecarEndpoints = describeCortexSidecarHealth(userId, config);
+  const sidecarConnectionId = sidecarEndpoints.queryGeneration.primary.connectionProfileId
+    || config.sidecar?.connectionProfileId
+    || null;
   const sidecarRequired =
     config.entityExtractionMode === "sidecar" ||
     config.salienceScoringMode === "sidecar" ||
@@ -1017,7 +1027,7 @@ app.get("/health", async (c) => {
   const sidecarHasApiKey = sidecarProfile
     ? (!sidecarApiKeyRequired || !!sidecarProfile.has_api_key)
     : false;
-  const sidecarReady = !sidecarRequired || !!(sidecarProfile && sidecarProvider && sidecarHasApiKey);
+  const sidecarReady = !sidecarRequired || sidecarEndpoints.availability === "ok";
 
   if (sidecarRequired && !sidecarConnectionId) {
     pushCheck(
@@ -1321,6 +1331,11 @@ app.get("/health", async (c) => {
       model: config.sidecar?.model || sidecarProfile?.model || null,
       hasApiKey: sidecarHasApiKey,
       ready: sidecarReady,
+      availability: sidecarConnectivity.timedOut
+        ? "timeout"
+        : sidecarEndpoints.availability,
+      queryGeneration: sidecarEndpoints.queryGeneration,
+      memorySummarization: sidecarEndpoints.memorySummarization,
       connectivity: sidecarConnectivity,
     },
     chat: chatReport,

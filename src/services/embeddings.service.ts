@@ -865,8 +865,8 @@ function normalizeConfig(input: any): EmbeddingConfig {
     : undefined;
   const vertex_project = normalizeOptionalString(input?.vertex_project);
 
-  const rawProfiles = Array.isArray(input?.connectionProfiles) ? input.connectionProfiles : [];
-  let connectionProfiles: EmbeddingConnectionProfile[] = rawProfiles
+  const rawProfiles: any[] = Array.isArray(input?.connectionProfiles) ? input.connectionProfiles : [];
+  let connectionProfiles = rawProfiles
     .filter((profile: unknown) => profile && typeof profile === "object")
     .map((profile: any) => stripProfileSecrets(profile));
 
@@ -1812,6 +1812,44 @@ export function revokeEmbeddingRegistryProvider(
   return removed;
 }
 
+export type HostEmbeddingDriver = Omit<ProviderDescriptor, "kind" | "id"> & Partial<HostScopeContext> & {
+  installationId?: string;
+};
+
+function hostScopeFromEmbeddingDriver(driver: HostEmbeddingDriver): HostScopeContext & { installationId: string } {
+  const installationId = typeof driver.installationId === "string" && driver.installationId.trim()
+    ? driver.installationId.trim()
+    : "host";
+  const installScope = driver.installScope === "user" || driver.installScope === "operator" || driver.installScope === "system"
+    ? driver.installScope
+    : "system";
+  return {
+    installationId,
+    installScope,
+    installedByUserId: driver.installedByUserId,
+    authenticatedSubject: driver.authenticatedSubject,
+  };
+}
+
+export function registerEmbeddingDriver(id: string, driver: HostEmbeddingDriver): () => void {
+  const host = hostScopeFromEmbeddingDriver(driver);
+  providerRegistry.register({
+    kind: "embedding",
+    id,
+    description: driver.description ?? driver,
+    broker: driver.broker,
+    generation: driver.generation,
+    revision: driver.revision,
+    owner: driver.owner,
+  }, host);
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    providerRegistry.unregister({ kind: "embedding", id }, host);
+  };
+}
+
 function normalizeEmbeddingApiUrlForModelListing(rawUrl: string): string {
   const trimmed = rawUrl.trim().replace(/\/+$/, "");
   if (!trimmed) return "";
@@ -2120,10 +2158,10 @@ export async function updateEmbeddingConfig(
   }
 
   const current = readRawEmbeddingConfig(userId);
-  type IncomingProfile = EmbeddingConnectionProfile & { api_key?: string | null; hasSecret?: boolean };
-  const incomingProfiles: IncomingProfile[] | undefined = Array.isArray(input.connectionProfiles)
-    ? (input.connectionProfiles as IncomingProfile[]).map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
-    : undefined;
+  const incomingProfiles: Array<EmbeddingConnectionProfile & { api_key?: string | null; hasSecret?: boolean }> | undefined =
+    Array.isArray(input.connectionProfiles)
+      ? input.connectionProfiles.map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
+      : undefined;
   const patched = applyLegacyConnectionPatch(current, {
     ...current,
     ...input,
