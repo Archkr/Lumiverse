@@ -92,8 +92,8 @@ describe("stt routes multi-tenant isolation", () => {
     );
     providerRegistry.register({ kind: "stt", id: "live-alice-stt" }, aliceHost);
 
-    expect(listedProviderIds(ALICE)).resolves.not.toContain("denied-stt");
-    expect(listedProviderIds(BOB)).resolves.not.toContain("live-alice-stt");
+    await expect(listedProviderIds(ALICE)).resolves.not.toContain("denied-stt");
+    await expect(listedProviderIds(BOB)).resolves.not.toContain("live-alice-stt");
 
     providerRegistry.unloadInstallation("inst-alice-stt");
 

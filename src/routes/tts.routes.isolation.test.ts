@@ -6,8 +6,8 @@ const { getTtsProvider, getTtsProviderList } = await import("../tts/registry");
 const { providerRegistry } = await import("../spindle/provider-registry");
 import type { ProviderKey } from "../spindle/provider-registry";
 
-const ALICE = "user:alpha-id";
-const BOB = "user:beta-id";
+const ALICE = "alpha-id";
+const BOB = "beta-id";
 
 const aliceHost = {
   installationId: "inst-alice",

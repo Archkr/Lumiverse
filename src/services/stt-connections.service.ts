@@ -204,7 +204,6 @@ export function revokeSttRegistryProvider(
 }
 
 export type HostSttEngine = Omit<ProviderDescriptor, "kind" | "id"> & Partial<HostScopeContext> & {
-export type HostSttEngine = Omit<ProviderDescriptor, "kind" | "id"> & Partial<HostScopeContext> & {
   installationId?: string;
 };
 
