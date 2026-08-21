@@ -882,14 +882,27 @@ export class ProviderRegistry {
   }
 
   private encodeBody(body: unknown, binary: boolean): BodyInit {
-    if (body instanceof Uint8Array) return body;
+    if (body instanceof Uint8Array) {
+      // Always return a fresh ArrayBuffer-backed copy: BodyInit rejects
+      // SharedArrayBuffer-backed views.
+      const copy = new Uint8Array(body.byteLength);
+      copy.set(body);
+      return copy;
+    }
     if (ArrayBuffer.isView(body)) {
-      return new Uint8Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
+      const view = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+      const copy = new Uint8Array(view.byteLength);
+      copy.set(view);
+      return copy;
     }
     if (typeof body === "string" || body instanceof ArrayBuffer) return body;
     if (binary && body && typeof body === "object" && "data" in (body as object)) {
       const data = (body as { data: unknown }).data;
-      if (data instanceof Uint8Array) return data;
+      if (data instanceof Uint8Array) {
+        const copy = new Uint8Array(data.byteLength);
+        copy.set(data);
+        return copy;
+      }
     }
     return JSON.stringify(body ?? null);
   }

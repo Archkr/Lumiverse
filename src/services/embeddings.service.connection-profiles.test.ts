@@ -38,6 +38,15 @@ function openaiBody(dims = 2): { data: Array<{ embedding: number[] }> } {
   return { data: [{ embedding: Array.from({ length: dims }, (_, i) => i + 0.25) }] };
 }
 
+type FetchStub = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/** bun:test's spyOn(mockImplementation) requires the full Bun fetch shape,
+ *  which carries a preconnect method the plain stubs below omit. */
+function asFetchStub(fn: FetchStub): typeof fetch {
+  const stub = Object.assign(fn.bind(globalThis), { preconnect() {} });
+  return stub as typeof fetch;
+}
+
 function enabledProfiles(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
@@ -205,14 +214,14 @@ describe("embedding connection profiles", () => {
     secrets.set(sk(USER, embeddingProfileSecretKey(FALLBACK_ID)), "fallback-key");
 
     const urls: string[] = [];
-    spies.push(spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
       if (url.includes("primary.test")) {
         return new Response("primary down", { status: 503 });
       }
       return new Response("fallback down", { status: 503 });
-    }));
+    })));
 
     try {
       await embedTexts(USER, ["hello"]);
@@ -257,7 +266,7 @@ describe("embedding connection profiles", () => {
     const controller = new AbortController();
     const urls: string[] = [];
     let releasePrimary: ((err: Error) => void) | undefined;
-    spies.push(spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       urls.push(url);
       return new Promise<Response>((_resolve, reject) => {
@@ -267,7 +276,7 @@ describe("embedding connection profiles", () => {
           releasePrimary = onAbort;
         }
       });
-    }));
+    })));
 
     const pending = embedTexts(USER, ["hello"], { signal: controller.signal });
     await Bun.sleep(10);
@@ -289,13 +298,13 @@ describe("embedding connection profiles", () => {
     secrets.set(sk(USER, embeddingProfileSecretKey(FALLBACK_ID)), "fallback-key");
 
     const controller = new AbortController();
-    spies.push(spyOn(globalThis, "fetch").mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub((_input: RequestInfo | URL, init?: RequestInit) => {
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => {
           reject(new DOMException("Aborted", "AbortError"));
         }, { once: true });
       });
-    }));
+    })));
 
     const pending = cachedEmbedTexts(USER, ["cache-me"], { signal: controller.signal });
     await Bun.sleep(10);
@@ -334,10 +343,10 @@ describe("embedding connection profiles", () => {
     expect(secretReads).toEqual([]);
     expect(statusReads.length).toBeGreaterThan(0);
 
-    spies.push(spyOn(globalThis, "fetch").mockImplementation(async () => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async () => {
       expect(secretReads).toContain(embeddingProfileSecretKey(PRIMARY_ID));
       return new Response(JSON.stringify(openaiBody()), { status: 200, headers: { "Content-Type": "application/json" } });
-    }));
+    })));
 
     await embedTexts(USER, ["hello"]);
     expect(secretReads).toEqual([embeddingProfileSecretKey(PRIMARY_ID)]);
@@ -349,12 +358,12 @@ describe("embedding connection profiles", () => {
     putCfg(enabledProfiles({ fallbackProfileIds: [] }));
     secrets.set(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)), secret);
 
-    spies.push(spyOn(globalThis, "fetch").mockImplementation(async () => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async () => {
       return new Response(
         `denied Bearer ${secret} at embedding-profile/${PRIMARY_ID}/apiKey`,
         { status: 401 },
       );
-    }));
+    })));
 
     try {
       await embedTexts(USER, ["hello"]);
@@ -372,11 +381,11 @@ describe("embedding connection profiles", () => {
     secrets.set(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)), "primary-key");
     secrets.set(sk(USER, embeddingProfileSecretKey(FALLBACK_ID)), "fallback-key");
 
-    spies.push(spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("primary.test")) return new Response("nope", { status: 500 });
       return new Response(JSON.stringify(openaiBody()), { status: 200, headers: { "Content-Type": "application/json" } });
-    }));
+    })));
 
     const vectors = await embedTexts(USER, ["hello"]);
     expect(vectors[0]?.length).toBe(2);
