@@ -2182,7 +2182,9 @@ export default function MessageContent({
           >
             <span className={styles.longMessageTogglePill}>
               <span>{longMessageExpanded ? t('messageContent.showLess') : t('messageContent.readMore')}</span>
-              <ChevronDown className={styles.longMessageToggleIcon} size={15} strokeWidth={2.25} aria-hidden="true" />
+              <span className={styles.longMessageToggleIconFrame} aria-hidden="true">
+                <ChevronDown className={styles.longMessageToggleIcon} size={13} strokeWidth={2.4} />
+              </span>
             </span>
           </button>
         )}

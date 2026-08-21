@@ -21,19 +21,20 @@
   overflow: hidden;
 }
 
-.longMessageViewportOverflowing::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 104px;
-  pointer-events: none;
-  background: linear-gradient(
+.longMessageViewportOverflowing {
+  -webkit-mask-image: linear-gradient(
     to bottom,
-    transparent 0%,
-    color-mix(in srgb, var(--long-message-fade-color, var(--lumiverse-bg, #0a0a0c)) 58%, transparent) 48%,
-    var(--long-message-fade-color, var(--lumiverse-bg, #0a0a0c)) 100%
+    #000 0,
+    #000 calc(100% - 42px),
+    rgba(0, 0, 0, 0.42) calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 42px),
+    rgba(0, 0, 0, 0.42) calc(100% - 16px),
+    transparent 100%
   );
 }
 
@@ -43,14 +44,11 @@
 }
 
 .longMessageToggle {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  width: 100%;
-  margin-top: 9px;
-  padding: 3px 0;
+  display: block;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin: 5px auto 0;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--lumiverse-primary-text, var(--lumiverse-primary));
@@ -62,44 +60,47 @@
   letter-spacing: 0.01em;
 }
 
-.longMessageToggle::before,
-.longMessageToggle::after {
-  content: '';
-  height: 1px;
-  min-width: 24px;
-  flex: 1;
-  opacity: 0.65;
-}
-
-.longMessageToggle::before {
-  background: linear-gradient(to right, transparent, var(--lumiverse-border-hover));
-}
-
-.longMessageToggle::after {
-  background: linear-gradient(to left, transparent, var(--lumiverse-border-hover));
+.longMessageToggle:not(.longMessageToggleExpanded) {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 3px;
+  margin: 0;
+  transform: translateX(-50%);
 }
 
 .longMessageTogglePill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 5px 12px 5px 14px;
+  gap: 7px;
+  min-height: 27px;
+  padding: 3px 4px 3px 11px;
   border: 1px solid var(--lumiverse-border-hover);
   border-radius: 999px;
   background:
-    linear-gradient(180deg, var(--lumiverse-primary-010), transparent),
-    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 88%, transparent);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
+    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 92%, var(--lumiverse-primary) 8%);
   box-shadow:
-    0 5px 16px rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    0 3px 12px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045);
   backdrop-filter: blur(var(--lcs-glass-soft-blur, 6px));
   transition:
     transform var(--lumiverse-transition-fast),
     border-color var(--lumiverse-transition-fast),
     background var(--lumiverse-transition-fast),
     box-shadow var(--lumiverse-transition-fast);
+}
+
+.longMessageToggleIconFrame {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--lumiverse-primary-015);
+  color: var(--lumiverse-primary-text, var(--lumiverse-primary));
+  transition: background var(--lumiverse-transition-fast);
 }
 
 .longMessageToggleIcon {
@@ -115,12 +116,16 @@
   transform: translateY(-1px);
   border-color: var(--lumiverse-primary-050);
   background:
-    linear-gradient(180deg, var(--lumiverse-primary-015), transparent),
-    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 82%, transparent);
+    linear-gradient(180deg, var(--lumiverse-primary-010), transparent),
+    color-mix(in srgb, var(--long-message-fade-color, var(--lcs-glass-bg)) 86%, var(--lumiverse-primary) 14%);
   box-shadow:
-    0 7px 20px rgba(0, 0, 0, 0.2),
-    0 0 18px var(--lumiverse-primary-010),
+    0 5px 14px rgba(0, 0, 0, 0.22),
+    0 0 12px var(--lumiverse-primary-010),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.longMessageToggle:hover .longMessageToggleIconFrame {
+  background: var(--lumiverse-primary-020);
 }
 
 .longMessageToggle:active .longMessageTogglePill {
@@ -138,6 +143,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .longMessageTogglePill,
+  .longMessageToggleIconFrame,
   .longMessageToggleIcon {
     transition: none;
   }
