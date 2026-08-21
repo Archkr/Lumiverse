@@ -560,6 +560,17 @@ app.post("/bulk-update", async (c) => {
   return c.json({ updated, count: updated.length });
 });
 
+app.post("/batch-delete", async (c) => {
+  const userId = c.get("userId");
+  const body: { ids?: unknown } = await c.req.json<{ ids?: unknown }>().catch(() => ({}));
+  if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 1000) {
+    return c.json({ error: "ids must be a non-empty array with at most 1000 items" }, 400);
+  }
+  const ids = body.ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+  if (ids.length === 0) return c.json({ error: "ids must contain character ids" }, 400);
+  return c.json(await svc.batchDeleteCharacters(userId, ids));
+});
+
 app.post("/", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json();

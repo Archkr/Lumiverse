@@ -1506,7 +1506,11 @@ export function isImageReferenced(userId: string, id: string): boolean {
       [userId, id, WALLPAPER_LIBRARY_OWNER],
     ) ||
     hasImageReference(
-      "SELECT 1 AS found FROM character_gallery WHERE user_id = ? AND image_id = ? LIMIT 1",
+      `SELECT 1 AS found
+         FROM character_gallery cg
+         JOIN characters c ON c.id = cg.character_id
+        WHERE cg.user_id = ? AND cg.image_id = ? AND c.deleting = 0
+        LIMIT 1`,
       [userId, id],
     ) ||
     hasImageReference(
@@ -1597,7 +1601,13 @@ export function findReferencedImageIds(userId: string, candidates: ReadonlySet<s
         sql: (m) => `SELECT id AS hit FROM images WHERE user_id = ? AND owner_extension_identifier = ? AND id IN (${m})`,
         head: [userId, WALLPAPER_LIBRARY_OWNER],
       },
-      { sql: (m) => `SELECT image_id AS hit FROM character_gallery WHERE user_id = ? AND image_id IN (${m})`, head: [userId] },
+      {
+        sql: (m) => `SELECT cg.image_id AS hit
+                       FROM character_gallery cg
+                       JOIN characters c ON c.id = cg.character_id
+                      WHERE cg.user_id = ? AND c.deleting = 0 AND cg.image_id IN (${m})`,
+        head: [userId],
+      },
       { sql: (m) => `SELECT image_id AS hit FROM characters WHERE user_id = ? AND deleting = 0 AND image_id IN (${m})`, head: [userId] },
       { sql: (m) => `SELECT image_id AS hit FROM personas WHERE user_id = ? AND image_id IN (${m})`, head: [userId] },
       { sql: (m) => `SELECT image_id AS hit FROM theme_assets WHERE user_id = ? AND image_id IN (${m})`, head: [userId] },
