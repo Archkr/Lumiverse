@@ -345,6 +345,10 @@ mock.module('./ui-events-helper', () => ({
   },
 }))
 mock.module('./browser-scheduler', () => ({ scheduleSpindleDomTask: () => () => {}, yieldToBrowser: async () => {} }))
+// The native adapter intentionally imports the production Vite registry. This
+// lifecycle test exercises the loader boundary, so keep that compile-time-only
+// module graph behind its adapter rather than weakening the production macros.
+mock.module('./theme-authoring-native', () => ({ createNativeThemeAuthoringAPI: () => ({}) }))
 
 const lifecycleModuleSource = `
   export function teardown() {

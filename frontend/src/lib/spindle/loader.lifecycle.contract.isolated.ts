@@ -269,6 +269,10 @@ mock.module('@/lib/drawer-tab-registry', () => ({
   sanitizeHiddenDrawerTabIds: (ids?: string[]) => ids ?? [],
 }))
 mock.module('./browser-scheduler', () => ({ yieldToBrowser: async () => {}, scheduleSpindleDomTask: () => () => {} }))
+// The native adapter intentionally imports the production Vite registry. This
+// lifecycle test exercises the loader boundary, so keep that compile-time-only
+// module graph behind its adapter rather than weakening the production macros.
+mock.module('./theme-authoring-native', () => ({ createNativeThemeAuthoringAPI: () => ({}) }))
 
 // These factories intentionally load after the narrow store and visual-component
 // mocks; the real production helpers retain the mocked boundary references.
