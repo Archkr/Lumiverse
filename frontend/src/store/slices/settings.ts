@@ -630,7 +630,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
   personasPerPage: 24,
   messagesPerPage: 50,
   chatDisplayMode: 'minimal',
-  longMessageCollapseEnabled: true,
+  longMessageCollapseEnabled: false,
   longMessageCollapsePreset: 'comfortable',
   minimalUseFullAvatar: false,
   bubbleUserAlign: 'right',

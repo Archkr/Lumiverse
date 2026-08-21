@@ -263,9 +263,9 @@ describe('legacy input settings migration', () => {
 })
 
 describe('long message collapse settings', () => {
-  test('defaults to enabled with the comfortable height preset', () => {
+  test('defaults to disabled with the comfortable height preset', () => {
     const initial = store()
-    expect(initial.longMessageCollapseEnabled).toBe(true)
+    expect(initial.longMessageCollapseEnabled).toBe(false)
     expect(initial.longMessageCollapsePreset).toBe('comfortable')
   })
 
@@ -274,16 +274,16 @@ describe('long message collapse settings', () => {
     database(rows)
     const first = store()
 
-    first.setSetting('longMessageCollapseEnabled', false)
+    first.setSetting('longMessageCollapseEnabled', true)
     first.setSetting('longMessageCollapsePreset', 'tall')
     await flushSettingsNow()
 
-    expect(rows.get('longMessageCollapseEnabled')).toBe(false)
+    expect(rows.get('longMessageCollapseEnabled')).toBe(true)
     expect(rows.get('longMessageCollapsePreset')).toBe('tall')
 
     const restored = store()
     await restored.loadSettings()
-    expect(restored.longMessageCollapseEnabled).toBe(false)
+    expect(restored.longMessageCollapseEnabled).toBe(true)
     expect(restored.longMessageCollapsePreset).toBe('tall')
   })
 })
