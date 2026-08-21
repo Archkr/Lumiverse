@@ -13,16 +13,25 @@ export const WS_RESUME_RECOVERY_COMPLETE = '__ws_resume_recovery_complete'
 export const WS_RESUME_RECOVERY_FAILED = '__ws_resume_recovery_failed'
 
 /** If we send a ping and don't see a pong within this window, treat the socket as dead. */
-const PONG_TIMEOUT_MS = 10_000
+const PONG_TIMEOUT_MS = 15_000
 
 /**
  * Shorter watchdog used when the page returns from hidden — iOS PWAs and some
  * desktop browsers silently kill the WS during suspension, and a snappier
- * foreground probe lets the recovery state resolve promptly on resume.
+ * foreground probe lets the recovery state resolve promptly on resume. Keep
+ * this generous enough for WebKit/Android to restore networking and drain the
+ * main-thread queue before declaring a healthy socket dead.
  */
-const RESUME_PONG_TIMEOUT_MS = 3_000
+const RESUME_PONG_TIMEOUT_MS = 15_000
 const PING_INTERVAL_MS = 30_000
-const RESUME_RECOVERY_TIMEOUT_MS = 20_000
+const CONNECT_TIMEOUT_MS = 15_000
+const RESUME_RECOVERY_TIMEOUT_MS = 30_000
+const RESUME_RECONNECT_SETTLE_MS = 250
+const INITIAL_RECONNECT_MS = 3_000
+const MAX_RECONNECT_MS = 30_000
+const RECONNECT_JITTER_MS = 1_000
+const WAKE_CHECK_INTERVAL_MS = 5_000
+const WAKE_GAP_MS = 15_000
 
 type MobilePlatform = {
   userAgent: string
@@ -49,6 +58,8 @@ export class WebSocketClient {
   private ws: WebSocket | null = null
   private handlers = new Map<string, Set<EventHandler>>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private connectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
   private heartbeatWorker: Worker | null = null
   private heartbeatWorkerUnavailable = false
   private heartbeatGeneration = 0
@@ -72,6 +83,8 @@ export class WebSocketClient {
    * page briefly and then return while a large upload is starting.
    */
   private suppressNextResumePingUntil = 0
+  /** Timer-gap fallback for mobile WebViews that omit lifecycle events. */
+  private lastLifecycleTick = Date.now()
 
   constructor(url?: string) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -89,16 +102,23 @@ export class WebSocketClient {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    this.ws = new WebSocket(this.url)
+    const socket = new WebSocket(this.url)
+    this.ws = socket
+    this.armConnectWatchdog(socket)
+    // Install lifecycle listeners while CONNECTING too. Otherwise an initial
+    // handshake suspended before onopen could time out in the background and
+    // have no foreground event left to restart it.
+    this.startVisibilityTracking()
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket) return
+      this.clearConnectWatchdog()
       console.log('[WS] Connected to', this.url)
       // Cancel any stale reconnect timer from a prior socket's onclose
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer)
         this.reconnectTimer = null
       }
-      this.startVisibilityTracking()
       if (!this.lifecyclePaused) this.startPing()
       // If the old transport died while the PWA was suspended, this is the
       // first fresh socket of the resume recovery. Prove it explicitly rather
@@ -108,7 +128,8 @@ export class WebSocketClient {
       this.emit(EventType.CONNECTED, {})
     }
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return
       try {
         const data = JSON.parse(event.data)
         if (data.type === 'pong') {
@@ -138,19 +159,53 @@ export class WebSocketClient {
       }
     }
 
-    const thisSocket = this.ws
-    this.ws.onclose = (e) => {
+    socket.onclose = (e) => {
       console.log('[WS] Closed:', e.code, e.reason)
-      if (this.ws !== thisSocket) return
+      if (this.ws !== socket) return
+      this.clearConnectWatchdog()
+      this.ws = null
       this.stopPing()
       this.emit(WS_CLOSE, { code: e.code, reason: e.reason })
       if (this.shouldReconnect) {
-        this.scheduleReconnect()
+        this.scheduleReconnect(this.resumeRecoveryTimer !== null)
       }
     }
 
-    this.ws.onerror = (e) => {
+    socket.onerror = (e) => {
+      if (this.ws !== socket) return
       console.error('[WS] Error:', e)
+    }
+  }
+
+  private armConnectWatchdog(socket: WebSocket): void {
+    this.clearConnectWatchdog()
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null
+      if (this.ws !== socket || socket.readyState !== WebSocket.CONNECTING) return
+      console.warn('[WS] Connection handshake timed out — reconnecting')
+      this.abandonSocket(socket)
+      this.emit(WS_CLOSE, { code: 1006, reason: 'connection timeout' })
+      if (this.shouldReconnect) this.scheduleReconnect(this.resumeRecoveryTimer !== null)
+    }, CONNECT_TIMEOUT_MS)
+  }
+
+  private clearConnectWatchdog(): void {
+    if (!this.connectTimer) return
+    clearTimeout(this.connectTimer)
+    this.connectTimer = null
+  }
+
+  /** Detach a stale transport before closing so delayed events cannot mutate current state. */
+  private abandonSocket(socket: WebSocket): void {
+    if (this.ws === socket) this.ws = null
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onerror = null
+    socket.onclose = null
+    try {
+      socket.close()
+    } catch {
+      /* noop */
     }
   }
 
@@ -164,13 +219,13 @@ export class WebSocketClient {
     this.stopPing()
     this.stopVisibilityTracking()
     this.clearResumeRecovery()
+    this.clearConnectWatchdog()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
     if (this.ws) {
-      this.ws.close()
-      this.ws = null
+      this.abandonSocket(this.ws)
     }
   }
 
@@ -322,6 +377,7 @@ export class WebSocketClient {
   }
 
   private ackHeartbeat(): void {
+    this.reconnectAttempts = 0
     this.clearFallbackPongWatchdog()
     this.heartbeatWorker?.postMessage({
       type: 'ack',
@@ -343,14 +399,9 @@ export class WebSocketClient {
     // remain CLOSING for an unbounded period. Detach it first so its eventual
     // onclose is ignored, then drive the normal UI/reconnect state ourselves.
     this.stopPing()
-    this.ws = null
-    try {
-      socket.close()
-    } catch {
-      /* noop */
-    }
+    this.abandonSocket(socket)
     this.emit(WS_CLOSE, { code: 1006, reason: 'heartbeat timeout' })
-    if (this.shouldReconnect) this.scheduleReconnect()
+    if (this.shouldReconnect) this.scheduleReconnect(this.resumeRecoveryTimer !== null)
   }
 
   /** Send a ping immediately and arm the pong watchdog. Used after CONNECTED to verify round-trip. */
@@ -409,21 +460,37 @@ export class WebSocketClient {
     // lifecycle event that commonly fires during backgrounding/suspension.
     this.sendVisibility()
     addListener(document, 'visibilitychange', onVisibilityChange)
-    addListener(window, 'focus', onFocusChange)
+    addListener(window, 'focus', () => {
+      this.recoverConnectionOnForeground('focus')
+      onFocusChange()
+    })
     addListener(window, 'blur', onFocusChange)
-    addListener(window, 'pageshow', () => this.resumeFromBackground())
+    addListener(window, 'pageshow', () => this.recoverConnectionOnForeground('pageshow'))
     addListener(window, 'pagehide', () => {
       this.pauseForBackground()
       this.sendVisibility(true)
+      this.suspendTransport('page hidden')
     })
     // Chrome's Page Lifecycle API gives an extra, earlier opportunity to
     // disarm liveness timers before a document is frozen or bfcached.
-    addListener(document, 'freeze', () => this.pauseForBackground())
-    addListener(document, 'resume', () => this.resumeFromBackground())
+    addListener(document, 'freeze', () => {
+      this.pauseForBackground()
+      this.suspendTransport('page frozen')
+    })
+    addListener(document, 'resume', () => this.recoverConnectionOnForeground('resume'))
+    addListener(window, 'online', () => this.recoverConnectionOnForeground('online'))
+    addListener(window, 'offline', () => {
+      if (!this.isDocumentVisible()) return
+      this.beginResumeRecovery()
+      this.sendPingNow(PONG_TIMEOUT_MS, true)
+    })
     addListener(window, 'beforeunload', () => {
       this.pauseForBackground()
       this.sendVisibility(true)
     })
+    this.lastLifecycleTick = Date.now()
+    const wakeCheckTimer = setInterval(() => this.checkForWakeGap(), WAKE_CHECK_INTERVAL_MS)
+    this.visibilityCleanup.push(() => clearInterval(wakeCheckTimer))
   }
 
   private stopVisibilityTracking() {
@@ -441,8 +508,9 @@ export class WebSocketClient {
     this.send({ type: 'visibility', visible })
     this.sendStreamFocus(forceHidden)
     // Hidden→visible transition: iOS aggressively kills WS in suspended PWAs.
-    // Send a fast-watchdog ping so we detect a dead socket within ~3s, instead
-    // of waiting up to a full 30s ping window before noticing.
+    // Send a foreground proof ping instead of waiting for the next scheduled
+    // heartbeat. Its deadline is deliberately patient while mobile networking
+    // and the JavaScript event queues settle after suspension.
     if (visible && !this.wasVisible) {
       if (!this.consumeResumePingSuppression()) {
         this.sendPingNow(RESUME_PONG_TIMEOUT_MS, this.resumeRecoveryTimer !== null)
@@ -477,9 +545,10 @@ export class WebSocketClient {
     // unless we explicitly drive the normal close/reconnect path here.
     console.warn('[WS] Socket was closed before onclose fired — reconnecting')
     this.stopPing()
-    this.ws = null
+    this.clearConnectWatchdog()
+    this.abandonSocket(socket)
     this.emit(WS_CLOSE, { code: 1006, reason: 'stale socket detected' })
-    if (this.shouldReconnect) this.scheduleReconnect()
+    if (this.shouldReconnect) this.scheduleReconnect(true)
     return true
   }
 
@@ -503,17 +572,58 @@ export class WebSocketClient {
     this.stopPing()
   }
 
+  /**
+   * Chrome explicitly recommends releasing WebSockets when a page is frozen.
+   * pagehide covers bfcache and the equivalent WebKit lifecycle path. A plain
+   * visibility change intentionally keeps the transport and probes it later.
+   */
+  private suspendTransport(reason: string) {
+    const socket = this.ws
+    if (!socket) return
+    this.clearConnectWatchdog()
+    this.abandonSocket(socket)
+    this.emit(WS_CLOSE, { code: 1001, reason })
+  }
+
   private resumeFromBackground() {
     if (!this.isDocumentVisible()) return
     const wasPaused = this.lifecyclePaused
     this.lifecyclePaused = false
-    if (wasPaused) this.beginResumeRecovery()
+    if (wasPaused || this.ws?.readyState !== WebSocket.OPEN) this.beginResumeRecovery()
+    if (!this.ws) {
+      if (this.shouldReconnect) this.scheduleReconnect(true)
+      return
+    }
     this.startPing()
     this.sendVisibility()
   }
 
+  private recoverConnectionOnForeground(_source: string) {
+    if (!this.isDocumentVisible()) return
+    if (!this.lifecyclePaused && this.ws?.readyState === WebSocket.OPEN) return
+    this.resumeFromBackground()
+  }
+
+  private checkForWakeGap() {
+    const now = Date.now()
+    const elapsed = now - this.lastLifecycleTick
+    this.lastLifecycleTick = now
+    if (elapsed <= WAKE_GAP_MS || !this.isDocumentVisible()) return
+
+    // Some standalone WebViews resume timers without dispatching a matching
+    // visibility/pageshow event. Treat the clock jump as a wake hint: prove an
+    // OPEN socket, or restart a transport that is no longer usable.
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      this.resumeFromBackground()
+      return
+    }
+    this.beginResumeRecovery()
+    this.startPing()
+    this.sendPingNow(RESUME_PONG_TIMEOUT_MS, true)
+  }
+
   private beginResumeRecovery() {
-    this.clearResumeRecovery()
+    if (this.resumeRecoveryTimer) return
     this.emit(WS_RESUME_RECOVERY_START, {})
     this.resumeRecoveryTimer = setTimeout(() => {
       this.resumeRecoveryTimer = null
@@ -536,12 +646,21 @@ export class WebSocketClient {
     this.resumeProbeId = null
   }
 
-  private scheduleReconnect() {
+  private scheduleReconnect(foregroundRecovery = false) {
     if (this.reconnectTimer) return
+    // Background timers are not reliable and reconnecting a socket that the OS
+    // is about to suspend wastes resources. Foreground lifecycle handlers will
+    // restart recovery.
+    if (!this.isDocumentVisible()) return
+    const delay = foregroundRecovery
+      ? RESUME_RECONNECT_SETTLE_MS
+      : Math.min(INITIAL_RECONNECT_MS * (2 ** this.reconnectAttempts), MAX_RECONNECT_MS)
+        + Math.floor(Math.random() * RECONNECT_JITTER_MS)
+    this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
-    }, 3000)
+    }, delay)
   }
 
   send(data: any): void {

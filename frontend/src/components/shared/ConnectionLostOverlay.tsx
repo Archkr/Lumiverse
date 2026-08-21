@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
@@ -5,6 +6,11 @@ import { WifiOff, Download } from 'lucide-react'
 import { useStore } from '@/store'
 import { Spinner } from './Spinner'
 import styles from './ConnectionLostOverlay.module.css'
+
+// A single close event is routine on mobile resume and during network handoff.
+// Give the transport time to enter its explicit recovery state before blocking
+// the whole application. Authentication/update failures remain immediate.
+const CONNECTION_FAILURE_GRACE_MS = 5_000
 
 export default function ConnectionLostOverlay() {
   const { t } = useTranslation('shared')
@@ -17,9 +23,25 @@ export default function ConnectionLostOverlay() {
   const wsResumeRecovering = useStore((s) => s.wsResumeRecovering)
 
   const healthy = wsConnected && wsAuthSynced && wsRoundTripVerified
+  const connectionFailure =
+    isAuthenticated && wsHasEverConnected && !healthy && !wsResumeRecovering
+  const [showConnectionFailure, setShowConnectionFailure] = useState(false)
+
+  useEffect(() => {
+    if (!connectionFailure) {
+      setShowConnectionFailure(false)
+      return
+    }
+    const timer = window.setTimeout(
+      () => setShowConnectionFailure(true),
+      CONNECTION_FAILURE_GRACE_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [connectionFailure])
+
   const visible =
     isAuthenticated &&
-    (wsUpdatePending || (wsHasEverConnected && !healthy && !wsResumeRecovering))
+    (wsUpdatePending || showConnectionFailure)
 
   const title = wsUpdatePending
     ? t('connectionLost.updatingTitle')
