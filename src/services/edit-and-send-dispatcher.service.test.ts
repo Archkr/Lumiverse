@@ -272,6 +272,46 @@ describe("edit-and-send dispatcher", () => {
     expect(lost?.lease_owner).toBeNull();
   });
 
+  test("rows with exhausted attempts are never claimable and reconcile marks them failed", async () => {
+    // Pending row already at MAX_ATTEMPTS: the periodic sweep must skip it.
+    insertOutbox({
+      id: "exhausted-pending",
+      request_id: "req-exhausted-pending",
+      generation_id: "gen-exhausted-pending",
+      status: "pending",
+      attempt_count: 8,
+    });
+    expect(claimNextEditAndSendOutbox()).toBeNull();
+    expect(getGenerationOutboxById("exhausted-pending")?.status).toBe("pending");
+
+    // Stale claim at MAX_ATTEMPTS: reconcile fails it terminally instead of
+    // re-queueing it forever.
+    insertOutbox({
+      id: "exhausted-stale",
+      request_id: "req-exhausted-stale",
+      generation_id: "gen-exhausted-stale",
+      status: "claimed",
+      lease_owner: "dead-worker",
+      lease_expires_at: Date.now() - 5_000,
+      attempt_count: 8,
+    });
+    expect(reconcileEditAndSendOutbox()).toBe(1);
+    const stale = getGenerationOutboxById("exhausted-stale");
+    expect(stale?.status).toBe("failed");
+    expect(stale?.terminal_reason).toBe("max_attempts");
+    expect(stale?.lease_owner).toBeNull();
+
+    // A fresh pending row is still claimable after the gate.
+    insertOutbox({
+      id: "fresh-after-gate",
+      request_id: "req-fresh-after-gate",
+      generation_id: "gen-fresh-after-gate",
+      status: "pending",
+      attempt_count: 0,
+    });
+    expect(claimNextEditAndSendOutbox()?.id).toBe("fresh-after-gate");
+  });
+
   test("dispatcher/startup", async () => {
     const started: string[] = [];
     setEditAndSendStartGeneration(async (input) => {

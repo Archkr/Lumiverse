@@ -158,6 +158,9 @@ export function getGenerationOutboxByGenerationId(generationId: string): Generat
 }
 
 function isClaimable(row: GenerationOutboxRow, now: number): boolean {
+  // Rows whose attempts are exhausted are terminal-in-waiting: re-claiming
+  // them would retry forever, so only reconcile/failure paths may close them.
+  if (row.attempt_count >= MAX_ATTEMPTS) return false;
   if (row.status === "pending") {
     return row.next_attempt_at == null || row.next_attempt_at <= now;
   }
@@ -183,8 +186,9 @@ function claimOutboxRow(id: string, now: number): GenerationOutboxRow | null {
          AND status IN ('pending', 'claimed', 'running')
          AND (status = 'pending' OR (lease_expires_at IS NOT NULL AND lease_expires_at < ?))
          AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         AND (status != 'running' OR dispatched_at IS NULL)`,
-    ).run(INSTANCE_ID, leaseExpires, now, id, now, now);
+         AND (status != 'running' OR dispatched_at IS NULL)
+         AND attempt_count < ?`,
+    ).run(INSTANCE_ID, leaseExpires, now, id, now, now, MAX_ATTEMPTS);
     if (result.changes !== 1) return null;
     return getGenerationOutboxById(id);
   });
@@ -194,18 +198,19 @@ export function claimNextEditAndSendOutbox(now = nowMs()): GenerationOutboxRow |
   return withImmediateTransaction(() => {
     const candidate = getDb().query(
       `SELECT id FROM generation_outbox
-       WHERE (
-         (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
-         OR (
-           status IN ('claimed', 'running')
-           AND lease_expires_at IS NOT NULL
-           AND lease_expires_at < ?
-           AND (status != 'running' OR dispatched_at IS NULL)
+       WHERE attempt_count < ?
+         AND (
+           (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+           OR (
+             status IN ('claimed', 'running')
+             AND lease_expires_at IS NOT NULL
+             AND lease_expires_at < ?
+             AND (status != 'running' OR dispatched_at IS NULL)
+           )
          )
-       )
-       ORDER BY created_at ASC
-       LIMIT 1`,
-    ).get(now, now) as { id: string } | null;
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    ).get(MAX_ATTEMPTS, now, now) as { id: string } | null;
     if (!candidate) return null;
     const leaseExpires = now + LEASE_MS;
     const result = getDb().query(
@@ -219,8 +224,9 @@ export function claimNextEditAndSendOutbox(now = nowMs()): GenerationOutboxRow |
          AND status IN ('pending', 'claimed', 'running')
          AND (status = 'pending' OR (lease_expires_at IS NOT NULL AND lease_expires_at < ?))
          AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         AND (status != 'running' OR dispatched_at IS NULL)`,
-    ).run(INSTANCE_ID, leaseExpires, now, candidate.id, now, now);
+         AND (status != 'running' OR dispatched_at IS NULL)
+         AND attempt_count < ?`,
+    ).run(INSTANCE_ID, leaseExpires, now, candidate.id, now, now, MAX_ATTEMPTS);
     if (result.changes !== 1) return null;
     return getGenerationOutboxById(candidate.id);
   });
@@ -417,12 +423,24 @@ export function reconcileEditAndSendOutbox(now = nowMs()): number {
       continue;
     }
     if (row.lease_expires_at != null && row.lease_expires_at < now && row.dispatched_at == null) {
-      markOutbox(row.id, {
-        status: "pending",
-        lease_owner: null,
-        lease_expires_at: null,
-        next_attempt_at: now,
-      });
+      if (row.attempt_count >= MAX_ATTEMPTS) {
+        // Exhausted stale claims are terminal: never re-queue them.
+        markOutbox(row.id, {
+          status: "failed",
+          lease_owner: null,
+          lease_expires_at: null,
+          last_error_code: "max_attempts",
+          terminal_reason: "max_attempts",
+          completed_at: now,
+        });
+      } else {
+        markOutbox(row.id, {
+          status: "pending",
+          lease_owner: null,
+          lease_expires_at: null,
+          next_attempt_at: now,
+        });
+      }
       changed++;
     }
   }
@@ -435,6 +453,11 @@ export function reconcileEditAndSendOutbox(now = nowMs()): number {
  * - normal mode: an assistant message row inserted into the branch chat at or
  *   after the dispatch timestamp (messages.created_at is unixepoch seconds,
  *   outbox timestamps are ms; a small slack window absorbs skew).
+ *   Residual false-positive window: ANY assistant row in branch_chat_id after
+ *   dispatch-5s counts as this row's output, including messages written by
+ *   unrelated activity in the same branch chat during a crash window. Swipe
+ *   rows have the stronger expected_version revision check and are not
+ *   affected.
  * - swipe mode: the target assistant message's revision must have advanced
  *   past expected_version (chats.service bumps revision on every
  *   edit-and-send swipe write).
