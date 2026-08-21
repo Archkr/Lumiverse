@@ -53,6 +53,9 @@ export type IsEditAndSendGenerationActiveFn = (userId: string, generationId: str
 
 const LEASE_MS = 30_000;
 const MAX_ATTEMPTS = 8;
+/** Slack (seconds) absorbing clock skew between outbox (ms) and
+ *  messages.created_at (unixepoch seconds) during crash verification. */
+const RECOVERY_TIMESTAMP_SLACK_SECONDS = 5;
 const INSTANCE_ID = `eas-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
 
 let startGenerationFn: StartEditAndSendGenerationFn | null = null;
@@ -424,9 +427,41 @@ export function reconcileEditAndSendOutbox(now = nowMs()): number {
   return changed;
 }
 
+/**
+ * Durable output verification for crash recovery. The messages table has no
+ * generation_id column, so linkage uses conservative heuristics:
+ * - normal mode: an assistant message row inserted into the branch chat at or
+ *   after the dispatch timestamp (messages.created_at is unixepoch seconds,
+ *   outbox timestamps are ms; a small slack window absorbs skew).
+ * - swipe mode: the target assistant message's revision must have advanced
+ *   past expected_version (chats.service bumps revision on every
+ *   edit-and-send swipe write).
+ */
+function hasPersistedEditAndSendOutput(row: GenerationOutboxRow): boolean {
+  const dispatchedAt = row.dispatched_at ?? 0;
+  if (!dispatchedAt) return false;
+  const afterSeconds = Math.floor(dispatchedAt / 1000) - RECOVERY_TIMESTAMP_SLACK_SECONDS;
+  const inserted = getDb()
+    .query(
+      `SELECT id FROM messages
+       WHERE chat_id = ? AND is_user = 0 AND created_at >= ?
+       LIMIT 1`,
+    )
+    .get(row.branch_chat_id, afterSeconds);
+  if (inserted) return true;
+  if (row.mode === "swipe" && row.target_message_id) {
+    const target = getDb()
+      .query(`SELECT revision FROM messages WHERE id = ? AND chat_id = ? LIMIT 1`)
+      .get(row.target_message_id, row.branch_chat_id) as { revision?: number } | undefined;
+    return !!target && typeof target.revision === "number" && target.revision > row.expected_version;
+  }
+  return false;
+}
+
 export async function recoverEditAndSendOutbox(): Promise<number> {
   const now = nowMs();
   withImmediateTransaction(() => {
+    // Release stale, never-dispatched claims back to the pending queue.
     getDb().query(
       `UPDATE generation_outbox
        SET status = 'pending',
@@ -438,17 +473,61 @@ export async function recoverEditAndSendOutbox(): Promise<number> {
          AND dispatched_at IS NULL
          AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
     ).run(now, now, now);
-    getDb().query(
-      `UPDATE generation_outbox
-       SET status = 'completed',
-           completed_at = COALESCE(completed_at, ?),
-           lease_owner = NULL,
-           lease_expires_at = NULL,
-           terminal_reason = COALESCE(terminal_reason, 'startup_reconciled'),
-           updated_at = ?
-       WHERE status = 'running'
-         AND dispatched_at IS NOT NULL`,
-    ).run(now, now);
+
+    // Dispatched-but-unfinished rows: verify durably whether the assistant
+    // output actually persisted before declaring success.
+    const orphaned = getDb()
+      .query(
+        `SELECT * FROM generation_outbox WHERE status = 'running' AND dispatched_at IS NOT NULL`,
+      )
+      .all() as any[];
+    for (const raw of orphaned) {
+      const row = rowToOutbox(raw);
+      if (hasPersistedEditAndSendOutput(row)) {
+        getDb().query(
+          `UPDATE generation_outbox
+           SET status = 'completed',
+               completed_at = COALESCE(completed_at, ?),
+               lease_owner = NULL,
+               lease_expires_at = NULL,
+               terminal_reason = 'verified_output',
+               last_error_code = NULL,
+               updated_at = ?
+           WHERE id = ? AND status = 'running'`,
+        ).run(now, now, row.id);
+        continue;
+      }
+
+      const attempts = row.attempt_count + 1;
+      if (attempts >= MAX_ATTEMPTS) {
+        getDb().query(
+          `UPDATE generation_outbox
+           SET status = 'failed',
+               lease_owner = NULL,
+               lease_expires_at = NULL,
+               attempt_count = ?,
+               last_error_code = 'output_not_verified',
+               terminal_reason = 'max_attempts',
+               completed_at = ?,
+               updated_at = ?
+           WHERE id = ? AND status = 'running'`,
+        ).run(attempts, now, now, row.id);
+        continue;
+      }
+
+      getDb().query(
+        `UPDATE generation_outbox
+         SET status = 'pending',
+             lease_owner = NULL,
+             lease_expires_at = NULL,
+             attempt_count = ?,
+             next_attempt_at = ?,
+             last_error_code = 'output_not_verified',
+             terminal_reason = NULL,
+             updated_at = ?
+         WHERE id = ? AND status = 'running'`,
+      ).run(attempts, now + backoffMs(attempts), now, row.id);
+    }
   });
   return dispatchPendingEditAndSendOutbox();
 }

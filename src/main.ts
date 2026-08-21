@@ -79,8 +79,21 @@ if (pollinationsKeysMigrated > 0) {
 // Chat-head generation state is intentionally ephemeral. Clear any retained
 // in-memory pool state during startup so clients never resurrect stale heads
 // after a restart or hot-reload.
-const { clearAllPoolEntries } = await import("./services/generation-pool.service");
+const { clearAllPoolEntries, getPoolEntry } = await import("./services/generation-pool.service");
 clearAllPoolEntries();
+
+// Wire the edit-and-send dispatcher's liveness probe to the generation pool so
+// runtime reconciliation can distinguish genuinely finished generations from
+// crashed ones instead of trusting in-memory state alone.
+try {
+  const { setEditAndSendGenerationActiveCheck } = await import("./services/edit-and-send-dispatcher.service");
+  setEditAndSendGenerationActiveCheck((_userId, generationId) => {
+    const entry = getPoolEntry(generationId);
+    return !!entry && entry.status !== "completed" && entry.status !== "stopped" && entry.status !== "error";
+  });
+} catch (err) {
+  console.error("[startup] edit-and-send generation active check hook failed:", err);
+}
 
 try {
   const { recoverEditAndSendOutbox } = await import("./services/edit-and-send-dispatcher.service");

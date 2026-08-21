@@ -5,6 +5,7 @@ import {
   providerRegistry,
   type HostScopeContext,
   type ProviderDescriptor,
+  type ProviderScope,
   type RegisteredProvider,
 } from "../spindle/provider-registry";
 import { emitProviderRegistryChanged } from "../ws/bus";
@@ -46,10 +47,14 @@ function ttsDenied(record: RegisteredProvider): boolean {
   return rec.denied === true || rec.visible === false || rec.status === "denied";
 }
 
-function visibleTtsRecords(): RegisteredProvider[] {
+function visibleTtsRecords(userId?: string): RegisteredProvider[] {
+  const scopes = userId ? ([`user:${userId}`, "system"] as const) : undefined;
+  const records = scopes
+    ? providerRegistry.listVisible([...scopes])
+    : providerRegistry.getProviders();
   const extra: RegisteredProvider[] = [];
   try {
-    for (const record of providerRegistry.getProviders()) {
+    for (const record of records) {
       try {
         if (record.key.kind !== "tts") continue;
         if (ttsDenied(record)) continue;
@@ -69,15 +74,21 @@ class RegistryTtsAdapter implements TtsProvider {
   readonly displayName: string;
   readonly capabilities = REGISTRY_TTS_CAPABILITIES;
 
-  constructor(private readonly record: RegisteredProvider) {
+  constructor(
+    private readonly record: RegisteredProvider,
+    private readonly callerUserId: string | null,
+  ) {
     this.name = record.key.id;
     this.displayName = ttsDisplayName(record);
   }
 
   async synthesize(_apiKey: string, _apiUrl: string, request: TtsRequest): Promise<TtsResponse> {
     try {
+      // The caller's real scope, never the provider's own scope: passing the
+      // record's effectiveScope here would let any caller slip past the
+      // registry's cross-scope isolation check.
       const result = await providerRegistry.invoke(this.record.key, request, {
-        callerScope: this.record.key.effectiveScope,
+        callerScope: this.callerScope(),
       });
       if (result && typeof result === "object" && result instanceof ArrayBuffer) {
         return {
@@ -92,6 +103,10 @@ class RegistryTtsAdapter implements TtsProvider {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(`tts provider ${this.name} failed: ${message}`);
     }
+  }
+
+  private callerScope(): ProviderScope {
+    return this.callerUserId ? `user:${this.callerUserId}` : "system";
   }
 
   async *synthesizeStream(): AsyncGenerator<TtsStreamChunk, void, unknown> {
@@ -111,26 +126,26 @@ class RegistryTtsAdapter implements TtsProvider {
   }
 }
 
-function registryTtsAdapter(record: RegisteredProvider): TtsProvider {
-  return new RegistryTtsAdapter(record);
+function registryTtsAdapter(record: RegisteredProvider, callerUserId?: string): TtsProvider {
+  return new RegistryTtsAdapter(record, callerUserId ?? null);
 }
 
-export function getTtsProvider(name: string): TtsProvider | undefined {
+export function getTtsProvider(name: string, userId?: string): TtsProvider | undefined {
   const builtin = providers.get(name);
   if (builtin) return builtin;
-  const record = visibleTtsRecords().find((entry) => entry.key.id === name);
-  return record ? registryTtsAdapter(record) : undefined;
+  const record = visibleTtsRecords(userId).find((entry) => entry.key.id === name);
+  return record ? registryTtsAdapter(record, userId) : undefined;
 }
 
-export function listTtsProviders(): string[] {
-  return getTtsProviderList().map((provider) => provider.name);
+export function listTtsProviders(userId?: string): string[] {
+  return getTtsProviderList(userId).map((provider) => provider.name);
 }
 
-export function getTtsProviderList(): TtsProvider[] {
+export function getTtsProviderList(userId?: string): TtsProvider[] {
   const extras: TtsProvider[] = [];
-  for (const record of visibleTtsRecords()) {
+  for (const record of visibleTtsRecords(userId)) {
     try {
-      extras.push(registryTtsAdapter(record));
+      extras.push(registryTtsAdapter(record, userId));
     } catch {
       // Isolated adapter construction.
     }

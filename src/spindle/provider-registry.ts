@@ -524,7 +524,15 @@ export class ProviderRegistry {
     },
   ): Promise<unknown> {
     if (opts.callerScope !== key.effectiveScope) {
-      throw new Error("provider invoke is isolated to the caller scope");
+      // System-scoped providers are visible to every caller scope (mirrors
+      // listVisible semantics), so authenticated users may invoke them.
+      // User- and operator-scoped providers remain isolated to their own
+      // scope; a system context can never invoke another scope's record.
+      const systemVisibleToUser =
+        key.effectiveScope === "system" && opts.callerScope.startsWith("user:");
+      if (!systemVisibleToUser) {
+        throw new Error("provider invoke is isolated to the caller scope");
+      }
     }
     const record = this.get(key);
     if (!record) throw new Error("provider is not registered");

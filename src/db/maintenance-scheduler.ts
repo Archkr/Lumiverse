@@ -127,6 +127,16 @@ async function tick(
   if (schedulerRunning) return;
   schedulerRunning = true;
   try {
+    // Durable edit-and-send outbox reconciliation runs on every tick,
+    // independent of whether a user session is currently active: orphaned
+    // claimed/running rows must converge even with nobody logged in.
+    try {
+      const { reconcileEditAndSendOutbox } = await import("../services/edit-and-send-dispatcher.service");
+      reconcileEditAndSendOutbox();
+    } catch (reconcileErr) {
+      console.warn("[db] Edit-and-send outbox reconcile failed:", reconcileErr);
+    }
+
     const userId = getUserId();
     if (!userId) return;
 

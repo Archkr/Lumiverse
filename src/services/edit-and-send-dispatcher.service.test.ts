@@ -43,6 +43,31 @@ function initDispatcherDb(): void {
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`);
+  getDb().run(`CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    index_in_chat INTEGER NOT NULL DEFAULT 0,
+    is_user INTEGER NOT NULL DEFAULT 0,
+    content TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1
+  )`);
+}
+
+function insertMessage(overrides: Record<string, unknown> = {}): string {
+  const id = typeof overrides.id === "string" ? overrides.id : crypto.randomUUID();
+  const chatId = typeof overrides.chat_id === "string" ? overrides.chat_id : "b1";
+  const indexInChat = typeof overrides.index_in_chat === "number" ? overrides.index_in_chat : 0;
+  const isUser = typeof overrides.is_user === "number" ? overrides.is_user : 0;
+  const content = typeof overrides.content === "string" ? overrides.content : "";
+  const createdAt =
+    typeof overrides.created_at === "number" ? overrides.created_at : Math.floor(Date.now() / 1000);
+  const revision = typeof overrides.revision === "number" ? overrides.revision : 1;
+  getDb().query(
+    `INSERT INTO messages (id, chat_id, index_in_chat, is_user, content, created_at, revision)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, chatId, indexInChat, isUser, content, createdAt, revision);
+  return id;
 }
 
 function insertOutbox(overrides: Record<string, unknown> = {}): string {
@@ -209,6 +234,7 @@ describe("edit-and-send dispatcher", () => {
       status: "running",
       dispatched_at: Date.now() - 1_000,
     });
+    insertMessage({ chat_id: "b1", created_at: Math.floor(Date.now() / 1000) });
     insertOutbox({
       id: "fresh",
       request_id: "req-fresh",
@@ -220,9 +246,108 @@ describe("edit-and-send dispatcher", () => {
     expect(dispatched).toBe(2);
     expect(started.sort()).toEqual(["gen-fresh", "gen-stale"]);
     expect(getGenerationOutboxByRequest("u1", "c1", "req-sent")?.status).toBe("completed");
+    expect(getGenerationOutboxByRequest("u1", "c1", "req-sent")?.terminal_reason).toBe("verified_output");
     expect(getGenerationOutboxByRequest("u1", "c1", "req-fresh")?.status).toBe("running");
     expect(getGenerationOutboxByRequest("u1", "c1", "req-stale")?.status).toBe("running");
 
     expect(await dispatchPendingEditAndSendOutbox()).toBe(0);
+  });
+
+  test("crash recovery verifies persisted output before completing running rows", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // (a) running row + persisted assistant message -> completed/verified_output
+    insertOutbox({
+      id: "verified-row",
+      request_id: "req-verified",
+      generation_id: "gen-verified",
+      branch_chat_id: "branch-verified",
+      status: "running",
+      lease_owner: "dead-worker",
+      lease_expires_at: Date.now() + 30_000,
+      attempt_count: 3,
+      dispatched_at: Date.now() - 2_000,
+    });
+    insertMessage({ id: "asst-verified", chat_id: "branch-verified", created_at: nowSec });
+
+    // (b) running row + NO message -> pending, attempt_count+1, backoff scheduled
+    insertOutbox({
+      id: "lost-row",
+      request_id: "req-lost",
+      generation_id: "gen-lost",
+      branch_chat_id: "branch-lost",
+      status: "running",
+      lease_owner: "dead-worker",
+      lease_expires_at: Date.now() + 30_000,
+      attempt_count: 1,
+      dispatched_at: Date.now() - 2_000,
+    });
+
+    await recoverEditAndSendOutbox();
+
+    const verified = getGenerationOutboxById("verified-row");
+    expect(verified?.status).toBe("completed");
+    expect(verified?.terminal_reason).toBe("verified_output");
+
+    const lost = getGenerationOutboxById("lost-row");
+    expect(lost?.status).toBe("pending");
+    expect(lost?.attempt_count).toBe(2);
+    expect(lost?.lease_owner).toBeNull();
+    expect(lost?.lease_expires_at).toBeNull();
+    expect(lost?.last_error_code).toBe("output_not_verified");
+    expect(lost?.next_attempt_at).toBeGreaterThan(Date.now());
+  });
+
+  test("crash recovery marks swipe output verified via target message revision bump", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    insertMessage({
+      id: "asst-swipe-target",
+      chat_id: "branch-swipe",
+      is_user: 0,
+      revision: 4,
+      created_at: nowSec - 600,
+    });
+    insertOutbox({
+      id: "swipe-row",
+      request_id: "req-swipe-recover",
+      generation_id: "gen-swipe-recover",
+      branch_chat_id: "branch-swipe",
+      mode: "swipe",
+      target_message_id: "asst-swipe-target",
+      expected_version: 3,
+      status: "running",
+      lease_owner: "dead-worker",
+      lease_expires_at: Date.now() + 30_000,
+      attempt_count: 2,
+      dispatched_at: Date.now() - 2_000,
+    });
+
+    await recoverEditAndSendOutbox();
+
+    const row = getGenerationOutboxById("swipe-row");
+    expect(row?.status).toBe("completed");
+    expect(row?.terminal_reason).toBe("verified_output");
+  });
+
+  test("crash recovery fails rows whose attempts are exhausted without verified output", async () => {
+    insertOutbox({
+      id: "exhausted-row",
+      request_id: "req-exhausted",
+      generation_id: "gen-exhausted",
+      branch_chat_id: "branch-exhausted",
+      status: "running",
+      lease_owner: "dead-worker",
+      lease_expires_at: Date.now() + 30_000,
+      attempt_count: 8,
+      dispatched_at: Date.now() - 2_000,
+    });
+
+    await recoverEditAndSendOutbox();
+
+    const row = getGenerationOutboxById("exhausted-row");
+    expect(row?.status).toBe("failed");
+    expect(row?.terminal_reason).toBe("max_attempts");
+    expect(row?.last_error_code).toBe("output_not_verified");
+    expect(row?.lease_owner).toBeNull();
   });
 });
