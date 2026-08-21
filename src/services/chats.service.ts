@@ -3576,11 +3576,12 @@ export function editAndSend(
     return { status: "ok", replayed: false, payload };
   });
 
-  if (outcome.status === "ok" && !outcome.replayed && created) {
-    emitCreatedChatBranch(userId, created);
+  const createdBranch = created as CreatedChatBranch | null;
+  if (outcome.status === "ok" && !outcome.replayed && createdBranch) {
+    emitCreatedChatBranch(userId, createdBranch);
     if (editedCopy) {
-      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: created.newChatId, message: editedCopy }, userId);
-      try { invalidateChatMemoryCache(created.newChatId); } catch { /* optional in tests */ }
+      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: createdBranch.newChatId, message: editedCopy }, userId);
+      try { invalidateChatMemoryCache(createdBranch.newChatId); } catch { /* optional in tests */ }
     }
   }
 

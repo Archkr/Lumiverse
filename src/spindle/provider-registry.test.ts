@@ -106,7 +106,7 @@ describe("provider registry identity", () => {
     );
 
     await expect(
-      registry.invoke(key("user:alice", "inst-a"), {} as never),
+      registry.invoke(key("user:alice", "inst-a"), {} as never, undefined as never),
     ).rejects.toThrow(/callerScope/);
     await expect(
       registry.invoke(key("user:alice", "inst-a"), {}, {} as never),

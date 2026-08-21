@@ -1,4 +1,5 @@
 import { getDb } from "../db/connection";
+import type { SQLQueryBindings } from "bun:sqlite";
 
 export type EditAndSendOutboxStatus =
   | "pending"
@@ -250,10 +251,10 @@ function invokeIsGenerationActive(userId: string, generationId: string): boolean
 
 function markOutbox(id: string, fields: Record<string, unknown>): void {
   const assignments: string[] = [];
-  const values: unknown[] = [];
+  const values: SQLQueryBindings[] = [];
   for (const [key, value] of Object.entries(fields)) {
     assignments.push(`${key} = ?`);
-    values.push(value);
+    values.push(value as SQLQueryBindings);
   }
   assignments.push("updated_at = ?");
   values.push(nowMs());

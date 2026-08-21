@@ -6,6 +6,7 @@ import {
   resetEditAndSendDispatcherForTests,
   setEditAndSendStartGeneration,
   getGenerationOutboxByRequest,
+  type StartEditAndSendGenerationInput,
 } from "../services/edit-and-send-dispatcher.service";
 
 const USER_ID = "user-1";
@@ -149,7 +150,7 @@ afterEach(() => {
 
 describe("POST /:chatId/edit-and-send", () => {
   test("commits a swipe branch then dispatches the durable generation identity", async () => {
-    const started: Array<Record<string, unknown>> = [];
+    const started: Array<StartEditAndSendGenerationInput> = [];
     setEditAndSendStartGeneration(async (input) => {
       started.push(input);
       return { generationId: input.generationId, status: "streaming" };

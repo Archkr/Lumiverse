@@ -222,7 +222,7 @@ describe("edit-and-send branching", () => {
     const tailBranch = getMessages(USER, tail.payload.branchChatId);
     expect(tailBranch).toHaveLength(3);
     expect(tailBranch[1]?.content).toBe("ask again");
-    expect(tailBranch[2]?.id).toBe(tail.payload.immediateAssistantId);
+    expect(tailBranch[2]?.id).toBe(tail.payload.immediateAssistantId ?? "");
     expect(tailBranch[2]?.content).toBe("reply");
     expect(getMessages(USER, "tail-chat")).toHaveLength(3);
     const tailOutbox = getGenerationOutboxByRequest(USER, "tail-chat", "tail-req");
