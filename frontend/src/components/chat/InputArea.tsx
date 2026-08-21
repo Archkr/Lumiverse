@@ -250,6 +250,14 @@ function slugifyName(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+function deferTouchReleaseAction(action: () => void): void {
+  // Let the compatibility click from this touch finish targeting the send
+  // button before clearing the textarea can move the bottom-anchored action
+  // bar underneath it. Otherwise mobile browsers may retarget that click to
+  // the rightmost (Extras) action when the toolbar is horizontally scrolled.
+  window.setTimeout(action, 0)
+}
+
 export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: InputAreaProps) {
   const { t } = useTranslation('chat')
   const { t: te } = useTranslation('errors')
@@ -2699,8 +2707,10 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
       unlockTTSAudio()
       suppressFollowupClick()
       setMobileQueueHoldVisualState('queueing')
-      void handleQueueMessage().finally(() => {
-        setMobileQueueHoldVisualState('idle')
+      deferTouchReleaseAction(() => {
+        void handleQueueMessage().finally(() => {
+          setMobileQueueHoldVisualState('idle')
+        })
       })
       return
     }
@@ -2711,7 +2721,9 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
       unlockTTSAudio()
       suppressFollowupClick()
       setMobileQueueHoldVisualState('idle')
-      void handleSend()
+      deferTouchReleaseAction(() => {
+        void handleSend()
+      })
       return
     }
     if (mobileQueueHoldStateRef.current === 'idle' && !hasDraftContent) {
@@ -2720,7 +2732,9 @@ export default function InputArea({ chatId, onNavigateHome, onOpenChatFind }: In
       unlockNotificationAudio()
       unlockTTSAudio()
       suppressFollowupClick()
-      void handleSend()
+      deferTouchReleaseAction(() => {
+        void handleSend()
+      })
       return
     }
     if (mobileQueueHoldStateRef.current !== 'queueing') {

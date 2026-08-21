@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const css = readFileSync(join(import.meta.dir, 'InputArea.module.css'), 'utf8')
+const component = readFileSync(join(import.meta.dir, 'InputArea.tsx'), 'utf8')
 
 function readCssBlock(source: string, marker: string): string {
   const markerIndex = source.indexOf(marker)
@@ -53,5 +54,18 @@ describe('mobile input action bar scrolling contract', () => {
 
     expect(actionBar).toMatch(/scrollbar-width:\s*none/)
     expect(webkitScrollbar).toMatch(/display:\s*none/)
+  })
+
+  test('defers touch-release actions until the compatibility click is dispatched', () => {
+    const pointerUpStart = component.indexOf('const handleSendPointerUp =')
+    const pointerUpEnd = component.indexOf('const handleSendPointerCancel =', pointerUpStart)
+    const pointerUp = component.slice(pointerUpStart, pointerUpEnd)
+
+    expect(pointerUpStart).toBeGreaterThan(-1)
+    expect(pointerUpEnd).toBeGreaterThan(pointerUpStart)
+    expect(pointerUp.match(/handleSend\(\)/g)).toHaveLength(2)
+    expect(pointerUp.match(/deferTouchReleaseAction\(\(\) => \{\s*void handleSend\(\)/g)).toHaveLength(2)
+    expect(pointerUp.match(/handleQueueMessage\(\)/g)).toHaveLength(1)
+    expect(pointerUp).toMatch(/deferTouchReleaseAction\(\(\) => \{\s*void handleQueueMessage\(\)/)
   })
 })
