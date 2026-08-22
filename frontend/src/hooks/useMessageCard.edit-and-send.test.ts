@@ -2,10 +2,22 @@ import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'b
 import { JSDOM } from 'jsdom'
 import { act, createElement, useSyncExternalStore } from 'react'
 import type { Root } from 'react-dom/client'
+import type { EditAndSendInput, EditAndSendResult } from '@/api/chats'
 import type { Message } from '@/types/api'
 
-const editAndSend = mock(() => Promise.resolve({}))
+const editAndSend = mock((_chatId: string, _input: EditAndSendInput): Promise<EditAndSendResult> => Promise.resolve({
+  branchChatId: 'branch-1',
+  editedMessageId: 'branch-user-1',
+  immediateAssistantId: null,
+  generationCursor: {
+    generationId: 'gen-1',
+    chatId: 'branch-1',
+    requestId: 'server-request-1',
+    mode: 'normal' as const,
+  },
+}))
 const generateStart = mock(() => Promise.resolve({ generationId: 'gen-swipe' }))
+const navigate = mock((_path: string) => {})
 const beginStreaming = mock(() => {})
 const startStreaming = mock(() => {})
 const setStreamingError = mock(() => {})
@@ -60,7 +72,7 @@ function msg(partial: Partial<Message> & Pick<Message, 'id' | 'is_user'>): Messa
   }
 }
 
-const user = msg({ id: 'user-1', is_user: true, content: 'hello' })
+const user = msg({ id: 'user-1', is_user: true, content: 'hello', revision: 7 })
 const assistant = msg({ id: 'asst-1', is_user: false, content: 'hi', index_in_chat: 1 })
 const messagesUpdate = mock(() => Promise.resolve({ ...user, content: 'rewritten' }))
 
@@ -137,7 +149,7 @@ const useStoreMock = Object.assign(
 )
 
 mock.module('@/store', () => ({ useStore: useStoreMock }))
-mock.module('react-router', () => ({ useNavigate: () => mock(() => {}) }))
+mock.module('react-router', () => ({ useNavigate: () => navigate }))
 mock.module('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue ?? key,
@@ -152,6 +164,10 @@ mock.module('@/api/generate', () => ({
 }))
 mock.module('@/lib/loom/runtimeProfile', () => ({
   shouldForceLoomRuntimePreset: () => false,
+}))
+let nextRequestId = 0
+mock.module('@/lib/uuid', () => ({
+  generateUUID: () => `request-${++nextRequestId}`,
 }))
 mock.module('@/i18n', () => ({
   default: { t: (key: string) => key },
@@ -228,6 +244,17 @@ async function unmount(root: Root): Promise<void> {
 describe('useMessageCard edit-and-send', () => {
   beforeEach(() => {
     editAndSend.mockClear()
+    editAndSend.mockResolvedValue({
+      branchChatId: 'branch-1',
+      editedMessageId: 'branch-user-1',
+      immediateAssistantId: null,
+      generationCursor: {
+        generationId: 'gen-1',
+        chatId: 'branch-1',
+        requestId: 'server-request-1',
+        mode: 'normal',
+      },
+    })
     messagesUpdate.mockClear()
     generateStart.mockClear()
     beginStreaming.mockClear()
@@ -238,10 +265,18 @@ describe('useMessageCard edit-and-send', () => {
     clearMessageEdit.mockClear()
     beginMessageEdit.mockClear()
     updateMessageEditDraft.mockClear()
+    navigate.mockClear()
+    nextRequestId = 0
     storeState.setActiveChat.mockClear()
     storeState.isStreaming = false
     storeState.editingMessageId = 'user-1'
-    storeState.messageEditDraft = null
+    storeState.messageEditDraft = {
+      chatId: 'chat-1',
+      messageId: 'user-1',
+      content: 'hello',
+      dirty: false,
+      focusRequested: false,
+    }
     storeState.messages = [user]
     messagesUpdate.mockResolvedValue({ ...user, content: 'rewritten' })
   })
@@ -257,7 +292,7 @@ describe('useMessageCard edit-and-send', () => {
     }
   })
 
-  test('tail: updates in place and continues generation', async () => {
+  test('tail: submits one durable transaction and opens its branch', async () => {
     await renderHook(user)
     await act(async () => {
       hookSurface.setEditContent('rewritten')
@@ -267,22 +302,37 @@ describe('useMessageCard edit-and-send', () => {
       await hookSurface.handleEditAndSend()
     })
 
-    expect(messagesUpdate).toHaveBeenCalledWith('chat-1', 'user-1', { content: 'rewritten' })
-    expect(generateStart).toHaveBeenCalledWith(expect.objectContaining({
-      chat_id: 'chat-1',
-      generation_type: 'continue',
-    }))
-    expect(beginStreaming).toHaveBeenCalledWith(undefined, 'continue')
-    expect(startStreaming).toHaveBeenCalledWith('gen-swipe', undefined, 'continue')
+    expect(editAndSend).toHaveBeenCalledWith('chat-1', {
+      messageId: 'user-1',
+      content: 'rewritten',
+      expectedVersion: 7,
+      requestId: 'request-1',
+    })
+    expect(editAndSend).toHaveBeenCalledTimes(1)
+    expect(messagesUpdate).not.toHaveBeenCalled()
+    expect(generateStart).not.toHaveBeenCalled()
+    expect(beginStreaming).not.toHaveBeenCalled()
+    expect(startStreaming).not.toHaveBeenCalled()
+    expect(updateMessage).not.toHaveBeenCalled()
     expect(clearMessageEdit).toHaveBeenCalled()
     expect(storeState.editingMessageId).toBeNull()
     expect(storeState.messageEditDraft).toBeNull()
-    expect(editAndSend).not.toHaveBeenCalled()
-    expect(storeState.setActiveChat).not.toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith('/chat/branch-1')
   })
 
-  test('historical: swipes the subsequent assistant after update', async () => {
+  test('historical: leaves swipe dispatch to the durable endpoint', async () => {
     storeState.messages = [user, assistant]
+    editAndSend.mockResolvedValueOnce({
+      branchChatId: 'branch-2',
+      editedMessageId: 'branch-user-2',
+      immediateAssistantId: 'branch-asst-2',
+      generationCursor: {
+        generationId: 'gen-2',
+        chatId: 'branch-2',
+        requestId: 'server-request-2',
+        mode: 'swipe',
+      },
+    })
     await renderHook(user)
     await act(async () => {
       hookSurface.setEditContent('rewritten')
@@ -292,15 +342,11 @@ describe('useMessageCard edit-and-send', () => {
       await hookSurface.handleEditAndSend()
     })
 
-    expect(messagesUpdate).toHaveBeenCalledWith('chat-1', 'user-1', { content: 'rewritten' })
-    expect(generateStart).toHaveBeenCalledWith(expect.objectContaining({
-      chat_id: 'chat-1',
-      message_id: 'asst-1',
-      generation_type: 'swipe',
-    }))
-    expect(beginStreaming).toHaveBeenCalledWith('asst-1', 'swipe')
-    expect(editAndSend).not.toHaveBeenCalled()
-    expect(storeState.setActiveChat).not.toHaveBeenCalled()
+    expect(editAndSend).toHaveBeenCalledTimes(1)
+    expect(messagesUpdate).not.toHaveBeenCalled()
+    expect(generateStart).not.toHaveBeenCalled()
+    expect(beginStreaming).not.toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith('/chat/branch-2')
   })
 
   test('empty: does not call the API', async () => {
@@ -313,6 +359,7 @@ describe('useMessageCard edit-and-send', () => {
       await hookSurface.handleEditAndSend()
     })
 
+    expect(editAndSend).not.toHaveBeenCalled()
     expect(messagesUpdate).not.toHaveBeenCalled()
     expect(generateStart).not.toHaveBeenCalled()
     expect(addToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
@@ -334,11 +381,11 @@ describe('useMessageCard edit-and-send', () => {
     expect(beginStreaming).not.toHaveBeenCalled()
   })
 
-  test('failure: restores content and toasts without applying generation', async () => {
+  test('failure: keeps the edit open and reuses the request id on retry', async () => {
     const errorSpy = mock(() => {})
     const originalError = console.error
     console.error = errorSpy as typeof console.error
-    messagesUpdate.mockRejectedValueOnce(new Error('conflict'))
+    editAndSend.mockRejectedValueOnce(new Error('response lost'))
     await renderHook(user)
     await act(async () => {
       hookSurface.setEditContent('rewritten')
@@ -348,12 +395,26 @@ describe('useMessageCard edit-and-send', () => {
       await hookSurface.handleEditAndSend()
     })
 
-    expect(generateStart).not.toHaveBeenCalled()
+    expect(editAndSend).toHaveBeenCalledTimes(1)
+    expect(editAndSend.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ requestId: 'request-1' }))
+    expect(clearMessageEdit).not.toHaveBeenCalled()
+    expect(storeState.editingMessageId).toBe('user-1')
+    expect(storeState.messageEditDraft?.content).toBe('rewritten')
     expect(addToast).toHaveBeenCalledWith(expect.objectContaining({
       type: 'error',
-      message: 'Failed to edit and send',
+      message: 'response lost',
     }))
-    expect(updateMessage).toHaveBeenCalledWith('user-1', expect.objectContaining({ content: 'hello' }))
+
+    await act(async () => {
+      await hookSurface.handleEditAndSend()
+    })
+
+    expect(editAndSend).toHaveBeenCalledTimes(2)
+    expect(editAndSend.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ requestId: 'request-1' }))
+    expect(messagesUpdate).not.toHaveBeenCalled()
+    expect(generateStart).not.toHaveBeenCalled()
+    expect(updateMessage).not.toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith('/chat/branch-1')
     console.error = originalError
   })
 })

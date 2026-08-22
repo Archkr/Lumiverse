@@ -26,7 +26,15 @@ Open **Settings > Embeddings** and follow the setup checklist:
 
 Toggle the master switch on.
 
-### 2. Select a Provider
+### 2. Select a Connection
+
+Choose one of your saved connection profiles as the **primary connection**. Lumiverse uses the connection's provider, API URL, API key, and default model, while still letting you select a different embedding model for this feature.
+
+Choose **None (direct custom config)** if you want to enter an embedding provider, endpoint, and API key directly instead of reusing a connection.
+
+The available providers include Lumiverse's built-ins and any embedding providers contributed by enabled [Spindle extensions](../extensions/index.md#extension-provided-ai-providers).
+
+### 3. Choose a Provider and Model
 
 | Provider | Notes |
 |----------|-------|
@@ -36,20 +44,33 @@ Toggle the master switch on.
 | **ElectronHub** | Model aggregator |
 | **BananaBread** | Lumiverse's local embedding server. Defaults to `http://localhost:8008/v1/embeddings` and pulls its model list from `/v1/models`. |
 | **Nano-GPT** | Pay-per-token aggregator |
+| **Spindle extension** | An enabled extension may contribute an embedding provider. Availability and model options depend on that extension. |
 
-### 3. Configure the Connection
+### 4. Configure the Connection
 
 | Field | Description |
 |-------|-------------|
+| **Connection** | Saved connection profile used for this embedding endpoint, or **None** for direct custom configuration. |
 | **API URL** | Base URL for the provider. Auto-appends `/v1/embeddings` if no path is specified. |
 | **Embedding Model** | Model name (e.g., `text-embedding-3-small`) |
 | **API Key** | Your provider's authentication key |
 | **Dimensions** | Vector size — auto-detected when you run a test |
 | **Send Dimensions** | Whether to include the dimension value in API requests (some providers require it, others reject it) |
 
-### 4. Test the API
+### 5. Add Fallback Connections (Optional)
+
+Under **Primary and fallback connections**, add backup connection profiles in the order Lumiverse should try them. If the primary request fails or times out, Lumiverse advances through this chain without sharing one profile's API key with another profile.
+
+Every endpoint in a fallback chain must produce vectors with the same dimensions as the primary endpoint. Set a fallback's **Dimensions** when Lumiverse cannot determine it automatically. A known dimension mismatch is skipped instead of mixing incompatible vectors in the same index.
+
+!!! warning "Changing dimensions requires reindexing"
+    Existing vectors cannot be compared with vectors of another size. If you intentionally move to a provider or model with different dimensions, rebuild the affected embeddings after saving the new configuration.
+
+### 6. Test the API
 
 Click **Test API** to verify your setup. A successful test auto-detects the model's native dimensions and applies them.
+
+Test the primary and every fallback before relying on the chain. The displayed **Fallback chain** shows the order Lumiverse will use.
 
 ---
 
@@ -138,3 +159,6 @@ Controls the balance between traditional keyword matching and semantic vector se
 
 !!! tip "Test after setup"
     Always click Test API after configuration. This verifies your credentials work and auto-detects the correct dimensions — getting dimensions wrong produces garbage results.
+
+!!! tip "Use genuinely independent fallbacks"
+    A second profile pointing to the same upstream may fail during the same outage. For resilience, choose another provider or independently hosted endpoint with a dimension-compatible model.

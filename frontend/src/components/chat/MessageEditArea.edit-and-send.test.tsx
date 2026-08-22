@@ -152,21 +152,29 @@ describe('MessageEditArea edit-and-send', () => {
     expect(host.querySelector('button[aria-label="Edit and Send"]')).toBeNull()
   })
 
-  test('Cancel does not send and stays available while pending', async () => {
+  test('disables every completion action while Edit and Send is pending', async () => {
     const onCancel = mock(() => {})
     const onEditAndSend = mock(() => {})
+    const onSave = mock(() => {})
     const host = await render({
       onCancel,
       onEditAndSend,
+      onSave,
       editAndSendDisabled: true,
     })
-    const cancel = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('actions.cancel'))
+    const cancel = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('actions.cancel')) as HTMLButtonElement
+    const save = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('actions.save')) as HTMLButtonElement
     const send = host.querySelector('button[aria-label="Edit and Send"]') as HTMLButtonElement
+    expect(cancel.disabled).toBe(true)
+    expect(save.disabled).toBe(true)
     expect(send.disabled).toBe(true)
     await act(async () => {
-      cancel?.click()
+      cancel.click()
+      save.click()
+      send.click()
     })
-    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(onSave).not.toHaveBeenCalled()
     expect(onEditAndSend).not.toHaveBeenCalled()
   })
 })

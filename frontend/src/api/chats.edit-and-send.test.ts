@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import type { EditAndSendResult } from './chats'
 
 const post = mock((..._args: unknown[]) => Promise.resolve(undefined))
 
@@ -18,8 +19,8 @@ function serverEditAndSend(partial: {
   editedMessageId?: string
   immediateAssistantId?: string | null
   generationId?: string
-  mode?: string
-} = {}) {
+  mode?: EditAndSendResult['generationCursor']['mode']
+} = {}): EditAndSendResult {
   const branchChatId = partial.branchChatId ?? 'chat-1'
   const editedMessageId = partial.editedMessageId ?? 'msg-1'
   return {
@@ -30,7 +31,7 @@ function serverEditAndSend(partial: {
       generationId: partial.generationId ?? 'gen-1',
       chatId: branchChatId,
       requestId: 'req-1',
-      mode: partial.mode ?? 'continue',
+      mode: partial.mode ?? 'normal',
     },
   }
 }
@@ -55,11 +56,11 @@ describe('chatsApi.editAndSend', () => {
     expect(post).toHaveBeenCalledWith('/chats/chat-1/edit-and-send', input, undefined)
   })
 
-  test('historical response preserves immediateAssistantId for the swipe path', async () => {
+  test('historical response reports the durable swipe target', async () => {
     const response = serverEditAndSend({
       branchChatId: 'chat-9',
       immediateAssistantId: 'asst-2',
-      generationId: '',
+      generationId: 'gen-swipe',
       mode: 'swipe',
     })
     post.mockResolvedValueOnce(response)

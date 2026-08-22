@@ -264,7 +264,7 @@ function MessageEditAreaNative({
         data-spindle-mount="message_edit_actions"
         data-spindle-scope-key={messageId ? `message:${messageId}:edit-actions` : undefined}
       >
-        <button type="button" onClick={onCancel} className={styles.editCancelBtn}>
+        <button type="button" onClick={onCancel} className={styles.editCancelBtn} disabled={editAndSendDisabled}>
           {tc('actions.cancel')}
         </button>
         {showEditAndSend && Boolean(onEditAndSend) && (
@@ -278,7 +278,7 @@ function MessageEditAreaNative({
           {t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
         </button>
         )}
-        <button type="button" onClick={onSave} className={styles.editSaveBtn}>
+        <button type="button" onClick={onSave} className={styles.editSaveBtn} disabled={editAndSendDisabled}>
           {tc('actions.save')}
         </button>
       </div>

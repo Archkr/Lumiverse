@@ -16,10 +16,13 @@ export interface EditAndSendInput {
 export interface EditAndSendResult {
   branchChatId: string
   editedMessageId: string
-  immediateAssistantId?: string | null
-  generationCursor?: { generationId: string; chatId: string; requestId: string; mode: string }
-  generationId?: string | null
-  message?: Message
+  immediateAssistantId: string | null
+  generationCursor: {
+    generationId: string
+    chatId: string
+    requestId: string
+    mode: 'swipe' | 'normal'
+  }
 }
 
 export type ChatAppearanceAction =
@@ -201,9 +204,9 @@ export const chatsApi = {
   },
 
   /**
-   * Edit a user message and immediately re-prompt. The backend owns target
-   * creation / dispatch; the client must not pre-create generation targets.
-   * Historical turns return `immediateAssistantId` so the UI uses the swipe path.
+   * Branch at a user message, apply its edit, and durably dispatch generation.
+   * The client must navigate to the returned branch and recover its generation;
+   * it must not update the source message or start a second generation itself.
    */
   editAndSend(chatId: string, input: EditAndSendInput, options?: RequestOptions) {
     return post<EditAndSendResult>(`/chats/${chatId}/edit-and-send`, input, options)
