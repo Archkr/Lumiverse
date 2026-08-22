@@ -5,6 +5,7 @@ import { getDb } from "../db/connection";
 import { hashPassword, verifyPassword } from "../crypto/password";
 import { rateLimit } from "../middleware/rate-limit";
 import { purgeUser } from "../services/user-data/purge.service";
+import { SYSTEM_SECRET_PRINCIPAL } from "../services/secrets.service";
 
 const app = new Hono();
 
@@ -86,11 +87,12 @@ app.post("/me/password", passwordLimiter, async (c) => {
 const admin = new Hono();
 admin.use("/*", requireOwner);
 
-// GET / — list all users
+// GET / — list all users (the reserved system principal is not a login
+// account and must never appear in the admin roster)
 admin.get("/", (c) => {
   const rows = getDb()
-    .query('SELECT id, name, email, username, role, banned, createdAt, updatedAt FROM "user" ORDER BY createdAt DESC')
-    .all();
+    .query('SELECT id, name, email, username, role, banned, createdAt, updatedAt FROM "user" WHERE id != ? ORDER BY createdAt DESC')
+    .all(SYSTEM_SECRET_PRINCIPAL);
   return c.json(rows);
 });
 
@@ -230,6 +232,13 @@ admin.delete("/:id", async (c) => {
 
   if (session.user.id === id) {
     return c.json({ error: "Cannot delete yourself" }, 400);
+  }
+
+  // Deleting the reserved system principal would CASCADE-wipe every
+  // operator-provisioned system broker secret. Hard-reject regardless of
+  // caller role.
+  if (id === SYSTEM_SECRET_PRINCIPAL) {
+    return c.json({ error: "The system principal cannot be deleted: it owns the system broker secrets" }, 409);
   }
 
   if (!targetUser) {

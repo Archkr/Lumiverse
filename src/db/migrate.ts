@@ -115,8 +115,11 @@ const BASELINE_MIGRATIONS: readonly string[] = [
   "100_stream_deck_tokens.sql",
   "101_regex_script_extension_ownership.sql",
   "102_character_source_filename_index.sql",
+  "102_spindle_provider_scope.sql",
   "103_character_fts_update_columns.sql",
+  "103_edit_and_send_outbox.sql",
   "104_world_book_source_filename_index.sql",
+  "104_extension_grants_scoped_unique.sql",
   "105_st_migration_source_indexes.sql",
   "106_image_processing_queue.sql",
   "107_world_book_entry_order_index.sql",
@@ -222,7 +225,12 @@ function isBaselineDriftAlreadyApplied(db: Database, file: string): boolean {
 // implicit DELETE that fires ON DELETE CASCADE into every child table.
 // PRAGMA foreign_keys is a no-op inside a transaction, so the runner flips
 // it around the transaction instead of the .sql file doing it itself.
-const FOREIGN_KEYS_OFF_MIGRATIONS = new Set(["078_chats_character_id_nullable.sql"]);
+const FOREIGN_KEYS_OFF_MIGRATIONS = new Set([
+  "078_chats_character_id_nullable.sql",
+  // Table rebuild (drop + recreate) of extension_grants, which carries a child
+  // FK into extensions with ON DELETE CASCADE.
+  "104_extension_grants_scoped_unique.sql",
+]);
 
 function applyMigrationWithForeignKeysOff(db: Database, file: string, sql: string): void {
   db.run("PRAGMA foreign_keys = OFF");

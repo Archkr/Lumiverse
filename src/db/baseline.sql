@@ -302,7 +302,8 @@ CREATE TABLE extension_grants (
   extension_id TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
   permission TEXT NOT NULL,
   granted_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  UNIQUE(extension_id, permission)
+  scope TEXT NOT NULL DEFAULT 'system',
+  UNIQUE(extension_id, permission, scope)
 );
 
 CREATE TABLE extensions (
@@ -320,6 +321,32 @@ CREATE TABLE extensions (
   updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
   metadata TEXT DEFAULT '{}'
 , install_scope TEXT NOT NULL DEFAULT 'operator', installed_by_user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, branch TEXT DEFAULT NULL);
+
+CREATE TABLE generation_outbox (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  branch_chat_id TEXT NOT NULL,
+  edited_message_id TEXT NOT NULL,
+  target_message_id TEXT,
+  target_swipe_index INTEGER,
+  expected_version INTEGER NOT NULL,
+  generation_id TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL CHECK(mode IN ('normal', 'swipe')),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'running', 'completed', 'failed', 'cancelled')),
+  lease_owner TEXT,
+  lease_expires_at INTEGER,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER,
+  last_error_code TEXT,
+  terminal_reason TEXT,
+  dispatched_at INTEGER,
+  completed_at INTEGER,
+  cancelled_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 
 CREATE TABLE global_addons (
   id          TEXT PRIMARY KEY,
@@ -362,12 +389,11 @@ CREATE TABLE images (
   filename TEXT NOT NULL,
   original_filename TEXT NOT NULL DEFAULT '',
   mime_type TEXT NOT NULL DEFAULT '',
-  byte_size INTEGER NOT NULL DEFAULT 0,
   width INTEGER,
   height INTEGER,
   has_thumbnail INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
-, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, owner_extension_identifier TEXT, owner_character_id TEXT REFERENCES characters(id) ON DELETE SET NULL, owner_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL);
+, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, owner_extension_identifier TEXT, owner_character_id TEXT REFERENCES characters(id) ON DELETE SET NULL, owner_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, byte_size INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE import_consumed_tickets (
   archive_id  TEXT PRIMARY KEY,
@@ -496,7 +522,7 @@ CREATE TABLE memory_entities (
     emotional_valence TEXT DEFAULT '{}',
     metadata TEXT DEFAULT '{}',
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL, fact_extraction_status TEXT DEFAULT 'never', fact_extraction_last_attempt INTEGER, salience_breakdown TEXT DEFAULT '{"mentionComponent":0,"arcComponent":0,"graphComponent":0,"frequencyFloor":0,"total":0}', last_mention_timestamp INTEGER, recent_mention_count INTEGER DEFAULT 0, confidence TEXT DEFAULT 'confirmed', salience_peak REAL DEFAULT 0.0, user_edited_at INTEGER,
+    updated_at INTEGER NOT NULL, fact_extraction_status TEXT DEFAULT 'never', fact_extraction_last_attempt INTEGER, salience_breakdown TEXT DEFAULT '{"mentionComponent":0,"arcComponent":0,"graphComponent":0,"total":0}', last_mention_timestamp INTEGER, recent_mention_count INTEGER DEFAULT 0, confidence TEXT DEFAULT 'confirmed', user_edited_at INTEGER, salience_peak REAL DEFAULT 0.0,
     FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
 );
 
@@ -589,7 +615,26 @@ CREATE TABLE messages (
   parent_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
   branch_id TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
-, swipe_dates TEXT NOT NULL DEFAULT '[]');
+, swipe_dates TEXT NOT NULL DEFAULT '[]'
+, revision INTEGER NOT NULL DEFAULT 1);
+
+CREATE TABLE edit_and_send_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  branch_chat_id TEXT NOT NULL,
+  edited_message_id TEXT NOT NULL,
+  target_message_id TEXT,
+  target_swipe_index INTEGER,
+  generation_id TEXT NOT NULL,
+  response TEXT NOT NULL,
+  cursor TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (user_id, chat_id, request_id)
+);
 
 CREATE TABLE multiplayer_bans (
   id            TEXT PRIMARY KEY,
@@ -653,7 +698,7 @@ CREATE TABLE personas (
   metadata TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-, attached_world_book_id TEXT REFERENCES world_books(id) ON DELETE SET NULL, image_id TEXT REFERENCES images(id) ON DELETE SET NULL, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, title TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', subjective_pronoun TEXT NOT NULL DEFAULT '', objective_pronoun TEXT NOT NULL DEFAULT '', possessive_pronoun TEXT NOT NULL DEFAULT '', reflexive_pronoun TEXT NOT NULL DEFAULT '', possessive_pronoun_standalone TEXT NOT NULL DEFAULT '', is_narrator INTEGER NOT NULL DEFAULT 0);
+, attached_world_book_id TEXT REFERENCES world_books(id) ON DELETE SET NULL, image_id TEXT REFERENCES images(id) ON DELETE SET NULL, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, title TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', subjective_pronoun TEXT NOT NULL DEFAULT '', objective_pronoun TEXT NOT NULL DEFAULT '', possessive_pronoun TEXT NOT NULL DEFAULT '', is_narrator INTEGER NOT NULL DEFAULT 0, reflexive_pronoun TEXT NOT NULL DEFAULT '', possessive_pronoun_standalone TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE presets (
   id TEXT PRIMARY KEY,
@@ -696,12 +741,11 @@ CREATE TABLE regex_scripts (
   name TEXT NOT NULL,
   find_regex TEXT NOT NULL,
   replace_string TEXT NOT NULL DEFAULT '',
-  actions TEXT NOT NULL DEFAULT '[]',
   flags TEXT NOT NULL DEFAULT 'gi',
   placement TEXT NOT NULL DEFAULT '["ai_output"]',
   scope TEXT NOT NULL DEFAULT 'global',
   scope_id TEXT,
-  target TEXT NOT NULL DEFAULT '["response"]',
+  target TEXT NOT NULL DEFAULT 'response',
   min_depth INTEGER,
   max_depth INTEGER,
   trim_strings TEXT NOT NULL DEFAULT '[]',
@@ -713,7 +757,7 @@ CREATE TABLE regex_scripts (
   metadata TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-, folder TEXT NOT NULL DEFAULT '', script_id TEXT NOT NULL DEFAULT '', pack_id TEXT, preset_id TEXT, character_id TEXT, owner_extension_identifier TEXT);
+, folder TEXT NOT NULL DEFAULT '', script_id TEXT NOT NULL DEFAULT '', pack_id TEXT, preset_id TEXT, character_id TEXT, actions TEXT NOT NULL DEFAULT '[]', owner_extension_identifier TEXT);
 
 CREATE TABLE "secrets" (
   key TEXT NOT NULL,
@@ -1132,9 +1176,18 @@ CREATE INDEX idx_dwm_session_status
   ON dream_weaver_messages(session_id, status)
   WHERE kind = 'tool_card';
 
+CREATE INDEX idx_extension_grants_scope
+  ON extension_grants(extension_id, scope);
+
 CREATE INDEX idx_extensions_install_scope ON extensions(install_scope);
 
 CREATE INDEX idx_extensions_installed_by_user_id ON extensions(installed_by_user_id);
+
+CREATE INDEX idx_generation_outbox_request
+  ON generation_outbox(user_id, chat_id, request_id);
+
+CREATE INDEX idx_generation_outbox_status_next
+  ON generation_outbox(status, next_attempt_at);
 
 CREATE INDEX idx_global_addons_user ON global_addons(user_id);
 

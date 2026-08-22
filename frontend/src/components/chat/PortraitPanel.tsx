@@ -22,6 +22,7 @@ import { copyTextToClipboard } from '@/lib/clipboard'
 import { galleryImageMarkdown } from '@/lib/galleryImageReference'
 import { toast } from '@/lib/toast'
 import { Copy } from 'lucide-react'
+import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
 
 interface PortraitPanelProps {
   side?: 'left' | 'right'
@@ -57,7 +58,7 @@ function GalleryMosaicCell({ item, className, onOpen, onPreview }: GalleryMosaic
   )
 }
 
-export default function PortraitPanel({ side = 'right', mobileDrawer = false, open = false }: PortraitPanelProps) {
+function PortraitPanelNative({ side = 'right', mobileDrawer = false, open = false }: PortraitPanelProps) {
   const { t } = useTranslation('chat')
   const activeCharacterId = useStore((s) => s.activeCharacterId)
   const activeChatId = useStore((s) => s.activeChatId)
@@ -276,4 +277,8 @@ export default function PortraitPanel({ side = 'right', mobileDrawer = false, op
       />
     </div>
   )
+}
+
+export default function PortraitPanel(props: PortraitPanelProps) {
+  return useSpindleComponentOverride('PortraitPanel', PortraitPanelNative, props)
 }

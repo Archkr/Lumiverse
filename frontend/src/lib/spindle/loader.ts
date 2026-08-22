@@ -150,6 +150,12 @@ import {
   registerCssComponent,
   type SpindleCssComponentRegistrationOptions,
 } from './css-component-registry'
+import {
+  clearComponentOverridesForOwner,
+  registerComponentOverride as registerSpindleComponentOverride,
+  type SpindleComponentOverrideHandle,
+  type SpindleComponentOverrideRegistrationInput,
+} from './component-override-registry'
 import { registerHostIntentHandler, type HostIntentHandler, type JsonValue } from './host-intent-registry'
 
 declare const __APP_VERSION__: string
@@ -282,6 +288,7 @@ type FrontendExtensionUI = Omit<SpindleFrontendContext['ui'], 'createFloatWidget
   createFloatWidget(options?: FrontendFloatWidgetOptions): SpindleFloatWidgetHandle
   requestDockPanel(options: FrontendDockPanelOptions): SpindleDockPanelHandle
   registerCssComponent(options: SpindleCssComponentRegistrationOptions): () => void
+  registerComponentOverride(options: Omit<SpindleComponentOverrideRegistrationInput, 'owner' | 'generation'>): SpindleComponentOverrideHandle
   registerHostIntentHandler<T extends JsonValue = JsonValue>(name: string, handler: (detail: T) => boolean): () => void
 }
 
@@ -776,7 +783,10 @@ async function doLoadFrontendExtension(
   }
   const destroyRevokedResources = (previous: readonly string[], next: readonly string[]) => {
     const revokedPermissions = previous.filter((permission) => !next.includes(permission))
-    if (revokedPermissions.length > 0) clearCssComponentsForExtension(extensionId, generation)
+    if (revokedPermissions.length > 0) {
+      clearCssComponentsForExtension(extensionId, generation)
+      clearComponentOverridesForOwner(extensionId, generation)
+    }
     stateSelectors?.revokePermissions(revokedPermissions)
     if (previous.includes('world_books') && !next.includes('world_books')) {
       destroyComponentsForExtensionPermission(extensionId, 'world_books', generation)
@@ -818,6 +828,7 @@ async function doLoadFrontendExtension(
       }
     }
     clearCssComponentsForExtension(extensionId, generation)
+    clearComponentOverridesForOwner(extensionId, generation)
     try {
       clearPresetEditorSubscriptions()
       clearCharacterEditorSubscriptions()
@@ -1495,6 +1506,16 @@ async function doLoadFrontendExtension(
             options,
             `${extensionId}:${generation}:${generateUUID()}`,
           ))
+        },
+        registerComponentOverride(options) {
+          assertFrontendActive()
+          const handle = registerSpindleComponentOverride({
+            ...options,
+            owner: extensionId,
+            generation,
+          })
+          trackEventUnsubscribe(() => handle.destroy())
+          return handle
         },
         registerHostIntentHandler<T extends JsonValue = JsonValue>(name: string, handler: (detail: T) => boolean) {
           assertFrontendActive()
@@ -2185,6 +2206,7 @@ async function doLoadFrontendExtension(
         clearLiveRootsForExtension(extensionId, generation)
         clearTabMobilityHandle(extensionId, generation)
         clearCssComponentsForExtension(extensionId, generation)
+        clearComponentOverridesForOwner(extensionId, generation)
         forgetExtensionIdentity(extensionId)
         identityRegistered = false
 

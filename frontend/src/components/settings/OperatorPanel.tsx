@@ -39,6 +39,7 @@ import {
   type SmartDriveStatus,
   type TrustedHostEntry,
   type TrustedHostsResponse,
+  type BrokerOriginsResponse,
 } from '@/api/operator'
 import { settingsApi } from '@/api/settings'
 import { imagesApi } from '@/api/images'
@@ -487,6 +488,10 @@ export default function OperatorPanel() {
   const [trustedHostsLoading, setTrustedHostsLoading] = useState(true)
   const [trustedHostsError, setTrustedHostsError] = useState<string | null>(null)
   const [hostDraft, setHostDraft] = useState('')
+  const [brokerOrigins, setBrokerOrigins] = useState<BrokerOriginsResponse | null>(null)
+  const [brokerOriginsLoading, setBrokerOriginsLoading] = useState(true)
+  const [brokerOriginsError, setBrokerOriginsError] = useState<string | null>(null)
+  const [originDraft, setOriginDraft] = useState('')
   const storeBusy = useStore((s) => s.operatorBusy)
   const storeProgressMessage = useStore((s) => s.operatorProgressMessage)
   const thumbnailQueue = useStore((s) => s.thumbnailQueue)
@@ -704,6 +709,49 @@ export default function OperatorPanel() {
     saveTrustedHosts(current.filter((h) => h !== host))
   }, [saveTrustedHosts, trustedHosts])
 
+  const refreshBrokerOrigins = useCallback(async (showLoader = false) => {
+    if (showLoader) setBrokerOriginsLoading(true)
+    try {
+      const res = await operatorApi.getBrokerOrigins()
+      setBrokerOrigins(res)
+      setBrokerOriginsError(null)
+    } catch (err) {
+      setBrokerOriginsError(err instanceof Error ? err.message : t('operator.loadBrokerOriginsFailed'))
+    } finally {
+      setBrokerOriginsLoading(false)
+    }
+  }, [t])
+
+  const saveBrokerOrigins = useCallback(async (nextConfigured: string[]) => {
+    try {
+      const res = await operatorApi.putBrokerOrigins(nextConfigured)
+      setBrokerOrigins({ configured: res.configured })
+      setBrokerOriginsError(null)
+      addToast({ type: 'success', message: t('operator.brokerOriginsUpdated') })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('operator.updateBrokerOriginsFailed')
+      addToast({ type: 'error', message })
+      await refreshBrokerOrigins()
+    }
+  }, [addToast, refreshBrokerOrigins, t])
+
+  const handleAddOrigin = useCallback((value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return
+    const current = brokerOrigins?.configured ?? []
+    if (current.some((o) => o.toLowerCase() === trimmed.toLowerCase())) {
+      setOriginDraft('')
+      return
+    }
+    setOriginDraft('')
+    saveBrokerOrigins([...current, trimmed])
+  }, [brokerOrigins, saveBrokerOrigins])
+
+  const handleRemoveOrigin = useCallback((origin: string) => {
+    const current = brokerOrigins?.configured ?? []
+    saveBrokerOrigins(current.filter((o) => o !== origin))
+  }, [brokerOrigins, saveBrokerOrigins])
+
   const refreshVectorHealth = useCallback(async () => {
     try {
       const health = await embeddingsApi.getHealth()
@@ -878,6 +926,15 @@ export default function OperatorPanel() {
     }
   }, [refreshTrustedHosts])
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      refreshBrokerOrigins()
+    }, 0)
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [refreshBrokerOrigins])
+
   // Tick uptime every second (paused while reconnecting or shut down)
   useEffect(() => {
     if (reconnecting || isShutdown) return
@@ -921,6 +978,7 @@ export default function OperatorPanel() {
       refreshDnsSettings()
       refreshSmartctl()
       refreshTrustedHosts()
+      refreshBrokerOrigins()
 
       // Re-subscribe to log streaming
       operatorApi.subscribeLogs().catch(() => {})
@@ -1756,6 +1814,98 @@ export default function OperatorPanel() {
               {t('operator.hostsPortHint', { port: status?.port ?? '7860' })}
               {!trustedHostsReady ? t('operator.hostsLoadSnapshotHint') : ''}
             </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Approved Broker Origins */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>{t('operator.brokerOrigins')}</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <span className={styles.remoteHint}>{t('operator.brokerOriginsHint')}</span>
+
+          {brokerOriginsLoading && !brokerOrigins && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--lumiverse-text-dim)', fontSize: 12 }}>
+              <Loader2 size={14} className={spinClass} /> {t('operator.brokerOriginsLoading')}
+            </div>
+          )}
+
+          {brokerOriginsError && (
+            <div className={styles.disabledHint}>
+              {t('operator.brokerOriginsRefreshFailed', { error: brokerOriginsError })}
+            </div>
+          )}
+
+          {brokerOrigins && (
+            <div className={styles.dbInfoBlock}>
+              <span className={styles.fieldLabel}>{t('operator.brokerOriginsConfigured')}</span>
+              {brokerOrigins.configured.length > 0 ? (
+                <div className={styles.hostChipGroup}>
+                  {brokerOrigins.configured.map((origin) => (
+                    <span key={origin} className={styles.hostChip}>
+                      {origin}
+                      <button
+                        type="button"
+                        className={styles.hostChipRemove}
+                        onClick={() => handleRemoveOrigin(origin)}
+                        aria-label={t('operator.brokerOriginsRemove', { origin })}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className={styles.hostEmpty}>{t('operator.brokerOriginsEmpty')}</span>
+              )}
+            </div>
+          )}
+
+          {!brokerOrigins && !brokerOriginsLoading && !brokerOriginsError && (
+            <div className={styles.dbInfoBlock}>
+              <span className={styles.hostEmpty}>{t('operator.brokerOriginsNotLoaded')}</span>
+            </div>
+          )}
+
+          <div className={styles.dbInfoBlock}>
+            <span className={styles.fieldLabel}>{t('operator.brokerOriginsAddManually')}</span>
+            <form
+              className={styles.hostInputRow}
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleAddOrigin(originDraft)
+              }}
+            >
+              <input
+                type="text"
+                className={styles.hostInput}
+                placeholder={t('operator.brokerOriginsPlaceholder')}
+                value={originDraft}
+                onChange={(e) => setOriginDraft(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button
+                type="submit"
+                className={styles.controlBtnPrimary}
+                disabled={!originDraft.trim()}
+              >
+                <Globe size={14} />
+                {t('operator.brokerOriginsAdd')}
+              </button>
+              <button
+                type="button"
+                className={styles.controlBtn}
+                onClick={() => refreshBrokerOrigins(true)}
+                disabled={brokerOriginsLoading}
+              >
+                <RefreshCw size={14} className={brokerOriginsLoading ? spinClass : undefined} />
+                {t('operator.brokerOriginsRefresh')}
+              </button>
+            </form>
+            <span className={styles.fieldHint}>{t('operator.brokerOriginsPortHint')}</span>
           </div>
         </div>
       </div>

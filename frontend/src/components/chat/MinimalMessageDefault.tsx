@@ -405,6 +405,7 @@ export default function MinimalMessageDefault({
             generationMetrics={generationMetrics}
             showTokenCount={showMessageTokenCount}
           />
+          <span data-spindle-mount="message_header" data-spindle-scope={`message:${message.id}:minimal:header`} style={{ display: 'contents' }} />
         </div>
 
         {/* Reasoning block — hidden during editing since the edit area shows it inline */}
@@ -423,6 +424,7 @@ export default function MinimalMessageDefault({
         )}
 
         {/* Content */}
+        <span data-spindle-mount="message_body_before" data-spindle-scope={`message:${message.id}:minimal:body-before`} style={{ display: 'contents' }} />
         {isEditing ? (
           <MessageEditArea
             editContent={editContent}
@@ -446,6 +448,7 @@ export default function MinimalMessageDefault({
         ) : isActivelyStreaming ? (
           <StreamingIndicator />
         ) : null}
+        <span data-spindle-mount="message_body_after" data-spindle-scope={`message:${message.id}:minimal:body-after`} style={{ display: 'contents' }} />
 
         {/* User attachments render after content */}
         {isUser && message.extra?.attachments && message.extra.attachments.length > 0 && !isEditing && (
@@ -470,11 +473,13 @@ export default function MinimalMessageDefault({
         {!isUser && !isEditing && message.index_in_chat !== 0 && (
           <SwipeControls message={message} chatId={chatId} />
         )}
+        <span data-spindle-mount="message_swipe_indicators" data-spindle-scope={`message:${message.id}:minimal:swipe-indicators`} style={{ display: 'contents' }} />
 
         {/* Greeting navigator for first message */}
         {message.index_in_chat === 0 && !isUser && !isEditing && (
           <GreetingNav message={message} chatId={chatId} />
         )}
+        <span data-spindle-mount="message_footer" data-spindle-scope={`message:${message.id}:minimal:footer`} style={{ display: 'contents' }} />
       </div>
 
       {/* Actions (hidden in select mode) */}
