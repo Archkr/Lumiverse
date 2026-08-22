@@ -514,6 +514,7 @@ afterEach(async () => {
   navigate.mockReset()
   readDeviceLandingPageStartTab.mockReset()
   readDeviceLandingPageStartTab.mockReturnValue('characters')
+  Object.defineProperty(domWindow, 'innerWidth', { configurable: true, value: 1024 })
   storeState = createStoreState()
 })
 
@@ -562,6 +563,34 @@ describe('LandingPage character library', () => {
 
     await settleDeferred(nextPage, page([recentChat('character-2', 'Bea')], 2))
     expect(listRecentGrouped).toHaveBeenCalledTimes(2)
+  })
+
+  test('ignores a persisted desktop expanded width when paginating on mobile', async () => {
+    Object.defineProperty(domWindow, 'innerWidth', { configurable: true, value: 390 })
+    storeState = {
+      ...createStoreState(false),
+      landingPageGalleryWidth: 'expanded',
+    }
+    listRecentGrouped
+      .mockResolvedValueOnce(page([recentChat('character-1', 'Ava')], 2))
+      .mockResolvedValueOnce(page([recentChat('character-2', 'Bea')], 2))
+    listTags.mockResolvedValue([])
+    getHomepagePreview.mockResolvedValue(null)
+
+    const host = await mountLanding()
+    await flush()
+
+    expect(listRecentGrouped.mock.calls[0]?.[0]?.limit).toBe(12)
+    expect(host.querySelector('[data-component="LandingPageCharacters"]')?.classList.contains('contentExpanded')).toBe(false)
+
+    await act(async () => {
+      TestObserverInstances.at(-1)?.trigger()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(listRecentGrouped).toHaveBeenCalledTimes(2)
+    expect(listRecentGrouped.mock.calls[1]?.[0]?.limit).toBe(12)
   })
 
   test('loads the next Chats page when the landing scroller reaches its bottom', async () => {

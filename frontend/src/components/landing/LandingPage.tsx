@@ -1254,8 +1254,12 @@ function LandingPageNative() {
   const mainRef = useRef<HTMLElement>(null)
   const virtualContainerRef = useRef<HTMLDivElement | null>(null)
   const [mainWidth, setMainWidth] = useState(() => Math.min(1400, Math.max(320, window.innerWidth - 64)))
+  const [expandedWidthApplies, setExpandedWidthApplies] = useState(
+    () => window.innerWidth > CARD_MOBILE_BREAKPOINT,
+  )
   const [chatViewportHeight, setChatViewportHeight] = useState(0)
   const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
+  const isExpandedGallery = landingPageGalleryWidth === 'expanded' && expandedWidthApplies
   const virtualLayout = landingPageLayoutMode === 'compact' ? 'compact' : 'cards'
   const virtualGap = getColumnGap(mainWidth, virtualLayout)
   const virtualColumns = getColumnCount(mainWidth, virtualLayout)
@@ -1265,7 +1269,7 @@ function LandingPageNative() {
     : Math.ceil(virtualColumnWidth * (4 / 3)) + virtualGap
   const recentChatPageSize = resolveLandingChatPageSize({
     configuredPageSize: landingPageChatsDisplayed,
-    isExpanded: landingPageGalleryWidth === 'expanded',
+    isExpanded: isExpandedGallery,
     layout: virtualLayout,
     columns: virtualColumns,
     rowHeight: virtualRowEstimate,
@@ -1353,6 +1357,7 @@ function LandingPageNative() {
     const update = () => {
       frame = 0
       setMainWidth(el.clientWidth)
+      setExpandedWidthApplies(window.innerWidth > CARD_MOBILE_BREAKPOINT)
       const scroller = scrollRef.current
       if (scroller) {
         const availableHeight = renderedPxToLayoutPx(
@@ -1823,7 +1828,7 @@ function LandingPageNative() {
       )}
 
       <motion.div
-        className={clsx(styles.content, landingPageGalleryWidth === 'expanded' && styles.contentExpanded)}
+        className={clsx(styles.content, isExpandedGallery && styles.contentExpanded)}
         data-component="LandingPageCharacters"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
