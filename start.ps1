@@ -368,7 +368,7 @@ function Test-BackendDependencyLoad {
         # PowerShell 5 promotes redirected native stderr to error records. Keep
         # collecting it for the diagnostic, but judge success by the exit code.
         $ErrorActionPreference = "Continue"
-        $output = (& bun -e "require('jsdom')" 2>&1 | Out-String).Trim()
+        $output = (& bun -e "await import('./src/services/databank/web-page-parser.ts'); await import('./src/utils/remote-image-page.ts')" 2>&1 | Out-String).Trim()
         $exitCode = $LASTEXITCODE
     } finally {
         Pop-Location

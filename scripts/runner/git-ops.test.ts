@@ -69,10 +69,10 @@ test("keeps a manual install without a runner stamp", () => {
 
 test("treats an empty direct package directory as an incomplete install", () => {
   const dir = makeTempDir();
-  writePackageJson(dir, { dependencies: ["@asamuzakjp/css-color"] });
-  mkdirSync(join(dir, "node_modules", "@asamuzakjp", "css-color"), { recursive: true });
+  writePackageJson(dir, { dependencies: ["linkedom"] });
+  mkdirSync(join(dir, "node_modules", "linkedom"), { recursive: true });
 
-  expect(inspectDependencyTree(dir).missingPackages).toEqual(["@asamuzakjp/css-color"]);
+  expect(inspectDependencyTree(dir).missingPackages).toEqual(["linkedom"]);
 });
 
 test("uses copyfile installs on Windows", () => {
