@@ -260,6 +260,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
   const [inputSafeZone, setInputSafeZone] = useState(100)
   const lastInputSafeZoneRef = useRef(100)
   const [editableFocusInList, setEditableFocusInList] = useState(false)
+  const [collapsibleResizeActive, setCollapsibleResizeActive] = useState(false)
   const recentCollapsibleToggleMessageIdRef = useRef<string | null>(null)
   const recentCollapsibleToggleUntilRef = useRef(0)
   const recentCollapsibleToggleTimerRef = useRef<number | null>(null)
@@ -358,6 +359,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     initialScrollSettleUntilRef.current = 0
     userUnpinnedRef.current = false
     setEditableFocusInList(false)
+    setCollapsibleResizeActive(false)
     recentCollapsibleToggleMessageIdRef.current = null
     recentCollapsibleToggleUntilRef.current = 0
     programmaticReflowUntilByMessageIdRef.current.clear()
@@ -749,6 +751,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
       recentCollapsibleToggleMessageIdRef.current = null
       recentCollapsibleToggleUntilRef.current = 0
       recentCollapsibleToggleTimerRef.current = null
+      setCollapsibleResizeActive(false)
     }
 
     const handleCollapsibleToggle = (event: Event) => {
@@ -758,6 +761,14 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
         : null
       if (!messageId) return
 
+      // A disclosure click is reading intent. Suspend tail following before
+      // the row starts its transition so opening reasoning during a stream
+      // keeps the clicked section in place instead of pulling it toward the
+      // top as the virtualizer preserves the end anchor.
+      cancelInitialScrollToEnd()
+      markUserUnpinned()
+      suppressKeyboardRepin(USER_CONTROLLED_ROW_RESIZE_SETTLE_MS + 120)
+      setCollapsibleResizeActive(true)
       recentCollapsibleToggleMessageIdRef.current = messageId
       recentCollapsibleToggleUntilRef.current = performance.now() + USER_CONTROLLED_ROW_RESIZE_SETTLE_MS
       if (recentCollapsibleToggleTimerRef.current != null) {
@@ -777,7 +788,7 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
         recentCollapsibleToggleTimerRef.current = null
       }
     }
-  }, [])
+  }, [cancelInitialScrollToEnd, markUserUnpinned, suppressKeyboardRepin])
 
   const estimateMessageSize = useCallback((message: Message, measureKey: string) => {
     const measured = measuredRowHeightsRef.current.get(measureKey)
@@ -989,8 +1000,12 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     overscan: initialRangeWarm ? (isCoarsePointer ? 8 : 5) : 2,
     getItemKey,
     rangeExtractor,
-    anchorTo: editableFocusInList ? 'start' : 'end',
-    followOnAppend: editableFocusInList ? false : true,
+    // TanStack gives end anchoring precedence over the per-row resize
+    // predicate when the viewport is currently at the tail. Temporarily use
+    // start anchoring for a user-controlled disclosure transition so that the
+    // predicate above can keep the viewport stationary throughout the resize.
+    anchorTo: editableFocusInList || collapsibleResizeActive ? 'start' : 'end',
+    followOnAppend: editableFocusInList || collapsibleResizeActive ? false : true,
     scrollEndThreshold: SCROLL_END_THRESHOLD,
     paddingEnd: inputSafeZone,
     directDomUpdatesMode: 'position',
