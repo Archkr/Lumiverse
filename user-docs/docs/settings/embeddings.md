@@ -72,6 +72,13 @@ Click **Test API** to verify your setup. A successful test auto-detects the mode
 
 Test the primary and every fallback before relying on the chain. The displayed **Fallback chain** shows the order Lumiverse will use.
 
+When a test fails, the result may include a structured error code alongside its message:
+
+| Code | Meaning |
+|------|---------|
+| `embedding_fallback_exhausted` | The primary and every fallback in the chain failed or were skipped (e.g. dimension mismatch). |
+| `embedding_provider_unavailable` | The provider endpoint could not be reached (HTTP 502). |
+
 ---
 
 ## What Gets Vectorized
