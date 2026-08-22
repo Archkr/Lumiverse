@@ -68,6 +68,7 @@ async function resetStore(): Promise<void> {
 
 describe('displayPreprocessCache invalidation semantics', () => {
   let invalidateDisplayRegexCacheForVars: DisplayRegexModule['invalidateDisplayRegexCacheForVars']
+  let invalidateDisplayRegexCache: DisplayRegexModule['invalidateDisplayRegexCache']
   let seedDisplayPreprocessEntryForTests: DisplayRegexModule['seedDisplayPreprocessEntryForTests']
   let resetDisplayRegexCachesForTests: DisplayRegexModule['resetDisplayRegexCachesForTests']
   let getDisplayPreprocessCacheStatsForTests: DisplayRegexModule['getDisplayPreprocessCacheStatsForTests']
@@ -75,6 +76,7 @@ describe('displayPreprocessCache invalidation semantics', () => {
   beforeEach(async () => {
     const m = await loadMod()
     invalidateDisplayRegexCacheForVars = m.invalidateDisplayRegexCacheForVars
+    invalidateDisplayRegexCache = m.invalidateDisplayRegexCache
     seedDisplayPreprocessEntryForTests = m.seedDisplayPreprocessEntryForTests
     resetDisplayRegexCachesForTests = m.resetDisplayRegexCachesForTests
     getDisplayPreprocessCacheStatsForTests = m.getDisplayPreprocessCacheStatsForTests
@@ -82,10 +84,23 @@ describe('displayPreprocessCache invalidation semantics', () => {
     resetStore()
   })
 
-  test('entry without touchedVars is wiped by any var invalidation', () => {
+  test('dependency-free entry without touchedVars survives var invalidation', () => {
     seedDisplayPreprocessEntryForTests({ key: 'k1', value: 'a', messageId: 'm1' })
     invalidateDisplayRegexCacheForVars(new Set(['local:x']))
+    expect(getDisplayPreprocessCacheStatsForTests().size).toBe(1)
+  })
+
+  test('full invalidation still wipes dependency-free entries', () => {
+    seedDisplayPreprocessEntryForTests({ key: 'k4', value: 'd', messageId: 'm4' })
+    invalidateDisplayRegexCache()
     expect(getDisplayPreprocessCacheStatsForTests().size).toBe(0)
+  })
+
+  test('content cache dependency-free entry survives var invalidation', async () => {
+    const { seedDisplayContentEntryForTests, getDisplayContentCacheStatsForTests } = await loadMod()
+    seedDisplayContentEntryForTests({ key: 'ck', value: 'v' })
+    invalidateDisplayRegexCacheForVars(new Set(['local:x']))
+    expect(getDisplayContentCacheStatsForTests().hasKey('ck')).toBe(true)
   })
 
   test('entry with non-matching touchedVars survives var invalidation', () => {

@@ -513,11 +513,9 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   const affectedMessages = new Set<string>()
   for (const [key, entry] of displayRegexContentCache) {
     const fp = entry.touchedVars
-    if (!fp) {
-      displayRegexContentCache.delete(key)
-      if (entry.messageId) affectedMessages.add(entry.messageId)
-      continue
-    }
+    // Entries without touchedVars are dependency-free (output depends only on
+    // their cache key), so var-scoped invalidation cannot affect them.
+    if (!fp) continue
     for (const v of fp) {
       if (changedVars.has(v)) {
         displayRegexContentCache.delete(key)
@@ -528,11 +526,7 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   }
   for (const [key, entry] of displayPreprocessCache) {
     const fp = entry.touchedVars
-    if (!fp) {
-      displayPreprocessCache.delete(key)
-      if (entry.messageId) affectedMessages.add(entry.messageId)
-      continue
-    }
+    if (!fp) continue
     for (const v of fp) {
       if (changedVars.has(v)) {
         displayPreprocessCache.delete(key)
