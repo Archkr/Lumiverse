@@ -121,6 +121,14 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     setLandingRecentChats: (result) => set({ landingRecentChats: result }),
 
     setActiveChat: (chatId, characterId = null) => {
+      // A throttled token flush can still be queued when ChatView unmounts.
+      // Cancel it and clear the closure-owned buffers before resetting the
+      // public state; otherwise that timer can fire on the landing page and
+      // restore streaming content for a chat that is no longer active.
+      cancelStreamFlush()
+      rawStreamContent = ''
+      rawStreamReasoning = ''
+      reasoningStartedAt = 0
       endedGenerationIds.clear()
       set({
         activeChatId: chatId,

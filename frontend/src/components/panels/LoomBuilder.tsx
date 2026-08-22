@@ -3077,8 +3077,6 @@ useEffect(() => {
 
       <div style={{ display: activePresetEditorTab === 'preset' ? 'contents' : 'none' }}>
 
-      {activePreset && <PresetCoverHeader preset={activePreset} />}
-
       {/* Connection profile */}
       {activePreset && connectionProfile && (() => {
         const { sourceName, modelName } = formatProfileLabel(connectionProfile)
@@ -3293,6 +3291,8 @@ useEffect(() => {
 
       {/* Scrollable content: settings + block list */}
       <div className={s.scrollArea} ref={scrollAreaRef} onScroll={handleScrollCapture}>
+        {activePreset && <PresetCoverHeader preset={activePreset} />}
+
         {/* Settings accordion sections */}
         {activePreset && (
           <GenerationSettings
