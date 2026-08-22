@@ -10,7 +10,7 @@ Lumiverse runs on your own machine. It needs **Bun** (a fast JavaScript runtime)
 
 ## Requirements
 
-- **Bun** v1.3.13 or later — [Install Bun](https://bun.sh) (the start scripts auto-install Bun if missing and auto-upgrade older versions to latest stable)
+- **Bun** v1.3.13 or later (v1.4.0 or later on Windows) — [Install Bun](https://bun.sh) (the start scripts auto-install Bun if missing and auto-upgrade older versions to latest stable)
 - A modern web browser (Chrome, Firefox, Edge, Safari)
 - An API key from at least one AI provider (OpenAI, Anthropic, Google, etc.)
 
@@ -145,7 +145,7 @@ The start scripts accept flags to control behavior:
 
     | Flag | Description |
     |------|-------------|
-    | *(no flags)* | Start normally; auto-upgrade Bun to latest stable when below 1.3.13 |
+    | *(no flags)* | Start normally; auto-upgrade Bun to latest stable when below 1.4.0 |
     | `-Build` or `-b` | Rebuild frontend before starting |
     | `-Mode build-only` | Rebuild frontend only |
     | `-Mode backend-only` | Start backend only |

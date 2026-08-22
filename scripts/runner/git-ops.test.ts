@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
+  bunInstallCmd,
   inspectDependencyTree,
   packageInstallInputsChanged,
   planChangedDependencies,
@@ -32,7 +33,9 @@ function writePackageJson(
 }
 
 function installPackage(dir: string, packageName: string): void {
-  mkdirSync(join(dir, "node_modules", ...packageName.split("/")), { recursive: true });
+  const packageDir = join(dir, "node_modules", ...packageName.split("/"));
+  mkdirSync(packageDir, { recursive: true });
+  writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: packageName, version: "1.0.0" }));
 }
 
 afterEach(() => {
@@ -62,6 +65,19 @@ test("keeps a manual install without a runner stamp", () => {
   expect(existsSync(join(dir, "node_modules", ".lumiverse-install-complete"))).toBe(true);
   expect(existsSync(join(dir, "node_modules", "hono"))).toBe(true);
   expect(existsSync(join(dir, "node_modules", "bun-types"))).toBe(true);
+});
+
+test("treats an empty direct package directory as an incomplete install", () => {
+  const dir = makeTempDir();
+  writePackageJson(dir, { dependencies: ["@asamuzakjp/css-color"] });
+  mkdirSync(join(dir, "node_modules", "@asamuzakjp", "css-color"), { recursive: true });
+
+  expect(inspectDependencyTree(dir).missingPackages).toEqual(["@asamuzakjp/css-color"]);
+});
+
+test("uses copyfile installs on Windows", () => {
+  expect(bunInstallCmd("win32")).toEqual(["bun", "install", "--backend=copyfile"]);
+  expect(bunInstallCmd("linux")).toEqual(["bun", "install"]);
 });
 
 test("restores the previous dependency tree after a failed repair attempt", () => {

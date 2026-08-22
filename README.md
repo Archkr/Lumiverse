@@ -59,7 +59,7 @@ All commands below assume you have already cloned the repo and are working from 
 
 The launcher will:
 1. Install Bun if not found
-2. Upgrade Bun versions older than 1.3.13 to the latest stable release
+2. Upgrade unsupported Bun versions to the latest stable release (minimum 1.4.0 on Windows; 1.3.13 elsewhere)
 3. Run the **first-time setup wizard** (admin account, port, extension storage, optional SMART disk monitoring)
 4. Install backend dependencies and serve the existing frontend build if one is available
 5. Start the backend with the runner and IPC bridge when launched interactively

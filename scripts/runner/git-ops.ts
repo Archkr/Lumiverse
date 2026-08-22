@@ -82,7 +82,7 @@ function isProotRuntime(): boolean {
   return process.env.LUMIVERSE_IS_PROOT === "true";
 }
 
-function bunInstallCmd(): string[] {
+export function bunInstallCmd(platform: NodeJS.Platform = process.platform): string[] {
   if (isTermuxRuntime() || isProotRuntime()) {
     // Android filesystem emulation can't hardlink — copyfile is the only
     // backend that reliably installs without "Cannot find package" corruption.
@@ -90,6 +90,11 @@ function bunInstallCmd(): string[] {
     // forks lifecycle scripts (ssh2, cpu-features), producing spurious
     // CouldntReadCurrentDirectory errors. Both packages fall back to pure-JS.
     return ["bun", "install", "--backend=copyfile", "--ignore-scripts"];
+  }
+  if (platform === "win32") {
+    // Windows normally hardlinks packages from Bun's cache. Filesystem filters
+    // can leave those package directories empty even though install exits 0.
+    return ["bun", "install", "--backend=copyfile"];
   }
   return ["bun", "install"];
 }
@@ -541,7 +546,10 @@ export function inspectDependencyTree(dir: string): DependencyTreeState {
   const nodeModules = join(dir, "node_modules");
   const hasNodeModules = existsSync(nodeModules);
   const declaredPackages = listDeclaredInstallPackages(dir);
-  const missingPackages = declaredPackages.filter((packageName) => !existsSync(packageInstallPath(nodeModules, packageName)));
+  const missingPackages = declaredPackages.filter((packageName) => {
+    const packageDir = packageInstallPath(nodeModules, packageName);
+    return !existsSync(join(packageDir, "package.json"));
+  });
 
   return {
     hasNodeModules,
