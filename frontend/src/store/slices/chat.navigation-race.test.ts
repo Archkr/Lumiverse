@@ -64,4 +64,49 @@ describe('chat navigation during streaming', () => {
       jest.useRealTimers()
     }
   })
+
+  test('clears reasoning timer state when switching chats', () => {
+    const state = createStore()
+
+    state.setActiveChat('chat-1')
+    state.setStreamingReasoningStartedAt(1_000)
+    state.streamingReasoningDuration = 5_000
+
+    state.setActiveChat('chat-2')
+
+    expect(state.streamingReasoningStartedAt).toBeNull()
+    expect(state.streamingReasoningDuration).toBeNull()
+  })
+
+  test('starts each generation with a fresh render-facing reasoning clock', () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-08-22T18:00:00.000Z'))
+    const state = createStore()
+
+    try {
+      state.setActiveChat('chat-1')
+      state.setStreamingReasoningStartedAt(1_000)
+      state.streamingReasoningDuration = 5_000
+
+      state.beginStreaming(null)
+
+      expect(state.streamingReasoningStartedAt).toBeNull()
+      expect(state.streamingReasoningDuration).toBeNull()
+
+      state.appendStreamReasoning('first thought')
+
+      expect(state.streamingReasoningStartedAt).toBe(Date.now())
+
+      state.stopStreaming()
+      state.setStreamingReasoningStartedAt(2_000)
+      state.streamingReasoningDuration = 6_000
+
+      state.startStreaming('generation-2')
+
+      expect(state.streamingReasoningStartedAt).toBeNull()
+      expect(state.streamingReasoningDuration).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })

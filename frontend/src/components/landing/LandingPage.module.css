@@ -397,6 +397,19 @@
 
 .chatsLeaving {
   pointer-events: none;
+  /* One temporary compositor layer for the whole gallery is cheaper than
+     promoting every card independently. This class disappears on route exit. */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform-origin: 50% 50%;
+}
+
+.routeEntering {
+  /* Removed by onAnimationComplete so the full landing surface does not keep
+     a large GPU layer allocated while idle. */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform-origin: 50% 50%;
 }
 
 /* Card tilt wrapper — handles 3D tilt separately from framer-motion entry */
@@ -413,10 +426,18 @@
 
 .cardTilt.tilting {
   transition: transform 100ms ease-out;
+  transform:
+    rotateX(calc(var(--pointer-y, 0) * -9deg))
+    rotateY(calc(var(--pointer-x, 0) * 9deg))
+    scale3d(1.04, 1.04, 1.04);
 }
 
 .cardTilt.mobileMotionTilting {
   transition: transform 180ms ease-out;
+  transform:
+    rotateX(calc(var(--pointer-y, 0) * -4deg))
+    rotateY(calc(var(--pointer-x, 0) * 4deg))
+    scale3d(1.015, 1.015, 1.015);
 }
 
 /* Card — uses CSS animation for entry (no lingering inline styles that
@@ -453,25 +474,37 @@
     0 0 24px var(--lumiverse-primary-010);
 }
 
-/* Mouse-tracking radial shine */
-.card::after {
-  content: '';
+/* Mouse-tracking radial shine. The gradient itself never changes, so the
+   browser rasterizes it once; pointer movement only composites this oversized
+   texture with translate3d rather than repainting a gradient every frame. */
+.cardShine {
   position: absolute;
-  inset: 0;
+  inset: -25%;
   z-index: 3;
   pointer-events: none;
   opacity: 0;
   background: radial-gradient(
-    circle at var(--shine-x, 50%) var(--shine-y, 50%),
+    circle at 50% 50%,
     rgba(255, 255, 255, 0.10) 0%,
-    rgba(255, 255, 255, 0.03) 35%,
-    transparent 60%
+    rgba(255, 255, 255, 0.03) 23%,
+    transparent 40%
+  );
+  transform: translate3d(
+    calc(var(--pointer-x, 0) * 33.333%),
+    calc(var(--pointer-y, 0) * 33.333%),
+    0
   );
   transition: opacity 300ms ease;
 }
 
-.card:hover::after {
+.card:hover .cardShine {
   opacity: 1;
+}
+
+.cardTilt.tilting .cardShine,
+.cardTilt.mobileMotionTilting .cardShine {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
 /* Image zoom on card hover */
@@ -498,7 +531,7 @@
    shift, and (b) counter-rotating a fraction of the card's rotation.
    A plane that rotates less than its container reads as closer to
    the viewer, which is the "shifts perspective with the tilt" feel.
-   --tilt-x / --tilt-y (-1..1) are set on .cardTilt by the mouse
+   --pointer-x / --pointer-y (-1..1) are set on .cardTilt by the mouse
    handlers and drive both effects from the same source.
 
    The scale during tilt has to exceed (translate + rotation edge offset)
@@ -514,9 +547,9 @@
   --lazy-image-transform-transition: 120ms ease-out;
   transition: transform 120ms ease-out;
   transform:
-    translate3d(calc(var(--tilt-x, 0) * 8px), calc(var(--tilt-y, 0) * 8px), 0)
-    rotateX(calc(var(--tilt-y, 0) * 1.5deg))
-    rotateY(calc(var(--tilt-x, 0) * -1.5deg))
+    translate3d(calc(var(--pointer-x, 0) * 8px), calc(var(--pointer-y, 0) * 8px), 0)
+    rotateX(calc(var(--pointer-y, 0) * 1.5deg))
+    rotateY(calc(var(--pointer-x, 0) * -1.5deg))
     scale(1.14);
   will-change: transform;
 }
@@ -525,9 +558,9 @@
 .cardTilt.tilting .mosaicCell picture img {
   --lazy-image-transform-transition: 120ms ease-out;
   transform:
-    translate3d(calc(var(--tilt-x, 0) * 4px), calc(var(--tilt-y, 0) * 4px), 0)
-    rotateX(calc(var(--tilt-y, 0) * 1deg))
-    rotateY(calc(var(--tilt-x, 0) * -1deg))
+    translate3d(calc(var(--pointer-x, 0) * 4px), calc(var(--pointer-y, 0) * 4px), 0)
+    rotateX(calc(var(--pointer-y, 0) * 1deg))
+    rotateY(calc(var(--pointer-x, 0) * -1deg))
     scale(1.14);
   will-change: transform;
 }
@@ -595,11 +628,11 @@
 }
 
 .cardTilt.tilting .perspectiveLayer {
-  --layer-mouse-x: calc(var(--tilt-x, 0) * var(--layer-motion-x));
-  --layer-mouse-y: calc(var(--tilt-y, 0) * var(--layer-motion-y));
-  --layer-mouse-depth: calc(var(--tilt-y, 0) * var(--layer-motion-depth));
-  --layer-mouse-tilt-x: calc(var(--tilt-y, 0) * var(--layer-tilt-amount));
-  --layer-mouse-tilt-y: calc(var(--tilt-x, 0) * var(--layer-tilt-amount-neg));
+  --layer-mouse-x: calc(var(--pointer-x, 0) * var(--layer-motion-x));
+  --layer-mouse-y: calc(var(--pointer-y, 0) * var(--layer-motion-y));
+  --layer-mouse-depth: calc(var(--pointer-y, 0) * var(--layer-motion-depth));
+  --layer-mouse-tilt-x: calc(var(--pointer-y, 0) * var(--layer-tilt-amount));
+  --layer-mouse-tilt-y: calc(var(--pointer-x, 0) * var(--layer-tilt-amount-neg));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -643,7 +676,7 @@
   .cardTilt.mobileMotionTilting .cardAvatarFallback {
     transform: none;
   }
-  .card::after {
+  .cardShine {
     display: none;
   }
 }
@@ -664,7 +697,7 @@
   transform-style: flat;
 }
 
-.container[data-scrolling] .card::after {
+.container[data-scrolling] .cardShine {
   display: none;
 }
 
@@ -715,6 +748,7 @@
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
+  background: var(--lumiverse-card-bg);
   transform-style: preserve-3d;
 }
 
@@ -831,7 +865,8 @@
   transition: opacity var(--lumiverse-transition-fast), color var(--lumiverse-transition-fast);
 }
 
-.card:hover .deleteBtn {
+.card:hover .deleteBtn,
+.card:focus-within .deleteBtn {
   opacity: 1;
 }
 
@@ -840,10 +875,10 @@
   border-color: var(--lumiverse-danger-020);
 }
 
-/* Shift mode: make the remove-from-recent button visible and use a
-   non-destructive color cue so the user knows this is not a delete. */
-.deleteBtnShift,
-.card:hover .deleteBtnShift {
+/* Shift changes the hovered/focused card's action to remove-from-recent. It
+   must not reveal the action on every mounted card just because Shift is down. */
+.card:hover .deleteBtnShift,
+.card:focus-within .deleteBtnShift {
   opacity: 1;
   color: var(--lumiverse-primary);
   border-color: var(--lumiverse-primary-030);
@@ -1119,7 +1154,6 @@
   border-color: var(--lumiverse-danger-020);
 }
 
-.listDeleteBtnShift,
 .listItem:hover .listDeleteBtnShift,
 .listItem:focus-within .listDeleteBtnShift {
   opacity: 1;

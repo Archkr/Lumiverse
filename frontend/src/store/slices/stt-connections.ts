@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand'
 import type { AppStore, SttConnectionsSlice } from '@/types/store'
 import type { SttConnectionProfile } from '@/types/api'
+import { persistKey } from './settings'
 import { normalizeConnectionsOrder, reorderProfiles } from './connections-order-merge'
 
 export const createSttConnectionsSlice: StateCreator<AppStore, [], [], SttConnectionsSlice> = (set) => ({
@@ -12,21 +13,24 @@ export const createSttConnectionsSlice: StateCreator<AppStore, [], [], SttConnec
       sttProfiles: reorderProfiles(profiles, normalizeConnectionsOrder(state.connectionsOrder).stt),
     })),
 
-  addSttProfile: (profile) =>
+  addSttProfile: (profile) => {
+    let orderToPersist: AppStore['connectionsOrder'] | null = null
     set((state) => {
       const connectionsOrder = normalizeConnectionsOrder(state.connectionsOrder)
       const order = connectionsOrder.stt
       const existingIndex = state.sttProfiles.findIndex((candidate) => candidate.id === profile.id)
+      const nextOrder = order.includes(profile.id) ? order : [profile.id, ...order]
+      const nextConnectionsOrder = { ...connectionsOrder, stt: nextOrder }
+      if (nextOrder !== order) orderToPersist = nextConnectionsOrder
       return {
         sttProfiles: existingIndex === -1
           ? [profile, ...state.sttProfiles]
           : state.sttProfiles.map((candidate, index) => index === existingIndex ? profile : candidate),
-        connectionsOrder: {
-          ...connectionsOrder,
-          stt: order.includes(profile.id) ? order : [profile.id, ...order],
-        },
+        connectionsOrder: nextConnectionsOrder,
       }
-    }),
+    })
+    if (orderToPersist) persistKey('connectionsOrder', orderToPersist, 'state-sync')
+  },
 
   updateSttProfile: (id, updates) =>
     set((state) => ({

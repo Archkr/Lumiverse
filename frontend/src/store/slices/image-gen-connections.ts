@@ -79,16 +79,16 @@ export const createImageGenConnectionsSlice: StateCreator<AppStore, [], [], Imag
     const activeChanged = imageGeneration !== state.imageGeneration
     const connectionsOrder = normalizeConnectionsOrder(state.connectionsOrder)
     const order = connectionsOrder.imageGen
+    const nextOrder = order.includes(profile.id) ? order : [profile.id, ...order]
+    const nextConnectionsOrder = { ...connectionsOrder, imageGen: nextOrder }
     set({
       imageGenProfiles,
       imageGenProfilesVersion: state.imageGenProfilesVersion + 1,
       activeImageGenConnectionId,
       imageGeneration,
-      connectionsOrder: {
-        ...connectionsOrder,
-        imageGen: order.includes(profile.id) ? order : [profile.id, ...order],
-      },
+      connectionsOrder: nextConnectionsOrder,
     })
+    if (nextOrder !== order) persistKey('connectionsOrder', nextConnectionsOrder, 'state-sync')
     if (activeChanged) {
       if (state.fullSettingsLoaded) {
         persistImageGeneration(imageGeneration)

@@ -50,6 +50,8 @@ import { EventType } from '@/ws/events'
 import type { SpindlePreGenerationActivityPayload } from '@/types/ws-events'
 import styles from './ChatView.module.css'
 import clsx from 'clsx'
+import { markLandingPageChatReturn, peekLandingPageSnapshot } from '@/lib/landingPageSnapshot'
+import { holdImagesForTransition } from '@/lib/imageDecodeCache'
 
 interface CortexNotice {
   variant: 'processing' | 'error'
@@ -115,10 +117,24 @@ function formatIngestionDetail(status: CortexIngestionStatus, t: (key: string, o
     sidecar: t('chatView.cortexSidecar'),
     persisting: t('chatView.cortexPersisting'),
     complete: t('chatView.cortexComplete'),
-    error: status.error || t('chatView.cortexProcessingFailed'),
+    error: formatCortexError(status.error, t, 'chatView.cortexProcessingFailed'),
   }
 
   return phaseDetail[status.phase] + (status.pendingJobs > 1 ? t('chatView.cortexJobsPending', { count: status.pendingJobs }) : '')
+}
+
+function formatCortexError(
+  error: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  fallbackKey: string,
+): string {
+  // Sidecar status codes are internal implementation details. They arrive via
+  // the progress socket rather than a user-facing error contract, so never
+  // render values such as "sidecar_failed" in the memory notice.
+  if (/^sidecar(?:[_\s-].*)?$/i.test(error?.trim() ?? '')) {
+    return t(fallbackKey)
+  }
+  return error || t(fallbackKey)
 }
 
 function formatRebuildDetail(payload: CortexRebuildStatus, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -138,7 +154,7 @@ function buildCortexNotice(
     return {
       variant: 'error',
       title: t('chatView.memory'),
-      detail: rebuildStatus.error || t('chatView.memoryRebuildFailed'),
+      detail: formatCortexError(rebuildStatus.error, t, 'chatView.memoryRebuildFailed'),
       percent: rebuildStatus.percent,
     }
   }
@@ -147,7 +163,7 @@ function buildCortexNotice(
     return {
       variant: 'error',
       title: t('chatView.memory'),
-      detail: ingestionStatus.error || t('chatView.backgroundMemoryFailed'),
+      detail: formatCortexError(ingestionStatus.error, t, 'chatView.backgroundMemoryFailed'),
     }
   }
 
@@ -429,7 +445,11 @@ export default function ChatView() {
   const handleNavigateHome = useCallback(() => {
     if (chromeLeaveTimerRef.current !== null) return
 
+    const landingImageUrls = peekLandingPageSnapshot()?.imageUrls ?? []
+    if (landingImageUrls.length > 0) holdImagesForTransition(landingImageUrls)
+
     if (prefersReducedMotion()) {
+      markLandingPageChatReturn()
       navigate('/')
       return
     }
@@ -437,6 +457,7 @@ export default function ChatView() {
     setChatChromeLeaving(true)
     chromeLeaveTimerRef.current = window.setTimeout(() => {
       chromeLeaveTimerRef.current = null
+      markLandingPageChatReturn()
       navigate('/')
     }, CHAT_CHROME_LEAVE_MS)
   }, [navigate])
@@ -607,6 +628,21 @@ export default function ChatView() {
     }
   }, [chatWidthMode, chatContentMaxWidth])
 
+  // React Router reuses this component when only the chatId parameter changes.
+  // Clear the previous chat in a layout effect so its messages and streaming
+  // timer state cannot paint under the new route while the next chat loads.
+  useLayoutEffect(() => {
+    if (!chatId || activeChatId === chatId) return
+
+    const state = useStore.getState()
+    const isHydratedMultiplayerPeer = !!state.mpRoomId
+      && !state.mpIsHost
+      && state.mpChatId === chatId
+    if (isHydratedMultiplayerPeer) return
+
+    setActiveChat(chatId)
+  }, [activeChatId, chatId, setActiveChat])
+
   // Load chat and messages
   useEffect(() => {
     if (!chatId) return
@@ -630,7 +666,15 @@ export default function ChatView() {
         ])
         if (cancelled) return
 
-        setActiveChat(chatId, chat.character_id)
+        const activeState = useStore.getState()
+        if (activeState.activeChatId !== chatId) {
+          setActiveChat(chatId, chat.character_id)
+        } else {
+          // The route-transition layout effect already performed the destructive
+          // chat reset. Only fill in the owner now, so a generation event that
+          // arrived during the fetch is not cleared a second time.
+          activeState.setActiveCharacter(chat.character_id)
+        }
         useStore.getState().setActiveChatDisplayOwner(chat.character_display_owner ?? null)
         useStore.getState().setActiveChatName(chat.name ?? null)
         setMessages(msgPage.data, msgPage.total)
@@ -1067,7 +1111,7 @@ export default function ChatView() {
       chatColumnInner.style.removeProperty('--lcs-top-dock-height')
       chatComposerAboveRef.current = null
     }
-  }, [chatId, quickToolbarSettings])
+  }, [chatId, dockQuickToolbar, keepFloatingDockHost, quickToolbarSettings])
 
   if (!chatId) return null
 

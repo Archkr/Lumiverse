@@ -142,6 +142,8 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         isStreaming: false,
         streamingContent: '',
         streamingReasoning: '',
+        streamingReasoningDuration: null,
+        streamingReasoningStartedAt: null,
         streamingError: null,
         activeGenerationId: null,
         regeneratingMessageId: null,
@@ -305,6 +307,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         streamingContent: '',
         streamingReasoning: '',
         streamingReasoningDuration: null,
+        streamingReasoningStartedAt: null,
         streamingError: null,
         activeGenerationId: null,
         regeneratingMessageId: nextRegeneratingMessageId,
@@ -368,6 +371,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         streamingContent: '',
         streamingReasoning: '',
         streamingReasoningDuration: null,
+        streamingReasoningStartedAt: null,
         streamingError: null,
         activeGenerationId: generationId,
         regeneratingMessageId: nextRegeneratingMessageId,
@@ -422,7 +426,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     setStreamingReasoningStartedAt: (ts) => {
       // Also restore the closure variable so appendStreamToken can finalize
       // the duration when the first content token arrives after recovery.
-      if (ts) reasoningStartedAt = ts
+      reasoningStartedAt = ts ?? 0
       set({ streamingReasoningStartedAt: ts })
     },
 
@@ -454,7 +458,13 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     },
 
     appendStreamReasoning: (token, offset) => {
-      if (!reasoningStartedAt) reasoningStartedAt = Date.now()
+      if (!reasoningStartedAt) {
+        reasoningStartedAt = Date.now()
+        // Keep the render-facing timestamp in sync with the private duration
+        // clock. Otherwise it can retain a previous chat's recovery timestamp
+        // until the next pool poll corrects it.
+        set({ streamingReasoningStartedAt: reasoningStartedAt })
+      }
       if (offset != null) {
         const localLen = rawStreamReasoning.length
         if (offset > localLen) return 'gap'

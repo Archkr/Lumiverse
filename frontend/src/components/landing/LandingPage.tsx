@@ -33,7 +33,7 @@ import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { useStore } from '@/store'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import { warmCharacterPalette } from '@/hooks/useCharacterTheme'
-import { prefetchImages } from '@/lib/imageDecodeCache'
+import { holdImagesForTransition, prefetchImages } from '@/lib/imageDecodeCache'
 import { measureLayoutHeight, renderedPxToLayoutPx } from '@/lib/uiScale'
 import LazyImage from '@/components/shared/LazyImage'
 import ContextMenu, { type ContextMenuEntry, type ContextMenuPos } from '@/components/shared/ContextMenu'
@@ -65,8 +65,12 @@ import {
 } from '@/lib/landingPageTabs'
 import { readDeviceLandingPageStartTab } from '@/lib/landingPageStartTab'
 import { resolveLandingChatPageSize } from '@/lib/landingChatPagination'
-
-type LandingSortField = 'name' | 'recent' | 'created'
+import {
+  consumeLandingPageChatReturn,
+  readLandingPageSnapshot,
+  writeLandingPageSnapshot,
+  type LandingPageSortField,
+} from '@/lib/landingPageSnapshot'
 
 function getRecentChatDisplayName(item: GroupedRecentChat, t: TFunction<'landing'>): string {
   return item.is_group
@@ -114,6 +118,13 @@ function getItemAvatarUrls(
       }
     } else if (item.character_id) {
       const liveChar = characters.find((c) => c.id === item.character_id)
+      const perspectiveLayers = item.character_perspective_layers?.length
+        ? getPerspectiveLayers(item.character_perspective_layers)
+        : getPerspectiveLayers((liveChar as { extensions?: Record<string, unknown> } | undefined)?.extensions?.landing_perspective_layers)
+      if (variant === 'card' && perspectiveLayers.length >= 2) {
+        for (const layer of perspectiveLayers) urls.push(imagesApi.largeUrl(layer.image_id))
+        continue
+      }
       const getUrl = variant === 'card' ? getCharacterAvatarLargeUrlById : getCharacterAvatarThumbUrlById
       const url = getUrl(
         item.character_id,
@@ -200,17 +211,18 @@ function getPerspectiveLayerStyle(index: number, total: number, intensity: numbe
 interface RecentChatAvatarProps {
   item: GroupedRecentChat
   variant: 'card' | 'compact'
+  eager?: boolean
 }
 
-function RecentChatAvatar({ item, variant }: RecentChatAvatarProps) {
+function RecentChatAvatar({ item, variant, eager = false }: RecentChatAvatarProps) {
   const characters = useStore((s) => s.characters)
   const isGroup = item.is_group && item.group_character_ids && item.group_character_ids.length > 0
   // The landing list is already virtualized, so Tauri only mounts a bounded
   // set of rows. WKWebView can defer native lazy-image loads for a noticeable
   // period when a previously unmounted row returns to view; request those
   // bounded images eagerly without changing the memory-sensitive PWA path.
-  const imageLoading = typeof document !== 'undefined'
-    && document.documentElement.hasAttribute('data-tauri-desktop')
+  const imageLoading = eager || (typeof document !== 'undefined'
+    && document.documentElement.hasAttribute('data-tauri-desktop'))
     ? 'eager'
     : 'lazy'
 
@@ -255,7 +267,7 @@ function RecentChatAvatar({ item, variant }: RecentChatAvatarProps) {
                 <LazyImage
                   src={url}
                   alt=""
-                  decoding="async"
+                  decoding={eager ? 'sync' : 'async'}
                   loading={imageLoading}
                   fallback={
                     <div className={styles.mosaicFallback}>
@@ -282,7 +294,7 @@ function RecentChatAvatar({ item, variant }: RecentChatAvatarProps) {
             src={imagesApi.largeUrl(layer.image_id)}
             alt={index === perspectiveLayers.length - 1 ? item.character_name : ''}
             loading={imageLoading}
-            decoding="async"
+            decoding={eager ? 'sync' : 'async'}
             draggable={false}
             style={{
               ...getPerspectiveLayerStyle(index, perspectiveLayers.length, layer.intensity),
@@ -300,7 +312,7 @@ function RecentChatAvatar({ item, variant }: RecentChatAvatarProps) {
       <LazyImage
         src={avatarUrl}
         alt={item.character_name}
-        decoding="async"
+        decoding={eager ? 'sync' : 'async'}
         loading={imageLoading}
         fallback={
           <div className={fallbackClassName}>
@@ -337,12 +349,11 @@ function SkeletonListItem(_props: { index: number }) {
   )
 }
 
-// Last-known landing layout + item count, persisted so the skeleton matches
-// the real layout from the very first frame — before settings arrive from
-// bootstrap. Without it the page sat blank until settingsLoaded, then showed
-// a fixed 8 placeholders regardless of how many items would render.
+// Last-known landing presentation, persisted so the skeleton matches the real
+// layout from the very first frame — before settings arrive from bootstrap.
+// This is geometry only; chat data stays in the route-return memory snapshot.
 const LANDING_HINT_KEY = '__lumiverse_landing_hint'
-const SKELETON_MAX = 24
+const SKELETON_MAX = 100
 const CARD_MIN_WIDTH = 200
 const CARD_GAP = 20
 const CARD_MOBILE_BREAKPOINT = 600
@@ -364,6 +375,11 @@ type IdleWindow = Window & {
 interface LandingHint {
   layout?: 'cards' | 'compact'
   count?: number
+  galleryWidth?: 'compact' | 'expanded'
+  mainWidth?: number
+  chatViewportHeight?: number
+  viewportWidth?: number
+  viewportHeight?: number
 }
 
 function readLandingHint(): LandingHint {
@@ -425,9 +441,8 @@ function getPerspectiveTiltElements(root: HTMLElement): HTMLElement[] {
 function applyMobilePerspectiveParallax(root: HTMLElement, tiltX: number, tiltY: number): void {
   for (const tilt of getPerspectiveTiltElements(root)) {
     tilt.classList.add(styles.tilting, styles.mobileMotionTilting)
-    tilt.style.transform = `rotateX(${tiltY * -4}deg) rotateY(${tiltX * 4}deg) scale3d(1.015,1.015,1.015)`
-    tilt.style.setProperty('--tilt-x', String(tiltX))
-    tilt.style.setProperty('--tilt-y', String(tiltY))
+    tilt.style.setProperty('--pointer-x', String(tiltX))
+    tilt.style.setProperty('--pointer-y', String(tiltY))
   }
 }
 
@@ -436,9 +451,8 @@ function clearMobilePerspectiveParallax(root: HTMLElement): void {
     tilt.classList.remove(styles.mobileMotionTilting)
     if (!tilt.matches(':hover')) {
       tilt.classList.remove(styles.tilting)
-      tilt.style.transform = ''
-      tilt.style.removeProperty('--tilt-x')
-      tilt.style.removeProperty('--tilt-y')
+      tilt.style.removeProperty('--pointer-x')
+      tilt.style.removeProperty('--pointer-y')
     }
   }
 }
@@ -472,11 +486,22 @@ const containerVariants: Variants = {
   exit: { opacity: 0 },
 }
 
+// Exact inverse of the recent-chat gallery's home -> chat exit. Applying it
+// once to the restored landing surface makes the route transition feel like
+// one reversible movement without replaying every card's entry animation.
+const chatReturnInitial = { opacity: 0, y: 10, scale: 0.985 }
+const chatReturnAnimate = { opacity: 1, y: 0, scale: 1 }
+const chatReturnTransition = { duration: 0.22, ease: 'easeOut' as const }
+const freshLandingInitial = { opacity: 0 }
+const freshLandingAnimate = { opacity: 1 }
+const freshLandingTransition = { duration: 0.5 }
+
 const CHAT_NAV_FADE_MS = 220
 
 interface ChatCardProps {
   item: GroupedRecentChat
   animateEntry?: boolean
+  eagerImages?: boolean
   shiftPressed: boolean
   onClick: (item: GroupedRecentChat) => void
   onDeleteChat: (item: GroupedRecentChat) => void
@@ -485,7 +510,7 @@ interface ChatCardProps {
   onOpenContextMenu: (item: GroupedRecentChat, position: ContextMenuPos) => void
 }
 
-const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onClick, onDeleteChat, onDeleteAllChats, onRemoveFromRecent, onOpenContextMenu }: ChatCardProps) {
+const ChatCard = memo(function ChatCard({ item, animateEntry, eagerImages, shiftPressed, onClick, onDeleteChat, onDeleteAllChats, onRemoveFromRecent, onOpenContextMenu }: ChatCardProps) {
   const handleClick = useCallback(() => onClick(item), [onClick, item])
   const handleDelete = useMemo(() => {
     if (item.is_group && item.chat_count > 1) return undefined
@@ -501,7 +526,6 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
   }, [item, onDeleteChat, onDeleteAllChats])
   const { t } = useTranslation('landing')
   const tiltRef = useRef<HTMLDivElement>(null)
-  const cardRef = useRef<HTMLDivElement>(null)
   const rectRef = useRef<DOMRect | null>(null)
   const parallaxFrameRef = useRef<number | null>(null)
   const parallaxPointerRef = useRef<{ clientX: number; clientY: number } | null>(null)
@@ -516,19 +540,16 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
 
   const applyParallax = useCallback((clientX: number, clientY: number) => {
     const tilt = tiltRef.current
-    const card = cardRef.current
     const rect = rectRef.current
-    if (!tilt || !card || !rect) return
-    const mx = (clientX - rect.left) / rect.width
-    const my = (clientY - rect.top) / rect.height
+    if (!tilt || !rect) return
+    const mx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    const my = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
     const tiltX = (mx - 0.5) * 2
     const tiltY = (my - 0.5) * 2
-    tilt.style.transform =
-      `rotateX(${(my - 0.5) * -18}deg) rotateY(${(mx - 0.5) * 18}deg) scale3d(1.04,1.04,1.04)`
-    tilt.style.setProperty('--tilt-x', String(tiltX))
-    tilt.style.setProperty('--tilt-y', String(tiltY))
-    card.style.setProperty('--shine-x', `${mx * 100}%`)
-    card.style.setProperty('--shine-y', `${my * 100}%`)
+    // CSS derives card rotation, image/perspective parallax, and the fixed
+    // shine-layer translation from these two normalized coordinates.
+    tilt.style.setProperty('--pointer-x', String(tiltX))
+    tilt.style.setProperty('--pointer-y', String(tiltY))
   }, [])
 
   const scheduleParallax = useCallback((clientX: number, clientY: number) => {
@@ -563,17 +584,13 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
 
   const handleMouseLeave = useCallback(() => {
     const tilt = tiltRef.current
-    const card = cardRef.current
-    if (!tilt || !card) return
+    if (!tilt) return
     if (parallaxFrameRef.current !== null) cancelAnimationFrame(parallaxFrameRef.current)
     parallaxFrameRef.current = null
     parallaxPointerRef.current = null
     tilt.classList.remove(styles.tilting)
-    tilt.style.transform = ''
-    tilt.style.removeProperty('--tilt-x')
-    tilt.style.removeProperty('--tilt-y')
-    card.style.removeProperty('--shine-x')
-    card.style.removeProperty('--shine-y')
+    tilt.style.removeProperty('--pointer-x')
+    tilt.style.removeProperty('--pointer-y')
     rectRef.current = null
   }, [])
 
@@ -595,7 +612,6 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
       {...longPress}
     >
       <div
-        ref={cardRef}
         className={clsx(styles.card, animateEntry && styles.cardEntry, isGroup && styles.groupCard, isFavorite && styles.favoriteCard)}
       >
         {showDeleteButton && (
@@ -620,7 +636,7 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
           </button>
         )}
         <button type="button" className={styles.cardBtn} onClick={handleClick}>
-          <RecentChatAvatar item={item} variant="card" />
+          <RecentChatAvatar item={item} variant="card" eager={eagerImages} />
           <div className={styles.cardContent}>
             <h3 className={styles.cardName}>
               {isFavorite && <Star size={11} fill="currentColor" aria-hidden />}
@@ -647,12 +663,13 @@ const ChatCard = memo(function ChatCard({ item, animateEntry, shiftPressed, onCl
             </div>
           </div>
         </button>
+        <span className={styles.cardShine} aria-hidden="true" />
       </div>
     </div>
   )
 })
 
-const ChatListItem = memo(function ChatListItem({ item, animateEntry, shiftPressed, onClick, onDeleteChat, onDeleteAllChats, onRemoveFromRecent, onOpenContextMenu }: ChatCardProps) {
+const ChatListItem = memo(function ChatListItem({ item, animateEntry, eagerImages, shiftPressed, onClick, onDeleteChat, onDeleteAllChats, onRemoveFromRecent, onOpenContextMenu }: ChatCardProps) {
   const handleClick = useCallback(() => onClick(item), [onClick, item])
   const handleDelete = useMemo(() => {
     if (item.is_group && item.chat_count > 1) return undefined
@@ -711,7 +728,7 @@ const ChatListItem = memo(function ChatListItem({ item, animateEntry, shiftPress
       )}
 
       <button type="button" className={styles.listBtn} onClick={handleClick}>
-        <RecentChatAvatar item={item} variant="compact" />
+        <RecentChatAvatar item={item} variant="compact" eager={eagerImages} />
         <div className={styles.listBody}>
           <div className={styles.listTopRow}>
             <h3 className={styles.listName}>
@@ -759,6 +776,7 @@ interface VirtualRowProps {
   layoutMode: 'cards' | 'compact'
   initialPageSize: number
   animateInitialEntries: boolean
+  eagerImages: boolean
   shiftPressed: boolean
   measureElement: (el: Element | null) => void
   onChatClick: (item: GroupedRecentChat) => void
@@ -778,6 +796,7 @@ function virtualRowPropsEqual(prev: VirtualRowProps, next: VirtualRowProps): boo
   if (prev.layoutMode !== next.layoutMode) return false
   if (prev.initialPageSize !== next.initialPageSize) return false
   if (prev.animateInitialEntries !== next.animateInitialEntries) return false
+  if (prev.eagerImages !== next.eagerImages) return false
   if (prev.shiftPressed !== next.shiftPressed) return false
   if (prev.measureElement !== next.measureElement) return false
   if (prev.onChatClick !== next.onChatClick) return false
@@ -801,6 +820,7 @@ const VirtualRow = memo(function VirtualRow({
   layoutMode,
   initialPageSize,
   animateInitialEntries,
+  eagerImages,
   shiftPressed,
   measureElement,
   onChatClick,
@@ -830,6 +850,7 @@ const VirtualRow = memo(function VirtualRow({
             key={getRecentChatKey(item)}
             item={item}
             animateEntry={animateEntry}
+            eagerImages={eagerImages}
             shiftPressed={shiftPressed}
             onClick={onChatClick}
             onDeleteChat={onDeleteChat}
@@ -842,6 +863,7 @@ const VirtualRow = memo(function VirtualRow({
             key={getRecentChatKey(item)}
             item={item}
             animateEntry={animateEntry}
+            eagerImages={eagerImages}
             shiftPressed={shiftPressed}
             onClick={onChatClick}
             onDeleteChat={onDeleteChat}
@@ -865,6 +887,7 @@ interface VirtualizedChatRowsProps {
   scrollRef: RefObject<HTMLDivElement | null>
   initialPageSize: number
   animateInitialEntries: boolean
+  eagerImages: boolean
   navigatingToChat: boolean
   shiftPressed: boolean
   onContainerChange: (node: HTMLDivElement | null) => void
@@ -890,6 +913,7 @@ function VirtualizedChatRows({
   scrollRef,
   initialPageSize,
   animateInitialEntries,
+  eagerImages,
   navigatingToChat,
   shiftPressed,
   onContainerChange,
@@ -968,12 +992,13 @@ function VirtualizedChatRows({
     <motion.div
       className={clsx(styles.virtualChats, navigatingToChat && styles.chatsLeaving)}
       data-component="LandingPageChats"
+      data-layout-columns={virtualColumns}
       data-spindle-mount="landing_recent_chats"
       data-spindle-scope="landing:recent-chats"
       ref={setContainerRef}
       style={{ height: chatVirtualizer.getTotalSize() }}
       variants={containerVariants}
-      initial="hidden"
+      initial={animateInitialEntries ? 'hidden' : false}
       animate={navigatingToChat ? 'leaving' : 'visible'}
       exit="exit"
     >
@@ -990,6 +1015,7 @@ function VirtualizedChatRows({
             layoutMode={layoutMode}
             initialPageSize={initialPageSize}
             animateInitialEntries={animateInitialEntries}
+            eagerImages={eagerImages}
             shiftPressed={shiftPressed}
             measureElement={chatVirtualizer.measureElement}
             onChatClick={onChatClick}
@@ -1026,12 +1052,43 @@ function LandingPageNative() {
   const setSetting = useStore((s) => s.setSetting)
   const logout = useStore((s) => s.logout)
   const authUser = useStore((s) => s.user)
+  const suiteExtensionEnabled = useStore((s) => s.extensions.some((extension) => (
+    extension.identifier === 'lumiverse_suite' && extension.enabled && extension.has_frontend
+  )))
+  const [restoredSnapshot] = useState(() => readLandingPageSnapshot(authUser?.id))
+  const [isChatReturn] = useState(() => consumeLandingPageChatReturn() || Boolean(restoredSnapshot))
+  const hasRestoredChatReturn = Boolean(restoredSnapshot)
+  const landingEntryMode = hasRestoredChatReturn
+    ? 'chat-return'
+    : isChatReturn
+      ? 'cold-return'
+      : 'fresh'
+  const [landingEntryAnimating, setLandingEntryAnimating] = useState(hasRestoredChatReturn)
+  const [landingHint] = useState(readLandingHint)
+  const restoredVisitRef = useRef(Boolean(restoredSnapshot))
+  const restoredRefreshPendingRef = useRef(Boolean(restoredSnapshot))
+  const [snapshotGalleryWidth, setSnapshotGalleryWidth] = useState(
+    restoredSnapshot?.galleryWidth ?? (!settingsLoaded ? landingHint.galleryWidth ?? null : null),
+  )
+  // A cold load may use the persisted geometry while bootstrap is pending,
+  // but it must switch directly to the authoritative setting in the same
+  // render that marks settings ready. Keeping the hint for one extra effect
+  // frame creates a transient hint-layout/live-layout hybrid that visibly
+  // snaps while the fresh-entry fade is running. A route snapshot is allowed
+  // to own its first painted frame and is released by the effect below.
+  const effectiveGalleryWidth = restoredSnapshot
+    ? snapshotGalleryWidth ?? landingPageGalleryWidth
+    : settingsLoaded
+      ? landingPageGalleryWidth
+      : snapshotGalleryWidth ?? landingPageGalleryWidth
   const hasGlobalWallpaper = useStore((s) => Boolean(s.wallpaper.global?.image_id))
   const accountLabel = authUser?.username || authUser?.name || t('account')
   // The selected landing tab is intentionally local UI state. It must not be
   // persisted with account settings: a tab click on one device should never
   // move another device's landing page.
-  const [requestedLandingTab, setRequestedLandingTab] = useState<LandingPageTab>('characters')
+  const [requestedLandingTab, setRequestedLandingTab] = useState<LandingPageTab>(
+    restoredSnapshot?.requestedTab ?? 'characters',
+  )
   const [homepageSurfaceReady, setHomepageSurfaceReady] = useState(() => (
     typeof document !== 'undefined' && Boolean(document.querySelector(
       `[data-spindle-mount="${'landing_characters'}"] [data-homepage-character-library-ready="true"]`,
@@ -1053,7 +1110,7 @@ function LandingPageNative() {
         `[data-spindle-mount="${'landing_characters'}"] [data-homepage-character-library-ready="true"][data-spindle-ext-id="lumiverse_suite"]`,
       ))
       if (!ready) selectedCharactersForReady.current = false
-      else if (!selectedCharactersForReady.current) {
+      else if (!selectedCharactersForReady.current && !restoredVisitRef.current) {
         selectedCharactersForReady.current = true
         setRequestedLandingTab('characters')
       }
@@ -1094,33 +1151,35 @@ function LandingPageNative() {
     () => getAvailableLandingPageTabs({ characterLibraryEnabled: homepageSurfaceReady }),
     [homepageSurfaceReady],
   )
+  const suiteLandingTabsReady = suiteExtensionEnabled && suiteHomepageSurfaceReady
   useEffect(() => {
     const userId = authUser?.id ?? null
-    if (!suiteHomepageSurfaceReady || !userId || initializedStartTabForUser.current === userId) return
+    if (!suiteLandingTabsReady || !userId || initializedStartTabForUser.current === userId) return
     initializedStartTabForUser.current = userId
+    if (restoredVisitRef.current) return
     setRequestedLandingTab(readDeviceLandingPageStartTab(userId))
-  }, [authUser?.id, suiteHomepageSurfaceReady])
+  }, [authUser?.id, suiteLandingTabsReady])
   const activeLandingTab = normalizeLandingPageTab(requestedLandingTab, availableLandingTabs)
   const handleLandingTabChange = useCallback((tab: (typeof availableLandingTabs)[number]) => {
     if (!availableLandingTabs.includes(tab)) return
     setRequestedLandingTab(tab)
   }, [availableLandingTabs])
 
-  const [items, setItems] = useState<GroupedRecentChat[]>([])
-  const [loading, setLoading] = useState(true)
+  const [items, setItems] = useState<GroupedRecentChat[]>(() => restoredSnapshot?.items ?? [])
+  const [loading, setLoading] = useState(() => !restoredSnapshot)
   const [loadingMore, setLoadingMore] = useState(false)
   const [guidesOpen, setGuidesOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [total, setTotal] = useState(0)
+  const [total, setTotal] = useState(() => restoredSnapshot?.total ?? 0)
   const [creatingTempChat, setCreatingTempChat] = useState(false)
   const [tempChatMenuOpen, setTempChatMenuOpen] = useState(false)
   const [navigatingToChat, setNavigatingToChat] = useState(false)
-  const [animateInitialEntries, setAnimateInitialEntries] = useState(true)
+  const [animateInitialEntries, setAnimateInitialEntries] = useState(() => !hasRestoredChatReturn)
   const [shiftPressed, setShiftPressed] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
-  const [sortField, setSortField] = useState<LandingSortField>('recent')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [searchQuery, setSearchQuery] = useState(() => restoredSnapshot?.searchQuery ?? '')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(() => restoredSnapshot?.searchQuery.trim() ?? '')
+  const [sortField, setSortField] = useState<LandingPageSortField>(() => restoredSnapshot?.sortField ?? 'recent')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(() => restoredSnapshot?.sortDirection ?? 'desc')
   const [contextMenu, setContextMenu] = useState<{ item: GroupedRecentChat; position: ContextMenuPos } | null>(null)
   const [mobileMotionPermission, setMobileMotionPermission] = useState<DeviceRotationPermissionState>('unknown')
   const [showMobileMotionEnable, setShowMobileMotionEnable] = useState(false)
@@ -1129,7 +1188,7 @@ function LandingPageNative() {
   const chatNavigationTimerRef = useRef<number | null>(null)
   const fetchSequenceRef = useRef(0)
   const loadingMoreRef = useRef(false)
-  const chatPageSizeRef = useRef(landingPageChatsDisplayed)
+  const chatPageSizeRef = useRef(restoredSnapshot?.pageSize ?? landingPageChatsDisplayed)
 
   const profiles = useStore((s) => s.profiles)
   const activeProfileId = useStore((s) => s.activeProfileId)
@@ -1229,38 +1288,33 @@ function LandingPageNative() {
     return () => window.clearTimeout(timer)
   }, [animateInitialEntries, items.length, loading])
 
-  // Skeleton shape/count for the pre-settings window and the fetch window.
-  // Before settings arrive the store only has defaults, so fall back to the
-  // persisted last-known layout and item count.
-  const [landingHint] = useState(readLandingHint)
-  const skeletonLayout = settingsLoaded
-    ? landingPageLayoutMode
-    : landingHint.layout ?? landingPageLayoutMode
-  const expectedCount = settingsLoaded
-    ? Math.min(landingHint.count ?? landingPageChatsDisplayed, landingPageChatsDisplayed)
-    : landingHint.count ?? landingPageChatsDisplayed
-  const skeletonCount = Math.max(1, Math.min(expectedCount, SKELETON_MAX))
-
-  useEffect(() => {
-    if (!settingsLoaded || loading) return
-    writeLandingHint({
-      layout: landingPageLayoutMode,
-      count: Math.min(items.length, landingPageChatsDisplayed),
-    })
-  }, [settingsLoaded, loading, landingPageLayoutMode, items.length, landingPageChatsDisplayed])
-
   const sentinelRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const mainRef = useRef<HTMLElement>(null)
   const virtualContainerRef = useRef<HTMLDivElement | null>(null)
-  const [mainWidth, setMainWidth] = useState(() => Math.min(1400, Math.max(320, window.innerWidth - 64)))
+  const [mainWidth, setMainWidth] = useState(() => {
+    const geometry = restoredSnapshot ?? landingHint
+    const canRestoreGeometry = geometry
+      && typeof geometry.mainWidth === 'number'
+      && geometry.galleryWidth === effectiveGalleryWidth
+      && geometry.viewportWidth === window.innerWidth
+    return canRestoreGeometry
+      ? geometry.mainWidth!
+      : Math.min(1400, Math.max(320, window.innerWidth - 64))
+  })
   const [expandedWidthApplies, setExpandedWidthApplies] = useState(
     () => window.innerWidth > CARD_MOBILE_BREAKPOINT,
   )
-  const [chatViewportHeight, setChatViewportHeight] = useState(0)
+  const [chatViewportHeight, setChatViewportHeight] = useState(() => (
+    (restoredSnapshot ?? landingHint).viewportHeight === window.innerHeight
+      ? (restoredSnapshot ?? landingHint).chatViewportHeight ?? 0
+      : 0
+  ))
   const [virtualScrollMargin, setVirtualScrollMargin] = useState(0)
-  const isExpandedGallery = landingPageGalleryWidth === 'expanded' && expandedWidthApplies
-  const virtualLayout = landingPageLayoutMode === 'compact' ? 'compact' : 'cards'
+  const isExpandedGallery = effectiveGalleryWidth === 'expanded' && expandedWidthApplies
+  const virtualLayout = settingsLoaded
+    ? landingPageLayoutMode
+    : landingHint.layout ?? landingPageLayoutMode
   const virtualGap = getColumnGap(mainWidth, virtualLayout)
   const virtualColumns = getColumnCount(mainWidth, virtualLayout)
   const virtualColumnWidth = Math.max(1, (mainWidth - virtualGap * (virtualColumns - 1)) / virtualColumns)
@@ -1275,8 +1329,49 @@ function LandingPageNative() {
     rowHeight: virtualRowEstimate,
     availableHeight: chatViewportHeight,
   })
+  const skeletonLayout = virtualLayout
+  const expectedSkeletonCount = settingsLoaded
+    ? recentChatPageSize
+    : landingHint.count ?? landingPageChatsDisplayed
+  const skeletonCount = Math.max(1, Math.min(expectedSkeletonCount, SKELETON_MAX))
+
+  useEffect(() => {
+    if (!settingsLoaded || loading) return
+    writeLandingHint({
+      layout: virtualLayout,
+      count: Math.min(items.length, recentChatPageSize),
+      galleryWidth: effectiveGalleryWidth,
+      mainWidth,
+      chatViewportHeight,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    })
+  }, [chatViewportHeight, effectiveGalleryWidth, items.length, loading, mainWidth, recentChatPageSize, settingsLoaded, virtualLayout])
 
   useScrollGate(scrollRef)
+
+  useEffect(() => {
+    if (!restoredSnapshot?.imageUrls?.length) return
+    holdImagesForTransition(restoredSnapshot.imageUrls)
+  }, [restoredSnapshot])
+
+  useEffect(() => {
+    // The snapshot owns only the first restored frame. Once authoritative
+    // settings are available, subsequent width toggles should read the live
+    // store value normally.
+    if (restoredSnapshot && snapshotGalleryWidth !== null && settingsLoaded) {
+      setSnapshotGalleryWidth(null)
+    }
+  }, [restoredSnapshot, settingsLoaded, snapshotGalleryWidth])
+
+  useEffect(() => {
+    if (!restoredSnapshot || !scrollRef.current) return
+    const scroller = scrollRef.current
+    const frame = window.requestAnimationFrame(() => {
+      scroller.scrollTop = restoredSnapshot.scrollTop
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [restoredSnapshot])
 
   useEffect(() => {
     setShowMobileMotionEnable(
@@ -1356,7 +1451,10 @@ function LandingPageNative() {
     let frame = 0
     const update = () => {
       frame = 0
-      setMainWidth(el.clientWidth)
+      // A hidden/unlaid-out mount can transiently report zero. Retaining the
+      // snapshot geometry avoids collapsing an expanded return view to one
+      // default-width column before the next ResizeObserver delivery.
+      if (el.clientWidth > 0) setMainWidth(el.clientWidth)
       setExpandedWidthApplies(window.innerWidth > CARD_MOBILE_BREAKPOINT)
       const scroller = scrollRef.current
       if (scroller) {
@@ -1392,6 +1490,9 @@ function LandingPageNative() {
     // while the user is scrolling.
     const pageSize = recentChatPageSize
     chatPageSizeRef.current = pageSize
+    const refreshLimit = restoredRefreshPendingRef.current
+      ? Math.max(pageSize, restoredSnapshot?.items.length ?? 0)
+      : pageSize
 
     // Bootstrap delivers the first recent-chats page alongside settings —
     // consume it once instead of issuing another round trip. Later runs
@@ -1415,10 +1516,11 @@ function LandingPageNative() {
     setError(null)
     try {
       const result = await chatsApi.listRecentGrouped({
-        limit: pageSize,
+        limit: refreshLimit,
         ...recentChatQuery,
       })
       if (requestSequence !== fetchSequenceRef.current) return
+      restoredRefreshPendingRef.current = false
       setItems(result.data)
       setTotal(result.total)
     } catch (err: any) {
@@ -1428,7 +1530,7 @@ function LandingPageNative() {
     } finally {
       if (requestSequence === fetchSequenceRef.current) setLoading(false)
     }
-  }, [debouncedSearchQuery, recentChatPageSize, recentChatQuery, settingsLoaded, sortDirection, sortField])
+  }, [debouncedSearchQuery, recentChatPageSize, recentChatQuery, restoredSnapshot?.items.length, settingsLoaded, sortDirection, sortField])
 
   const loadMore = useCallback(async () => {
     // Intersection observers may deliver multiple entries during a grid
@@ -1505,6 +1607,33 @@ function LandingPageNative() {
   const navigateToChat = useCallback((chatId: string) => {
     if (chatNavigationTimerRef.current !== null) return
 
+    if (authUser?.id) {
+      writeLandingPageSnapshot({
+        userId: authUser.id,
+        items,
+        total,
+        scrollTop: scrollRef.current?.scrollTop ?? 0,
+        requestedTab: activeLandingTab,
+        searchQuery,
+        sortField,
+        sortDirection,
+        pageSize: chatPageSizeRef.current,
+        galleryWidth: effectiveGalleryWidth,
+        mainWidth: mainRef.current?.clientWidth || mainWidth,
+        chatViewportHeight,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        imageUrls: getItemAvatarUrls(
+          [
+            ...items.filter((item) => item.latest_chat_id === chatId),
+            ...items.filter((item) => item.latest_chat_id !== chatId),
+          ],
+          useStore.getState().characters,
+          virtualLayout === 'compact' ? 'compact' : 'card',
+        ),
+      })
+    }
+
     setNavigatingToChat(true)
 
     const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -1517,7 +1646,7 @@ function LandingPageNative() {
       chatNavigationTimerRef.current = null
       navigate(`/chat/${chatId}`)
     }, CHAT_NAV_FADE_MS)
-  }, [navigate])
+  }, [activeLandingTab, authUser?.id, chatViewportHeight, effectiveGalleryWidth, items, mainWidth, navigate, searchQuery, sortDirection, sortField, total, virtualLayout])
 
   const handleChatClick = useCallback(
     (item: GroupedRecentChat) => {
@@ -1800,7 +1929,7 @@ function LandingPageNative() {
     })
   }, [openModal, logout, t])
 
-  const handleSortFieldChange = useCallback((next: LandingSortField) => {
+  const handleSortFieldChange = useCallback((next: LandingPageSortField) => {
     setSortField(next)
     setSortDirection(next === 'name' ? 'asc' : 'desc')
   }, [])
@@ -1828,11 +1957,21 @@ function LandingPageNative() {
       )}
 
       <motion.div
-        className={clsx(styles.content, isExpandedGallery && styles.contentExpanded)}
+        className={clsx(
+          styles.content,
+          isExpandedGallery && styles.contentExpanded,
+          landingEntryAnimating && styles.routeEntering,
+        )}
         data-component="LandingPageCharacters"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        data-entry-mode={landingEntryMode}
+        initial={hasRestoredChatReturn ? chatReturnInitial : freshLandingInitial}
+        animate={hasRestoredChatReturn ? chatReturnAnimate : freshLandingAnimate}
+        transition={hasRestoredChatReturn
+          ? chatReturnTransition
+          : freshLandingTransition}
+        onAnimationComplete={() => {
+          if (landingEntryAnimating) setLandingEntryAnimating(false)
+        }}
       >
         <header className={styles.header} data-component="LandingPageHeader" data-spindle-mount="landing_header" data-spindle-scope="landing:header">
           <div className={styles.logo}>
@@ -1954,28 +2093,30 @@ function LandingPageNative() {
         </header>
 
         <div className={styles.landingToolbar} data-component="LandingPageTabs" data-spindle-mount="landing_toolbar">
-          <div className={clsx(styles.landingTabs, homepageSurfaceReady && styles.landingTabsWithSuite)} role="tablist" aria-label="Landing views">
-            {availableLandingTabs.map((tab) => {
-              const selected = activeLandingTab === tab
-              return (
-                <button key={tab} id={landingPageTabId(tab)} type="button" role="tab" data-landing-tab={tab}
-                  aria-selected={selected} aria-controls={landingPageTabPanelId(tab)} tabIndex={selected ? 0 : -1}
-                  onClick={() => handleLandingTabChange(tab)}
-                  onKeyDown={(event) => {
-                    const next = resolveTabArrowKey(event.key, tab, availableLandingTabs)
-                    if (!next) return
-                    event.preventDefault()
-                    handleLandingTabChange(next)
-                    window.requestAnimationFrame(() => document.getElementById(landingPageTabId(next))?.focus())
-                  }}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 10px', border: '1px solid var(--lumiverse-border)', borderRadius: 8, background: selected ? 'var(--lumiverse-primary-010)' : 'transparent', color: selected ? 'var(--lumiverse-text)' : 'var(--lumiverse-text-muted)', cursor: 'pointer' }}
-                >
-                  {tab === 'characters' ? <Users size={14} strokeWidth={1.5} /> : <MessageSquare size={14} strokeWidth={1.5} />}
-                  <span className={styles.landingTabLabel}>{tab === 'characters' ? 'Characters' : 'Chats'}</span>
-                </button>
-              )
-            })}
-          </div>
+          {suiteLandingTabsReady && (
+            <div className={clsx(styles.landingTabs, styles.landingTabsWithSuite)} role="tablist" aria-label="Landing views">
+              {availableLandingTabs.map((tab) => {
+                const selected = activeLandingTab === tab
+                return (
+                  <button key={tab} id={landingPageTabId(tab)} type="button" role="tab" data-landing-tab={tab}
+                    aria-selected={selected} aria-controls={landingPageTabPanelId(tab)} tabIndex={selected ? 0 : -1}
+                    onClick={() => handleLandingTabChange(tab)}
+                    onKeyDown={(event) => {
+                      const next = resolveTabArrowKey(event.key, tab, availableLandingTabs)
+                      if (!next) return
+                      event.preventDefault()
+                      handleLandingTabChange(next)
+                      window.requestAnimationFrame(() => document.getElementById(landingPageTabId(next))?.focus())
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 10px', border: '1px solid var(--lumiverse-border)', borderRadius: 8, background: selected ? 'var(--lumiverse-primary-010)' : 'transparent', color: selected ? 'var(--lumiverse-text)' : 'var(--lumiverse-text-muted)', cursor: 'pointer' }}
+                  >
+                    {tab === 'characters' ? <Users size={14} strokeWidth={1.5} /> : <MessageSquare size={14} strokeWidth={1.5} />}
+                    <span className={styles.landingTabLabel}>{tab === 'characters' ? 'Characters' : 'Chats'}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           {activeLandingTab === 'chats' && !chatsSurfaceReady && <>
           <SearchField
             value={searchQuery}
@@ -2010,13 +2151,17 @@ function LandingPageNative() {
           </button>
           <button
             type="button"
-            className={clsx(styles.hiddenManagerBtn, styles.galleryWidthBtn, landingPageGalleryWidth === 'expanded' && styles.galleryWidthBtnActive)}
-            onClick={() => setSetting('landingPageGalleryWidth', landingPageGalleryWidth === 'expanded' ? 'compact' : 'expanded')}
-            title={landingPageGalleryWidth === 'expanded' ? t('galleryWidth.compact') : t('galleryWidth.expanded')}
-            aria-label={landingPageGalleryWidth === 'expanded' ? t('galleryWidth.compact') : t('galleryWidth.expanded')}
-            aria-pressed={landingPageGalleryWidth === 'expanded'}
+            className={clsx(styles.hiddenManagerBtn, styles.galleryWidthBtn, effectiveGalleryWidth === 'expanded' && styles.galleryWidthBtnActive)}
+            onClick={() => {
+              const next = effectiveGalleryWidth === 'expanded' ? 'compact' : 'expanded'
+              setSnapshotGalleryWidth(null)
+              setSetting('landingPageGalleryWidth', next)
+            }}
+            title={effectiveGalleryWidth === 'expanded' ? t('galleryWidth.compact') : t('galleryWidth.expanded')}
+            aria-label={effectiveGalleryWidth === 'expanded' ? t('galleryWidth.compact') : t('galleryWidth.expanded')}
+            aria-pressed={effectiveGalleryWidth === 'expanded'}
           >
-            {landingPageGalleryWidth === 'expanded'
+            {effectiveGalleryWidth === 'expanded'
               ? <Minimize2 size={15} strokeWidth={1.5} />
               : <Maximize2 size={15} strokeWidth={1.5} />}
           </button>
@@ -2025,10 +2170,12 @@ function LandingPageNative() {
 
         <main className={styles.main} ref={mainRef} data-component="LandingPageMain" data-spindle-mount="landing_main">
           <span data-spindle-mount="landing_hero" data-spindle-scope="landing:hero" style={{ display: 'contents' }} />
-          <div id={landingPageTabPanelId('characters')} role="tabpanel" aria-labelledby={landingPageTabId('characters')}
+          <div id={landingPageTabPanelId('characters')} role={suiteLandingTabsReady ? 'tabpanel' : undefined}
+            aria-labelledby={suiteLandingTabsReady ? landingPageTabId('characters') : undefined}
             data-component="LandingPageCharacterPanel" data-spindle-mount="landing_characters" data-spindle-scope="landing:characters"
             hidden={activeLandingTab !== 'characters' || !homepageSurfaceReady} />
-          <div id={landingPageTabPanelId('chats')} role="tabpanel" aria-labelledby={landingPageTabId('chats')}
+          <div id={landingPageTabPanelId('chats')} role={suiteLandingTabsReady ? 'tabpanel' : undefined}
+            aria-labelledby={suiteLandingTabsReady ? landingPageTabId('chats') : undefined}
             data-component="LandingPageChatsPanel" data-spindle-mount="landing_chats"
             hidden={activeLandingTab !== 'chats'} />
           <AnimatePresence mode="wait">
@@ -2065,6 +2212,7 @@ function LandingPageNative() {
                 scrollRef={scrollRef}
                 initialPageSize={chatPageSizeRef.current}
                 animateInitialEntries={animateInitialEntries}
+                eagerImages={hasRestoredChatReturn}
                 navigatingToChat={navigatingToChat}
                 shiftPressed={shiftPressed}
                 onContainerChange={handleVirtualContainerChange}

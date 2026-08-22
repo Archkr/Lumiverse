@@ -3,7 +3,7 @@ import type { ActiveProfileSwitchReason, AppStore, ConnectionsSlice } from '@/ty
 import type { ConnectionProfile } from '@/types/api'
 import { settingsApi } from '@/api/settings'
 import { areReasoningSettingsEqual, normalizeReasoningSettingsForProvider } from '@/lib/reasoning-binding'
-import { REASONING_DEFAULTS, clearDirtyKey } from './settings'
+import { REASONING_DEFAULTS, clearDirtyKey, persistKey } from './settings'
 import { normalizeConnectionsOrder, reorderProfiles } from './connections-order-merge'
 
 const PERSISTED_ACTIVE_PROFILE_REASONS: ReadonlySet<ActiveProfileSwitchReason> = new Set([
@@ -84,23 +84,29 @@ export const createConnectionsSlice: StateCreator<AppStore, [], [], ConnectionsS
     }
   },
 
-  addProfile: (profile) => set((state) => {
-    const connectionsOrder = normalizeConnectionsOrder(state.connectionsOrder)
-    const order = connectionsOrder.llm
-    const existingIndex = state.profiles.findIndex((candidate) => candidate.id === profile.id)
-    return {
-      // A connection mutation is delivered both over WebSocket and in the
-      // initiating request's REST response. Either can arrive first, so treat
-      // adding an already-known id as an update instead of creating two rows.
-      profiles: existingIndex === -1
-        ? [profile, ...state.profiles]
-        : state.profiles.map((candidate, index) => index === existingIndex ? profile : candidate),
-      connectionsOrder: {
-        ...connectionsOrder,
-        llm: order.includes(profile.id) ? order : [profile.id, ...order],
-      },
-    }
-  }),
+  addProfile: (profile) => {
+    let orderToPersist: AppStore['connectionsOrder'] | null = null
+    set((state) => {
+      const connectionsOrder = normalizeConnectionsOrder(state.connectionsOrder)
+      const order = connectionsOrder.llm
+      const existingIndex = state.profiles.findIndex((candidate) => candidate.id === profile.id)
+      const nextOrder = order.includes(profile.id) ? order : [profile.id, ...order]
+      const nextConnectionsOrder = { ...connectionsOrder, llm: nextOrder }
+      if (nextOrder !== order) orderToPersist = nextConnectionsOrder
+      return {
+        // A connection mutation is delivered both over WebSocket and in the
+        // initiating request's REST response. Either can arrive first, so treat
+        // adding an already-known id as an update instead of creating two rows.
+        profiles: existingIndex === -1
+          ? [profile, ...state.profiles]
+          : state.profiles.map((candidate, index) => index === existingIndex ? profile : candidate),
+        connectionsOrder: nextConnectionsOrder,
+      }
+    })
+    // Pickers and startup hydration use this setting rather than the transient
+    // slice order, so a newly-prepended connection must update it as well.
+    if (orderToPersist) persistKey('connectionsOrder', orderToPersist, 'state-sync')
+  },
   updateProfile: (id, updates) =>
     set((state) => ({
       profiles: state.profiles.map((p) => (p.id === id ? { ...p, ...updates } : p)),

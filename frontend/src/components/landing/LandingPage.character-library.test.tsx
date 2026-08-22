@@ -7,6 +7,11 @@ import { I18nextProvider, initReactI18next } from 'react-i18next'
 import landing from '../../i18n/locales/en/landing.json'
 import panels from '../../i18n/locales/en/panels.json'
 import common from '../../i18n/locales/en/shared.json'
+import {
+  clearLandingPageSnapshot,
+  markLandingPageChatReturn,
+  writeLandingPageSnapshot,
+} from '@/lib/landingPageSnapshot'
 
 let createRoot: typeof CreateRoot
 let LandingPage: () => ReactNode
@@ -43,6 +48,7 @@ Object.assign(globalThis, {
   getComputedStyle: domWindow.getComputedStyle.bind(domWindow),
   requestAnimationFrame: domWindow.requestAnimationFrame.bind(domWindow),
   cancelAnimationFrame: domWindow.cancelAnimationFrame.bind(domWindow),
+  localStorage: domWindow.localStorage,
 })
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: domWindow.navigator })
 
@@ -98,13 +104,14 @@ type StoreState = {
   setEditingCharacterId: MockFn
   setSetting: MockFn
   logout: MockFn
-  user: { username: string } | null
+  user: { username: string; id: string } | null
   wallpaper: { global?: { image_id?: string | null } }
   profiles: Array<{ id: string; is_default?: boolean; name: string }>
   activeProfileId: string | null
   activeLoomPresetId: string | null
   loomRegistry: Record<string, { name: string }>
   characters: Array<{ id: string; image_id?: string | null }>
+  extensions: Array<{ identifier: string; enabled: boolean; has_frontend: boolean }>
   landingRecentChats: null
   setLandingRecentChats: MockFn
   updateCharacter: MockFn
@@ -183,13 +190,14 @@ function createStoreState(enabled = true): StoreState {
     setEditingCharacterId: jest.fn(),
     setSetting,
     logout: jest.fn(),
-    user: { username: 'test-user' },
+    user: { username: 'test-user', id: 'test-user-id' },
     wallpaper: { global: null },
     profiles: [],
     activeProfileId: null,
     activeLoomPresetId: null,
     loomRegistry: {},
     characters: [],
+    extensions: [],
     landingRecentChats: null,
     setLandingRecentChats: jest.fn(),
     updateCharacter: jest.fn(),
@@ -237,7 +245,10 @@ mock.module('@/ws/events', () => ({ EventType: { CHAT_DELETED: 'chat-deleted' } 
 mock.module('@/hooks/useScrollGate', () => ({ useScrollGate: jest.fn() }))
 mock.module('@/hooks/useCharacterTheme', () => ({ warmCharacterPalette: jest.fn() }))
 mock.module('@/hooks/useLongPress', () => ({ useLongPress: () => ({}) }))
-mock.module('@/lib/imageDecodeCache', () => ({ prefetchImages: jest.fn() }))
+mock.module('@/lib/imageDecodeCache', () => ({
+  holdImagesForTransition: jest.fn(),
+  prefetchImages: jest.fn(),
+}))
 mock.module('@/lib/uiScale', () => ({
   measureLayoutHeight: () => 0,
   renderedPxToLayoutPx: (value: number) => value,
@@ -277,7 +288,7 @@ mock.module('@/components/shared/SortControl', () => ({
   ),
 }))
 mock.module('@/components/shared/LazyImage', () => ({
-  default: ({ src, alt, fallback }: { src: string; alt: string; fallback?: ReactNode }) => src ? <img src={src} alt={alt} /> : fallback ?? null,
+  default: ({ src, alt, fallback, loading }: { src: string; alt: string; fallback?: ReactNode; loading?: 'eager' | 'lazy' }) => src ? <img src={src} alt={alt} loading={loading} /> : fallback ?? null,
 }))
 mock.module('@/components/shared/FormComponents', () => ({
   Button: ({ children, onClick, disabled, title, className }: { children?: ReactNode; onClick?: () => void; disabled?: boolean; title?: string; className?: string }) => (
@@ -313,8 +324,21 @@ mock.module('lucide-react', () => ({
 }))
 
 const MotionDiv = forwardRef<HTMLDivElement, Record<string, any>>((props, ref) => {
-  const { initial: _initial, animate: _animate, exit: _exit, variants: _variants, transition: _transition, ...domProps } = props
-  return <div ref={ref} {...domProps} />
+  const {
+    initial,
+    animate,
+    exit: _exit,
+    variants: _variants,
+    transition: _transition,
+    onAnimationComplete: _onAnimationComplete,
+    ...domProps
+  } = props
+  return <div
+    ref={ref}
+    data-motion-initial={initial === false ? 'false' : JSON.stringify(initial)}
+    data-motion-animate={typeof animate === 'string' ? animate : JSON.stringify(animate)}
+    {...domProps}
+  />
 })
 mock.module('motion/react', () => ({
   motion: { div: MotionDiv },
@@ -441,6 +465,12 @@ function charactersMount(host: HTMLDivElement) {
 }
 
 function appendReadySuiteRoot(host: HTMLDivElement) {
+  if (!storeState.extensions.some((extension) => extension.identifier === 'lumiverse_suite')) {
+    storeState = {
+      ...storeState,
+      extensions: [{ identifier: 'lumiverse_suite', enabled: true, has_frontend: true }],
+    }
+  }
   const root = document.createElement('section')
   root.dataset.homepageCharacterLibraryRoot = 'true'
   root.dataset.homepageCharacterLibraryReady = 'true'
@@ -498,6 +528,8 @@ afterEach(async () => {
     for (const { root } of roots) root.unmount()
   })
   document.body.replaceChildren()
+  domWindow.localStorage.clear()
+  clearLandingPageSnapshot()
   TestObserverInstances.splice(0)
   listSummaries.mockReset()
   listTags.mockReset()
@@ -620,6 +652,180 @@ describe('LandingPage character library', () => {
     expect(listRecentGrouped.mock.calls[1]?.[0]?.limit).toBe(listRecentGrouped.mock.calls[0]?.[0]?.limit)
   })
 
+  test('restores loaded Chats without replaying card entry animation while refreshing', async () => {
+    storeState = createStoreState(false)
+    listRecentGrouped.mockResolvedValueOnce(page([recentChat('character-1', 'Ava')]))
+    listTags.mockResolvedValue([])
+    getHomepagePreview.mockResolvedValue(null)
+
+    const firstHost = await mountLanding()
+    await flush()
+    expect(firstHost.querySelector('.cardEntry')).not.toBeNull()
+    expect(firstHost.querySelector('.cardShine')).not.toBeNull()
+
+    const scroller = firstHost.querySelector<HTMLElement>('[data-component="LandingPage"]')!
+    scroller.scrollTop = 420
+    const refresh = createDeferred<SummaryPage>()
+    listRecentGrouped.mockReturnValueOnce(refresh.promise)
+
+    await click(buttonMatching(firstHost, /Ava/)!)
+    const storedSnapshot = JSON.parse(domWindow.sessionStorage.getItem('__lumiverse_landing_page_snapshot_v1') || '{}')
+    expect(storedSnapshot.snapshot?.imageUrls).toEqual(['/avatar.png'])
+
+    const mounted = mountedRoots.find((entry) => entry.host === firstHost)!
+    mountedRoots.splice(mountedRoots.indexOf(mounted), 1)
+    await act(async () => mounted.root.unmount())
+    firstHost.remove()
+
+    const restoredHost = await mountLanding()
+
+    expect(restoredHost.textContent).toContain('Ava')
+    expect(restoredHost.querySelector('img[alt="Ava"]')?.getAttribute('loading')).toBe('eager')
+    expect(restoredHost.querySelector('.cardEntry')).toBeNull()
+    expect(restoredHost.querySelector('[data-entry-mode="chat-return"]')?.classList.contains('routeEntering')).toBe(true)
+    expect(restoredHost.querySelector('[data-entry-mode="chat-return"]')?.getAttribute('data-motion-initial')).toBe('{"opacity":0,"y":10,"scale":0.985}')
+    expect(restoredHost.querySelector('[data-entry-mode="chat-return"]')?.getAttribute('data-motion-animate')).toBe('{"opacity":1,"y":0,"scale":1}')
+    expect(restoredHost.querySelector<HTMLElement>('[data-component="LandingPage"]')?.scrollTop).toBe(420)
+    expect(listRecentGrouped).toHaveBeenCalledTimes(2)
+
+    await settleDeferred(refresh, page([recentChat('character-1', 'Ava')]))
+  })
+
+  test('recovers the landing snapshot after refreshing inside a chat route', async () => {
+    storeState = createStoreState(false)
+    const ava = { ...recentChat('character-1', 'Ava'), character_avatar_path: null }
+    domWindow.sessionStorage.setItem('__lumiverse_landing_page_snapshot_v1', JSON.stringify({
+      version: 1,
+      snapshot: {
+        userId: 'test-user-id',
+        items: [ava],
+        total: 1,
+        scrollTop: 240,
+        requestedTab: 'chats',
+        searchQuery: '',
+        sortField: 'recent',
+        sortDirection: 'desc',
+        pageSize: 12,
+        galleryWidth: 'compact',
+        mainWidth: 960,
+        chatViewportHeight: 700,
+        viewportWidth: domWindow.innerWidth,
+        viewportHeight: domWindow.innerHeight,
+      },
+    }))
+    const refresh = createDeferred<SummaryPage>()
+    listRecentGrouped.mockReturnValue(refresh.promise)
+
+    const host = await mountLanding()
+
+    expect(host.textContent).toContain('Ava')
+    expect(host.querySelector('[data-entry-mode="chat-return"]')?.getAttribute('data-motion-initial')).toBe('{"opacity":0,"y":10,"scale":0.985}')
+    expect(host.querySelector('.cardEntry')).toBeNull()
+    expect(host.querySelector<HTMLElement>('[data-component="LandingPage"]')?.scrollTop).toBe(240)
+    expect(domWindow.sessionStorage.getItem('__lumiverse_landing_page_snapshot_v1')).toBeNull()
+
+    await settleDeferred(refresh, page([ava]))
+  })
+
+  test('restores the expanded gallery geometry instead of its default-width topology', async () => {
+    Object.defineProperty(domWindow, 'innerWidth', { configurable: true, value: 2200 })
+    storeState = {
+      ...createStoreState(false),
+      landingPageGalleryWidth: 'expanded',
+    }
+    const ava = { ...recentChat('character-1', 'Ava'), character_avatar_path: null }
+    writeLandingPageSnapshot({
+      userId: 'test-user-id',
+      items: [ava],
+      total: 1,
+      scrollTop: 0,
+      requestedTab: 'chats',
+      searchQuery: '',
+      sortField: 'recent',
+      sortDirection: 'desc',
+      pageSize: 27,
+      galleryWidth: 'expanded',
+      mainWidth: 2000,
+      chatViewportHeight: 700,
+      viewportWidth: 2200,
+      viewportHeight: domWindow.innerHeight,
+    })
+    const refresh = createDeferred<SummaryPage>()
+    listRecentGrouped.mockReturnValue(refresh.promise)
+
+    const host = await mountLanding()
+
+    expect(host.querySelector('[data-component="LandingPageCharacters"]')?.classList.contains('contentExpanded')).toBe(true)
+    expect(host.querySelector('[data-component="LandingPageChats"]')?.getAttribute('data-layout-columns')).toBe('9')
+    expect(listRecentGrouped.mock.calls[0]?.[0]?.limit).toBe(36)
+
+    await settleDeferred(refresh, page([ava]))
+  })
+
+  test('uses the last expanded card presentation for the cold-load skeleton', async () => {
+    Object.defineProperty(domWindow, 'innerWidth', { configurable: true, value: 2200 })
+    storeState = {
+      ...createStoreState(false),
+      settingsLoaded: false,
+    }
+    domWindow.localStorage.setItem('__lumiverse_landing_hint', JSON.stringify({
+      layout: 'cards',
+      count: 36,
+      galleryWidth: 'expanded',
+      mainWidth: 2000,
+      chatViewportHeight: 700,
+      viewportWidth: 2200,
+      viewportHeight: domWindow.innerHeight,
+    }))
+
+    const host = await mountLanding()
+
+    expect(host.querySelector('[data-component="LandingPageCharacters"]')?.classList.contains('contentExpanded')).toBe(true)
+    expect(host.querySelectorAll('.skeletonCard')).toHaveLength(36)
+    expect(host.querySelector('.gridCards')).not.toBeNull()
+    expect(host.querySelector('.listSkeleton')).toBeNull()
+    expect(host.querySelector('[data-entry-mode="fresh"]')?.classList.contains('routeEntering')).toBe(false)
+    expect(host.querySelector('[data-entry-mode="fresh"]')?.getAttribute('data-motion-initial')).toBe('{"opacity":0}')
+    expect(host.querySelector('[data-entry-mode="fresh"]')?.getAttribute('data-motion-animate')).toBe('{"opacity":1}')
+    expect(listRecentGrouped).not.toHaveBeenCalled()
+  })
+
+  test('uses the last compact-list presentation for the cold-load skeleton', async () => {
+    storeState = {
+      ...createStoreState(false),
+      settingsLoaded: false,
+    }
+    domWindow.localStorage.setItem('__lumiverse_landing_hint', JSON.stringify({
+      layout: 'compact',
+      count: 8,
+      galleryWidth: 'compact',
+      mainWidth: 960,
+      chatViewportHeight: 700,
+      viewportWidth: domWindow.innerWidth,
+      viewportHeight: domWindow.innerHeight,
+    }))
+
+    const host = await mountLanding()
+
+    expect(host.querySelectorAll('.listSkeleton')).toHaveLength(8)
+    expect(host.querySelector('.compactList')).not.toBeNull()
+    expect(host.querySelector('.skeletonCard')).toBeNull()
+    expect(listRecentGrouped).not.toHaveBeenCalled()
+  })
+
+  test('uses the normal loading reveal for a chat-to-home navigation without a snapshot', async () => {
+    storeState = createStoreState(false)
+    listRecentGrouped.mockResolvedValue(page([recentChat('character-1', 'Ava')]))
+    markLandingPageChatReturn()
+
+    const host = await mountLanding()
+    await flush()
+
+    expect(host.querySelector('[data-entry-mode="cold-return"]')?.getAttribute('data-motion-initial')).toBe('{"opacity":0}')
+    expect(host.querySelector('[data-entry-mode="cold-return"]')?.getAttribute('data-motion-animate')).toBe('{"opacity":1}')
+    expect(host.querySelector('.cardEntry')).not.toBeNull()
+  })
+
   test('keeps the recent-chat gallery compact by default and can expand it', async () => {
     storeState = createStoreState(false)
     listRecentGrouped.mockResolvedValue(page([]))
@@ -639,7 +845,7 @@ describe('LandingPage character library', () => {
     expect(host.querySelector<HTMLButtonElement>('[aria-label="Use compact gallery width"]')?.getAttribute('aria-pressed')).toBe('true')
   })
 
-  test('shows only native Chats before and after the suite surface is disabled', async () => {
+  test('shows native Chats without tab chrome before and after the suite surface is disabled', async () => {
     storeState = createStoreState(false)
     listRecentGrouped.mockResolvedValue(page([]))
     listTags.mockResolvedValue([])
@@ -648,9 +854,11 @@ describe('LandingPage character library', () => {
     const host = await mountLanding()
     await flush()
 
-    expect(host.querySelectorAll('button[role="tab"]')).toHaveLength(1)
+    expect(host.querySelectorAll('button[role="tab"]')).toHaveLength(0)
     expect(tab(host, 'Characters')).toBeUndefined()
-    expect(tab(host, 'Chats')?.getAttribute('aria-selected')).toBe('true')
+    expect(tab(host, 'Chats')).toBeUndefined()
+    expect(host.querySelector('[data-component="LandingPageChatsPanel"]')?.hasAttribute('role')).toBe(false)
+    expect(host.querySelector('[data-component="LandingPageChatsPanel"]')?.hasAttribute('aria-labelledby')).toBe(false)
     expect(host.textContent).toContain('No recent chats')
     expect(listSummaries).not.toHaveBeenCalled()
 
@@ -659,9 +867,9 @@ describe('LandingPage character library', () => {
     root.remove()
     await flush()
 
-    expect(host.querySelectorAll('button[role="tab"]')).toHaveLength(1)
+    expect(host.querySelectorAll('button[role="tab"]')).toHaveLength(0)
     expect(tab(host, 'Characters')).toBeUndefined()
-    expect(tab(host, 'Chats')?.getAttribute('aria-selected')).toBe('true')
+    expect(tab(host, 'Chats')).toBeUndefined()
     expect(host.textContent).toContain('No recent chats')
   })
 
@@ -674,7 +882,7 @@ describe('LandingPage character library', () => {
     const host = await mountLanding()
     await flush()
 
-    expect(tab(host, 'Chats')?.getAttribute('aria-selected')).toBe('true')
+    expect(tab(host, 'Chats')).toBeUndefined()
     expect(host.textContent).toContain('No recent chats')
     expect(listSummaries).not.toHaveBeenCalled()
 
@@ -726,7 +934,8 @@ describe('LandingPage character library', () => {
     await flush()
 
     expect(tab(host, 'Characters')).toBeUndefined()
-    expect(tab(host, 'Chats')?.getAttribute('aria-selected')).toBe('true')
+    expect(tab(host, 'Chats')).toBeUndefined()
+    expect(host.querySelector('[data-component="LandingPageChatsPanel"]')?.hasAttribute('role')).toBe(false)
     expect(host.textContent).toContain('No recent chats')
     expect(listSummaries).not.toHaveBeenCalled()
   })
@@ -749,7 +958,7 @@ describe('LandingPage character library', () => {
 
     firstRoot.remove()
     await flush()
-    expect(tab(host, 'Chats')?.getAttribute('aria-selected')).toBe('true')
+    expect(tab(host, 'Chats')).toBeUndefined()
     expect(host.textContent).toContain('No recent chats')
 
     appendReadySuiteRoot(host)
