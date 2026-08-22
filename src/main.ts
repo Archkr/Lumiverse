@@ -79,8 +79,39 @@ if (pollinationsKeysMigrated > 0) {
 // Chat-head generation state is intentionally ephemeral. Clear any retained
 // in-memory pool state during startup so clients never resurrect stale heads
 // after a restart or hot-reload.
-const { clearAllPoolEntries } = await import("./services/generation-pool.service");
+const { clearAllPoolEntries, getPoolEntry } = await import("./services/generation-pool.service");
 clearAllPoolEntries();
+
+// Wire the edit-and-send dispatcher's liveness probe to the generation pool so
+// runtime reconciliation can distinguish genuinely finished generations from
+// crashed ones instead of trusting in-memory state alone.
+try {
+  const { setEditAndSendGenerationActiveCheck } = await import("./services/edit-and-send-dispatcher.service");
+  setEditAndSendGenerationActiveCheck((_userId, generationId) => {
+    const entry = getPoolEntry(generationId);
+    return !!entry && entry.status !== "completed" && entry.status !== "stopped" && entry.status !== "error";
+  });
+} catch (err) {
+  console.error("[startup] edit-and-send generation active check hook failed:", err);
+}
+
+try {
+  const { recoverEditAndSendOutbox } = await import("./services/edit-and-send-dispatcher.service");
+  const recovered = await recoverEditAndSendOutbox();
+  if (recovered > 0) {
+    console.log(`[startup] Recovered ${recovered} edit-and-send outbox item(s)`);
+  }
+} catch (err) {
+  console.error("[startup] edit-and-send outbox recovery failed:", err);
+}
+
+try {
+  const { providerRegistry } = await import("./spindle/provider-registry");
+  const { getSecret } = await import("./services/secrets.service");
+  providerRegistry.configure({ getSecret });
+} catch (err) {
+  console.error("[startup] provider registry secret hook failed:", err);
+}
 
 // Dynamic import: auth modules call getDb() at module level, so must load after initDatabase()
 const { seedOwner, backfillUserIds, backfillDefaultPresets, getFirstUserId } = await import("./auth/seed");

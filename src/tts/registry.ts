@@ -48,6 +48,9 @@ function ttsDenied(record: RegisteredProvider): boolean {
 }
 
 function visibleTtsRecords(userId?: string): RegisteredProvider[] {
+  // Absent userId resolves SYSTEM-scope providers ONLY — never an all-scopes
+  // sweep across other users' records. Every production caller passes the
+  // authenticated user id explicitly; tests may pass "system" semantics.
   const scopes: readonly (`user:${string}` | "system")[] = userId
     ? [`user:${userId}`, "system"]
     : ["system"];
@@ -84,6 +87,9 @@ class RegistryTtsAdapter implements TtsProvider {
 
   async synthesize(_apiKey: string, _apiUrl: string, request: TtsRequest): Promise<TtsResponse> {
     try {
+      // The caller's real scope, never the provider's own scope: passing the
+      // record's effectiveScope here would let any caller slip past the
+      // registry's cross-scope isolation check.
       const result = await providerRegistry.invoke(this.record.key, request, {
         callerScope: this.callerScope(),
       });

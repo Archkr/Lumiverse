@@ -96,6 +96,25 @@ describe("provider registry identity", () => {
       registry.invoke(key("operator:op-1", "inst-op", "sidecar", "tools"), {}, { callerScope: "user:alice" }),
     ).rejects.toThrow(/isolated/);
   });
+
+  test("requires an explicit callerScope and never defaults to the provider scope", async () => {
+    const registry = new ProviderRegistry();
+    registry.attachWorker("inst-a", () => undefined);
+    registry.register(
+      { kind: "embedding", id: "foo" },
+      { installationId: "inst-a", installScope: "user", authenticatedSubject: "alice" },
+    );
+
+    await expect(
+      registry.invoke(key("user:alice", "inst-a"), {} as never, undefined as never),
+    ).rejects.toThrow(/callerScope/);
+    await expect(
+      registry.invoke(key("user:alice", "inst-a"), {}, {} as never),
+    ).rejects.toThrow(/callerScope/);
+    await expect(
+      registry.invoke(key("user:alice", "inst-a"), {}, { callerScope: undefined as never }),
+    ).rejects.toThrow(/callerScope/);
+  });
 });
 
 describe("provider registry invocations", () => {

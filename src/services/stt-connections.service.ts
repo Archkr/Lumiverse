@@ -103,6 +103,9 @@ function registrySttProvider(record: RegisteredProvider): SttProviderInfo {
 }
 
 function visibleSttRecords(userId?: string): RegisteredProvider[] {
+  // Absent userId resolves SYSTEM-scope providers ONLY — never an all-scopes
+  // sweep across other users' records. Every production caller passes the
+  // authenticated user id explicitly; tests may pass "system" semantics.
   const scopes: readonly (`user:${string}` | "system")[] = userId
     ? [`user:${userId}` as const, "system" as const]
     : ["system" as const];
@@ -198,6 +201,44 @@ export function revokeSttRegistryProvider(
     });
   }
   return removed;
+}
+
+export type HostSttEngine = Omit<ProviderDescriptor, "kind" | "id"> & Partial<HostScopeContext> & {
+  installationId?: string;
+};
+
+function hostScopeFromSttEngine(engine: HostSttEngine): HostScopeContext & { installationId: string } {
+  const installationId = typeof engine.installationId === "string" && engine.installationId.trim()
+    ? engine.installationId.trim()
+    : "host";
+  const installScope = engine.installScope === "user" || engine.installScope === "operator" || engine.installScope === "system"
+    ? engine.installScope
+    : "system";
+  return {
+    installationId,
+    installScope,
+    installedByUserId: engine.installedByUserId,
+    authenticatedSubject: engine.authenticatedSubject,
+  };
+}
+
+export function registerSttEngine(id: string, engine: HostSttEngine): () => void {
+  const host = hostScopeFromSttEngine(engine);
+  providerRegistry.register({
+    kind: "stt",
+    id,
+    description: engine.description ?? engine,
+    broker: engine.broker,
+    generation: engine.generation,
+    revision: engine.revision,
+    owner: engine.owner,
+  }, host);
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    providerRegistry.unregister({ kind: "stt", id }, host);
+  };
 }
 
 export function resolveSttApiUrl(profile: { provider: string; api_url?: string | null }, userId?: string): string {

@@ -64,6 +64,8 @@ export interface MinimalMessageDefaultProps {
   isContextAnchor: boolean
   handleEdit: () => void
   handleSaveEdit: () => void
+  handleEditAndSend: () => void
+  editAndSendPending: boolean
   handleCancelEdit: () => void
   handleDelete: () => void
   handleToggleHidden: () => void
@@ -180,8 +182,8 @@ export default function MinimalMessageDefault({
   isEditing, editContent, setEditContent, editReasoning, setEditReasoning, showReasoningEditor,
   isUser, isActivelyStreaming, displayContent, reasoning, reasoningDuration, reasoningStartedAt,
   tokenCount, generationMetrics, avatarUrl, fullAvatarUrl, displayAvatarUrl, displayName, macroUserName, isHidden, isContextAnchor,
-  handleEdit, handleSaveEdit, handleCancelEdit, handleDelete, handleToggleHidden, handleToggleContextAnchor,
-  handleFork, handlePromptBreakdown,
+  handleEdit, handleSaveEdit, handleEditAndSend, handleCancelEdit, handleDelete, handleToggleHidden, handleToggleContextAnchor,
+  handleFork, handlePromptBreakdown, editAndSendPending,
 }: MinimalMessageDefaultProps) {
   const { t } = useTranslation('chat')
   const { t: tc } = useTranslation('common')
@@ -431,6 +433,9 @@ export default function MinimalMessageDefault({
             onChangeContent={setEditContent}
             onSave={handleSaveEdit}
             onCancel={handleCancelEdit}
+            onEditAndSend={handleEditAndSend}
+            messageId={message.id}
+            editAndSendDisabled={editAndSendPending}
             editReasoning={showReasoningEditor ? editReasoning : undefined}
             onChangeReasoning={showReasoningEditor ? setEditReasoning : undefined}
           />
