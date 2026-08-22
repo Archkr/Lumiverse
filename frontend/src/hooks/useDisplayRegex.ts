@@ -65,6 +65,8 @@ interface DisplayPreprocessBody {
 interface DisplayPreprocessOutcome {
   content: string
   ok: boolean
+  touchedVars?: readonly string[]
+  cacheable?: boolean
 }
 
 interface PendingDisplayPreprocess {
@@ -238,7 +240,7 @@ function enqueueDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): 
   })
 }
 
-function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<DisplayPreprocessOutcome> {
+export function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<DisplayPreprocessOutcome> {
   if (isDisplayChatOwned(chatId)) {
     const resolver = getDisplayResolverForChat(chatId)
     if (resolver) {
@@ -256,7 +258,16 @@ function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Pr
           },
         })
         .then((local) => {
-          if (local) return { content: local.content, ok: true }
+          if (local) {
+            return {
+              content: local.content,
+              ok: true,
+              ...(Array.isArray(local.touchedVars) && local.touchedVars.length > 0
+                ? { touchedVars: local.touchedVars }
+                : {}),
+              cacheable: local.cacheable !== false,
+            }
+          }
           console.error(`[display] resolver.resolveBody returned null for owned chat=${chatId}; showing raw (no backend fallback)`)
           return { content: body.rawContent, ok: false }
         })
@@ -333,8 +344,14 @@ function useDisplayPreprocessedState(
       })
         .then((next) => {
           if (displayPreprocessCache.get(key)?.promise === assignedPromise) {
-            if (next.ok) {
-              displayPreprocessCache.set(key, { value: next.content, messageId: messageIdForEntry })
+            if (next.ok && next.cacheable !== false) {
+              displayPreprocessCache.set(key, {
+                value: next.content,
+                messageId: messageIdForEntry,
+                ...(next.touchedVars && next.touchedVars.length > 0
+                  ? { touchedVars: new Set(next.touchedVars) }
+                  : {}),
+              })
               if (displayPreprocessCache.size > DISPLAY_PREPROCESS_CACHE_MAX) {
                 const drop = displayPreprocessCache.size - DISPLAY_PREPROCESS_CACHE_MAX
                 let i = 0
@@ -521,6 +538,30 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   }
   for (const messageId of affectedMessages) bumpPerMessageCv(messageId)
   bumpGlobalCv()
+}
+
+export function seedDisplayPreprocessEntryForTests(entry: {
+  key: string
+  value: string
+  messageId?: string
+  touchedVars?: Iterable<string>
+}): void {
+  displayPreprocessCache.set(entry.key, {
+    value: entry.value,
+    ...(entry.messageId ? { messageId: entry.messageId } : {}),
+    ...(entry.touchedVars ? { touchedVars: new Set(entry.touchedVars) } : {}),
+  })
+}
+
+export function getDisplayPreprocessCacheStatsForTests(): { size: number } {
+  return { size: displayPreprocessCache.size }
+}
+
+export function resetDisplayRegexCachesForTests(): void {
+  displayPreprocessCache.clear()
+  displayRegexContentCache.clear()
+  displayRegexResolutionCache.clear()
+  displayRegexPerMessageCv.clear()
 }
 
 async function resolveMacrosBatchChunked(
