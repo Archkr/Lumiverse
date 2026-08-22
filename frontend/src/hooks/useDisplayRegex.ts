@@ -78,6 +78,19 @@ const displayRegexResolutionCache = new Map<string, DisplayRegexCacheEntry>()
 const displayRegexContentCache = new Map<string, DisplayRegexContentCacheEntry>()
 const displayPreprocessCache = new Map<string, { value?: string; promise?: Promise<DisplayPreprocessOutcome>; touchedVars?: ReadonlySet<string>; messageId?: string }>()
 const DISPLAY_PREPROCESS_CACHE_MAX = 500
+const DISPLAY_REGEX_CONTENT_CACHE_MAX = 300
+
+// FIFO eviction for displayRegexContentCache; streaming inserts one key per
+// chunk with full content embedded, so the map needs a hard size bound.
+function evictDisplayRegexContentCacheOverflow(): void {
+  if (displayRegexContentCache.size <= DISPLAY_REGEX_CONTENT_CACHE_MAX) return
+  const drop = displayRegexContentCache.size - DISPLAY_REGEX_CONTENT_CACHE_MAX
+  let i = 0
+  for (const k of displayRegexContentCache.keys()) {
+    if (i++ >= drop) break
+    displayRegexContentCache.delete(k)
+  }
+}
 const displayRegexCacheListeners = new Set<() => void>()
 let displayRegexGlobalCv = 0
 const displayRegexPerMessageCv = new Map<string, number>()
@@ -557,6 +570,24 @@ export function getDisplayPreprocessCacheStatsForTests(): { size: number } {
   return { size: displayPreprocessCache.size }
 }
 
+export function seedDisplayContentEntryForTests(entry: {
+  key: string
+  value: string
+  messageId?: string
+  touchedVars?: Iterable<string>
+}): void {
+  displayRegexContentCache.set(entry.key, {
+    value: entry.value,
+    ...(entry.messageId ? { messageId: entry.messageId } : {}),
+    ...(entry.touchedVars ? { touchedVars: new Set(entry.touchedVars) } : {}),
+  })
+  evictDisplayRegexContentCacheOverflow()
+}
+
+export function getDisplayContentCacheStatsForTests(): { size: number; hasKey(key: string): boolean } {
+  return { size: displayRegexContentCache.size, hasKey: (k) => displayRegexContentCache.has(k) }
+}
+
 export function resetDisplayRegexCachesForTests(): void {
   displayPreprocessCache.clear()
   displayRegexContentCache.clear()
@@ -983,6 +1014,7 @@ export function useDisplayRegex(
                 ...(touchedVars ? { touchedVars } : {}),
                 ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
               })
+              evictDisplayRegexContentCacheOverflow()
             } else {
               displayRegexContentCache.delete(contentCacheKey)
             }

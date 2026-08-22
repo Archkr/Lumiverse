@@ -146,3 +146,21 @@ describe('displayPreprocessCache invalidation semantics', () => {
     }
   })
 })
+
+describe('displayRegexContentCache cap', () => {
+  beforeEach(async () => {
+    const m = await loadMod()
+    m.resetDisplayRegexCachesForTests()
+  })
+
+  test('content cache never exceeds the cap', async () => {
+    const { seedDisplayContentEntryForTests, getDisplayContentCacheStatsForTests } = await loadMod()
+    for (let i = 0; i < 350; i++) {
+      seedDisplayContentEntryForTests({ key: `ck${i}`, value: `v${i}`, messageId: `m${i}` })
+    }
+    expect(getDisplayContentCacheStatsForTests().size).toBeLessThanOrEqual(300)
+    // Oldest entries evicted, newest retained
+    expect(getDisplayContentCacheStatsForTests().hasKey('ck0')).toBe(false)
+    expect(getDisplayContentCacheStatsForTests().hasKey('ck349')).toBe(true)
+  })
+})
