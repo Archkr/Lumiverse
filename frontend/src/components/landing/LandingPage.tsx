@@ -1523,7 +1523,10 @@ function LandingPageNative() {
 
       if (item.is_group) {
         const groupCharacterIds = item.group_character_ids ?? []
-        if (item.chat_count > 1 && groupCharacterIds.length > 1) {
+        // Converted chats can remain one-member groups. Their forks are still
+        // distinct chats, so expose the picker instead of navigating straight
+        // to the newest fork and making the parent lineage unreachable.
+        if (item.chat_count > 1 && groupCharacterIds.length > 0) {
           openModal('manageChats', {
             characterId: item.character_id,
             characterName: getRecentChatDisplayName(item, t),

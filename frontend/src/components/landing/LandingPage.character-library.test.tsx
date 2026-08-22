@@ -389,6 +389,18 @@ function recentChat(id: string, name: string) {
   }
 }
 
+function convertedGroupChat(id: string, name: string) {
+  return {
+    ...recentChat(id, name),
+    latest_chat_id: `group-${id}-branch`,
+    latest_chat_name: `${name} branch`,
+    is_group: true,
+    chat_count: 2,
+    group_character_ids: [id],
+    group_name: `${name} group`,
+  }
+}
+
 function page(data: Summary[], total = data.length): SummaryPage {
   return { data, total }
 }
@@ -506,6 +518,26 @@ afterEach(async () => {
 })
 
 describe('LandingPage character library', () => {
+  test('opens chat history for forked one-member converted groups', async () => {
+    storeState = createStoreState(false)
+    listRecentGrouped.mockResolvedValue(page([convertedGroupChat('character-1', 'Ava')]))
+    listTags.mockResolvedValue([])
+    getHomepagePreview.mockResolvedValue(null)
+
+    const host = await mountLanding()
+    await flush()
+
+    await click(buttonMatching(host, /Ava group/)!)
+
+    expect(storeState.openModal).toHaveBeenCalledWith('manageChats', {
+      characterId: 'character-1',
+      characterName: 'Ava group',
+      isGroupChat: true,
+      groupCharacterIds: ['character-1'],
+    })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   test('uses the landing scroller for resized gallery pagination and de-duplicates observer entries', async () => {
     storeState = createStoreState(false)
     const nextPage = createDeferred<SummaryPage>()

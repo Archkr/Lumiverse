@@ -63,7 +63,11 @@ export default function ManageChatsModal() {
   const activeChatId = useStore((s) => s.activeChatId)
 
   const { characterId, characterName, isGroupChat = false, groupCharacterIds = EMPTY_GROUP_CHARACTER_IDS } = modalProps
-  const isGroupContext = isGroupChat && groupCharacterIds.length > 1
+  // A solo chat becomes a real group-scoped chat as soon as it is converted,
+  // before the user adds another member. Keep that one-member state on the
+  // group endpoint: the solo endpoint deliberately excludes group metadata,
+  // which otherwise makes both sides of a fork appear to vanish here.
+  const isGroupContext = isGroupChat && groupCharacterIds.length > 0
 
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [loading, setLoading] = useState(true)
