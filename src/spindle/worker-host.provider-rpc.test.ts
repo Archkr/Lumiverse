@@ -80,11 +80,25 @@ function extensionInfo(id: string, scope: "user" | "operator", userId: string | 
   return {
     id,
     identifier: id,
+    name: id,
+    version: "0.0.0",
+    author: "",
+    description: "",
+    github: "",
+    homepage: "",
+    permissions: [],
+    granted_permissions: [],
+    enabled: true,
+    installed_at: 0,
+    updated_at: 0,
+    has_frontend: false,
+    has_backend: false,
+    status: "stopped",
     metadata: {
       install_scope: scope,
       installed_by_user_id: userId,
     },
-  } as ExtensionInfo;
+  };
 }
 
 function attachRuntime(host: WorkerHost): unknown[] {
