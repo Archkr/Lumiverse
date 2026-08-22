@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  PROVIDER_REQUEST_MAX_BYTES,
   ProviderRegistry,
+  measureJsonBytes,
   parseExtensionSecretKey,
   type BrokerRequest,
   type ProviderHostToWorker,
@@ -20,6 +22,57 @@ function brokerRegistry(overrides: Partial<ConstructorParameters<typeof Provider
 }
 
 describe("provider broker security", () => {
+  test("byte accounting includes raw and nested binary payloads", () => {
+    const bytes = 10 * 1024 * 1024;
+    expect(measureJsonBytes(new ArrayBuffer(bytes))).toBeGreaterThan(bytes);
+    expect(measureJsonBytes({ body: new ArrayBuffer(bytes) })).toBeGreaterThan(bytes);
+    expect(measureJsonBytes(new Uint8Array(bytes))).toBeGreaterThan(bytes);
+    expect(() => {
+      const { registry } = brokerRegistry();
+      registry.prepareBroker({
+        kind: "tts",
+        url: "https://provider.test/tts",
+        body: new ArrayBuffer(PROVIDER_REQUEST_MAX_BYTES + 1),
+        correlationId: "oversized-binary",
+      }, { installationId: "inst-a", installScope: "system" });
+    }).toThrow(/exceeds/);
+  });
+
+  test("reads broker responses through a hard streaming byte limit", async () => {
+    let sent = 0;
+    const chunk = new Uint8Array(700_000).fill(65);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= 1_400_000) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+        sent += chunk.byteLength;
+      },
+    });
+    const { registry } = brokerRegistry({
+      fetch: async () => new Response(stream, { headers: { "content-type": "text/plain" } }),
+    });
+    const result = await registry.completeBroker({
+      kind: "tts",
+      url: "https://provider.test/tts",
+      method: "POST",
+      headers: {},
+      body: null,
+      binary: false,
+      secretKey: null,
+      installationId: "inst-a",
+      authenticatedSubject: "",
+      correlationId: "large-response",
+      round: 1,
+      workerView: {},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/provider response exceeds/);
+    expect(sent).toBeLessThanOrEqual(1_400_000);
+  });
+
   test("parseExtensionSecretKey only accepts extension:<installationId>:<name>", () => {
     expect(parseExtensionSecretKey("extension:inst-a:embedding-key")).toEqual({
       installationId: "inst-a",

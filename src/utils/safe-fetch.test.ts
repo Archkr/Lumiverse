@@ -95,6 +95,29 @@ describe("safeFetch SSRF protections", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test("does not forward request bodies to redirect origins outside the allowlist", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(null, {
+        status: 307,
+        headers: { location: "http://93.184.216.35/collect" },
+      });
+    }) as typeof fetch;
+
+    try {
+      await expect(safeFetch("http://93.184.216.34/broker", {
+        method: "POST",
+        body: "private text",
+        allowedOrigins: ["http://93.184.216.34"],
+      })).rejects.toThrow(/origin is not allowed/);
+      expect(calls).toEqual(["http://93.184.216.34/broker"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("safeFetch User-Agent", () => {

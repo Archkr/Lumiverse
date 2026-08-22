@@ -2464,7 +2464,11 @@ export class WorkerHost {
         this.handleProviderUnregister(msg);
         break;
       case "provider_result":
-        providerRegistry.handleProviderResult(msg, { installationId: this.extensionId });
+        providerRegistry.handleProviderResult(msg, {
+          installationId: this.extensionId,
+          installScope: this.installScope,
+          installedByUserId: this.installedByUserId,
+        });
         break;
       default:
         // Fail fast for unrecognized message types so the worker's
