@@ -5,6 +5,7 @@
     "": {
       "name": "lumiverse-backend",
       "dependencies": {
+        "@asamuzakjp/css-color": "5.1.1",
         "@lancedb/lancedb": "0.37.1",
         "@lenml/tokenizer-claude": "^3.7.2",
         "@lenml/tokenizers": "^3.7.2",
