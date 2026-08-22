@@ -2,7 +2,7 @@
 
 Beyond `ctx.ui.mount()` for fixed mount points, the frontend context exposes registration APIs that let an extension customize UI the host already renders: decorate repeated DOM, override native React components, contribute settings tabs, and mount first-party host surfaces into extension-owned elements.
 
-All registrations are scoped to your extension installation and torn down automatically when your frontend unloads or reloads (each handle also exposes an explicit `destroy()`).
+All registrations are scoped to your extension installation and torn down automatically when your frontend unloads or reloads. Component-override and settings-tab handles additionally expose an explicit `destroy()`; `ctx.ui.registerDomDecorator()` returns a bare `() => void` cleanup function instead of a handle object.
 
 ## DOM decorators
 
@@ -185,7 +185,7 @@ Composer-adjacent placement is reachable through free mount points: `chat_compos
 
 There are two supported ways to extend the toolbar area:
 
-- **Input bar actions**: `ctx.ui.registerInputBarAction({ id, label, subtitle?, iconName?, placement: 'quick_toolbar', enabled })` adds a host-rendered button; `placement: 'quick_toolbar'` routes it into the QuickToolbar rail.
+- **Input bar actions**: `ctx.ui.registerInputBarAction({ id, label, subtitle?, iconSvg?, iconUrl?, enabled })` adds a host-rendered button. An action crosses into the QuickToolbar rail only when its `placement` is **unset** or equals `'input_bar.extras'` (the Extras popover — see [UI Placement > Input Bar Actions](ui-placement.md#input-bar-actions)), or when its contribution ID is one of the host's hardcoded `lumiverse_suite.*` action IDs. There is no `'quick_toolbar'` placement value; passing any other placement keeps the action out of the rail.
 - **Full workspace surface**: mount `quick_toolbar.workspace` into a `chat_top_dock` root. The host renders its QuickToolbar inside your root and participates in chat-top-dock negotiation: when the toolbar is docked (or a strip dock host is requested), the host stamps `data-dock-request="strip"` on your extension root so the dock column stays open as a stable host.
 
 Dock behavior attributes to be aware of when styling around the dock:

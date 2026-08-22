@@ -86,6 +86,7 @@ nav = [
     { "Theme Authoring" = "frontend-api/theme-authoring.md" },
   ] },
   { "Lifecycle" = "lifecycle.md" },
+  { "Upgrade Notes" = "UPGRADE-NOTES.md" },
   { "Examples" = [
     { "Overview" = "examples/index.md" },
     { "Minimal Backend" = "examples/minimal-backend.md" },

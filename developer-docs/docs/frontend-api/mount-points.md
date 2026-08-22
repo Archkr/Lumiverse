@@ -58,7 +58,7 @@ All 58 canonical mount points, grouped by surface:
 
 ### Message-level (8)
 
-These anchors are stamped **per rendered message** and carry a `data-spindle-scope` like `message:{id}:footer`. They exist on both the bubble and minimal message themes unless noted. Because messages are virtualized (destroyed and recreated on scroll), use [`ctx.ui.registerDomDecorator()`](host-surfaces.md#dom-decorators) rather than `ctx.ui.mount()` for these — decorators replay automatically onto recycled anchors.
+These anchors are stamped **per rendered message** and carry a `data-spindle-scope` like `message:{id}:bubble:footer` (bubble theme) or `message:{id}:minimal:footer` (minimal theme). They exist on both the bubble and minimal message themes unless noted. Because messages are virtualized (destroyed and recreated on scroll), use [`ctx.ui.registerDomDecorator()`](host-surfaces.md#dom-decorators) rather than `ctx.ui.mount()` for these — decorators replay automatically onto recycled anchors.
 
 | ID | Anchors to |
 |---|---|
