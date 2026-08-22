@@ -893,6 +893,8 @@ export class ProviderRegistry {
 
   private encodeBody(body: unknown, binary: boolean): BodyInit {
     if (body instanceof Uint8Array) {
+      // Always return a fresh ArrayBuffer-backed copy: BodyInit rejects
+      // SharedArrayBuffer-backed views.
       const copy = new Uint8Array(body.byteLength);
       copy.set(body);
       return copy;

@@ -3436,6 +3436,10 @@ export function editAndSend(
 
   const fingerprint = editAndSendFingerprint(input);
   const now = Date.now();
+  // Holder object: assignments made inside the transaction callback are not
+  // tracked by control-flow analysis on the bare `let`, which collapsed the
+  // post-transaction guard to `never`.
+  const branchRef: { current: CreatedChatBranch | null } = { current: null };
   let created: CreatedChatBranch | null = null;
   let editedCopy: Message | null = null;
 
@@ -3473,6 +3477,7 @@ export function editAndSend(
     const mode: EditAndSendMode = subsequentAssistant ? "swipe" : "normal";
 
     created = createChatBranchRows(userId, chat, branchAt);
+    branchRef.current = created;
     const editedMessageId = created.idMap.get(source.id);
     if (!editedMessageId) return { status: "not_found", error: "Failed to copy edited message" };
     const targetMessageId = subsequentAssistant
@@ -3576,12 +3581,11 @@ export function editAndSend(
     return { status: "ok", replayed: false, payload };
   });
 
-  const createdBranch = created as CreatedChatBranch | null;
-  if (outcome.status === "ok" && !outcome.replayed && createdBranch) {
-    emitCreatedChatBranch(userId, createdBranch);
+  if (outcome.status === "ok" && !outcome.replayed && branchRef.current) {
+    emitCreatedChatBranch(userId, branchRef.current);
     if (editedCopy) {
-      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: createdBranch.newChatId, message: editedCopy }, userId);
-      try { invalidateChatMemoryCache(createdBranch.newChatId); } catch { /* optional in tests */ }
+      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: branchRef.current.newChatId, message: editedCopy }, userId);
+      try { invalidateChatMemoryCache(branchRef.current.newChatId); } catch { /* optional in tests */ }
     }
   }
 

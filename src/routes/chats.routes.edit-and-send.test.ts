@@ -150,7 +150,7 @@ afterEach(() => {
 
 describe("POST /:chatId/edit-and-send", () => {
   test("commits a swipe branch then dispatches the durable generation identity", async () => {
-    const started: Array<StartEditAndSendGenerationInput> = [];
+    const started: StartEditAndSendGenerationInput[] = [];
     setEditAndSendStartGeneration(async (input) => {
       started.push(input);
       return { generationId: input.generationId, status: "streaming" };

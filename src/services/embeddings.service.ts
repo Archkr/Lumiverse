@@ -352,11 +352,6 @@ export interface EmbeddingConfigWithStatus extends EmbeddingConfig {
   fallbackProfileIds: string[];
 }
 
-/** Statused except provider_profiles secrets, resolved later by withEmbeddingSecretStatus. */
-type EmbeddingConfigPreStatus = Omit<EmbeddingConfigWithStatus, "provider_profiles"> & {
-  provider_profiles?: Partial<Record<EmbeddingProvider, EmbeddingProviderProfile>>;
-};
-
 export interface EmbeddingModelsPreviewInput {
   provider?: EmbeddingProvider;
   api_url?: string;
@@ -870,8 +865,8 @@ function normalizeConfig(input: any): EmbeddingConfig {
     : undefined;
   const vertex_project = normalizeOptionalString(input?.vertex_project);
 
-  const rawProfiles = Array.isArray(input?.connectionProfiles) ? input.connectionProfiles : [];
-  let connectionProfiles: EmbeddingConnectionProfile[] = rawProfiles
+  const rawProfiles: any[] = Array.isArray(input?.connectionProfiles) ? input.connectionProfiles : [];
+  let connectionProfiles = rawProfiles
     .filter((profile: unknown) => profile && typeof profile === "object")
     .map((profile: any) => stripProfileSecrets(profile));
 
@@ -2012,6 +2007,13 @@ function readRawEmbeddingConfig(userId: string): EmbeddingConfig {
   return cfg;
 }
 
+/** Config whose connection-profile status fields are resolved;
+ *  provider_profiles key status is applied separately by
+ *  withEmbeddingSecretStatus. */
+type EmbeddingConfigPreStatus = Omit<EmbeddingConfigWithStatus, "provider_profiles"> & {
+  provider_profiles?: EmbeddingConfig["provider_profiles"];
+};
+
 async function withEmbeddingSecretStatus(
   userId: string,
   config: EmbeddingConfigPreStatus,
@@ -2024,8 +2026,12 @@ async function withEmbeddingSecretStatus(
       { ...profile, has_api_key: await hasEmbeddingSecret(userId, provider as EmbeddingProvider) },
     ] as const),
   )) as Partial<Record<EmbeddingProvider, EmbeddingProviderProfileWithStatus>>;
-  const has_api_key = profilesWithStatus[config.provider]?.has_api_key
-    ?? await hasEmbeddingSecret(userId, config.provider);
+  // toConfigWithStatus already resolved has_api_key from the selected
+  // connection profile's secret; only fall back to provider-key lookups when
+  // that signal is absent (e.g. legacy configs without connection profiles).
+  const has_api_key = config.has_api_key
+    || profilesWithStatus[config.provider]?.has_api_key === true
+    || await hasEmbeddingSecret(userId, config.provider);
   return {
     ...config,
     has_api_key,
@@ -2150,10 +2156,10 @@ export async function updateEmbeddingConfig(
   }
 
   const current = readRawEmbeddingConfig(userId);
-  type IncomingProfile = EmbeddingConnectionProfile & { api_key?: string | null; hasSecret?: boolean };
-  const incomingProfiles: IncomingProfile[] | undefined = Array.isArray(input.connectionProfiles)
-    ? (input.connectionProfiles as IncomingProfile[]).map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
-    : undefined;
+  const incomingProfiles: Array<EmbeddingConnectionProfile & { api_key?: string | null; hasSecret?: boolean }> | undefined =
+    Array.isArray(input.connectionProfiles)
+      ? input.connectionProfiles.map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
+      : undefined;
   const patched = applyLegacyConnectionPatch(current, {
     ...current,
     ...input,

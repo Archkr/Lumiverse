@@ -60,8 +60,14 @@ app.post("/test", async (c) => {
     return c.json({ success: true, ...result, applied_dimensions: result.dimension });
   } catch (err: any) {
     const msg = err?.message || "Embedding test failed";
-    const status = /disabled|not configured/i.test(msg) ? 400 : 502;
-    return c.json({ error: msg }, status);
+    const code = typeof err?.code === "string" ? err.code : undefined;
+    const status = /disabled|not configured/i.test(msg)
+      ? 400
+      : code === embeddingsSvc.EMBEDDING_ERROR_CODES.PROVIDER_UNAVAILABLE
+        || code === embeddingsSvc.EMBEDDING_ERROR_CODES.FALLBACK_EXHAUSTED
+        ? 502
+        : 502;
+    return c.json(code ? { error: msg, code } : { error: msg }, status);
   }
 });
 

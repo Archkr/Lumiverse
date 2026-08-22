@@ -107,6 +107,7 @@ interface StartupSettings {
   drawerSettings?: unknown;
   spindleSettings?: unknown;
   connectionsOrder?: Partial<Record<"llm" | "imageGen" | "stt" | "tts", string[]>>;
+  activeProfileId?: string | null;
 }
 
 const LIST_LIMIT_CONNECTIONS = 100;
@@ -114,7 +115,7 @@ const LIST_LIMIT_PACKS_PERSONAS = 200;
 const LIST_LIMIT_REGEX = 1000;
 const LANDING_CHATS_DEFAULT_LIMIT = 12;
 const LANDING_CHATS_MAX_LIMIT = 100;
-const STARTUP_SETTINGS_KEYS = [
+export const STARTUP_SETTINGS_KEYS = [
   "favorites",
   "landingHiddenCharacterIds",
   "filterTab",
@@ -130,6 +131,7 @@ const STARTUP_SETTINGS_KEYS = [
   "drawerSettings",
   "spindleSettings",
   "connectionsOrder",
+  "activeProfileId",
 ] as const;
 
 /**
@@ -157,7 +159,7 @@ export function sanitizeConnectionsOrder(
   return sanitized;
 }
 
-function getStartupSettings(userId: string): StartupSettings {
+export function getStartupSettings(userId: string): StartupSettings {
   const rows = settingsSvc.getSettingsByKeys(userId, [...STARTUP_SETTINGS_KEYS]);
   const startupSettings: StartupSettings = {};
 
@@ -237,6 +239,15 @@ function getStartupSettings(userId: string): StartupSettings {
   const connectionsOrder = sanitizeConnectionsOrder(rows.get("connectionsOrder"));
   if (Object.keys(connectionsOrder).length > 0) {
     startupSettings.connectionsOrder = connectionsOrder;
+  }
+
+  if (rows.has("activeProfileId")) {
+    const activeProfileId = rows.get("activeProfileId");
+    if (typeof activeProfileId === "string" && activeProfileId.length > 0) {
+      startupSettings.activeProfileId = activeProfileId;
+    } else if (activeProfileId === null) {
+      startupSettings.activeProfileId = null;
+    }
   }
 
   return startupSettings;

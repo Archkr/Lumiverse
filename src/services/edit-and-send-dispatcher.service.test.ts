@@ -71,7 +71,7 @@ function insertMessage(overrides: Record<string, unknown> = {}): string {
   return id;
 }
 
-function insertOutbox(overrides: Record<string, unknown> = {}): string {
+function insertOutbox(overrides: Record<string, string | number | null> = {}): string {
   const id = typeof overrides.id === "string" ? overrides.id : crypto.randomUUID();
   const now = Date.now();
   getDb().query(
