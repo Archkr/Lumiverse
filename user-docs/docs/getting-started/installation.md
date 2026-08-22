@@ -10,7 +10,7 @@ Lumiverse runs on your own machine. It needs **Bun** (a fast JavaScript runtime)
 
 ## Requirements
 
-- **Bun** v1.3.13 or later (v1.4.0 or later on Windows) — [Install Bun](https://bun.sh) (the start scripts auto-install Bun if missing and auto-upgrade older versions to latest stable)
+- **Bun** v1.4.0 or later — [Install Bun](https://bun.sh) (the start scripts auto-install Bun if missing and auto-upgrade older versions to latest stable)
 - A modern web browser (Chrome, Firefox, Edge, Safari)
 - An API key from at least one AI provider (OpenAI, Anthropic, Google, etc.)
 
@@ -69,7 +69,7 @@ After the shell opens, continue with the normal startup command below.
     ./start.sh
     ```
 
-    The script auto-detects Termux and installs required packages (`glibc-repo`, `glibc-runner`, `proot`). It uses a three-tier execution strategy to find the best way to run Bun on your device, then validates the exact `proot`-wrapped path it will later use for `bun install`. If Bun is older than 1.3.13, startup uses the `bun-termux` manager to atomically update both the Bun runtime and its wrapper before continuing.
+    The script auto-detects Termux and installs required packages (`glibc-repo`, `glibc-runner`, `proot`). It uses a three-tier execution strategy to find the best way to run Bun on your device, then validates the exact `proot`-wrapped path it will later use for `bun install`. If Bun is older than 1.4.0, startup uses the `bun-termux` manager to atomically update both the Bun runtime and its wrapper before continuing.
 
     If `grun bun --version` works but the native Termux install path is still broken, `start.sh` now attempts a `bun-termux` rebuild before it lets first-run setup continue.
 
@@ -122,7 +122,7 @@ The start scripts accept flags to control behavior:
 
     | Flag | Description |
     |------|-------------|
-    | *(no flags)* | Start normally; auto-upgrade Bun to latest stable when below 1.3.13 |
+    | *(no flags)* | Start normally; auto-upgrade Bun to latest stable when below 1.4.0 |
     | `-b`, `--build` | Rebuild frontend before starting |
     | `--build-only` | Rebuild frontend only, don't start |
     | `--backend-only` | Start backend only, skip frontend |

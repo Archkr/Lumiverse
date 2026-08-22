@@ -15,13 +15,12 @@ if (!("BUN_RUNTIME_TRANSPILER_CACHE_PATH" in process.env)) {
 }
 
 // ── Bun version gate ────────────────────────────────────────────────────────
-// Bun 1.3.10-1.3.12 can panic on occupied Windows IPC named pipes during
-// runner/extension restarts. Native Windows additionally requires 1.4.0 for
-// package-install and runtime fixes not present in the final 1.3 release.
+// Bun 1.4 includes package-install, runtime, and Windows IPC fixes required by
+// Lumiverse, along with the production memory and stream improvements we rely on.
 const [_bunMaj = 0, _bunMin = 0, _bunPat = 0] = Bun.version
   .split(".")
   .map((part) => Number.parseInt(part, 10) || 0);
-const _bunMinimum: readonly [number, number, number] = process.platform === "win32" ? [1, 4, 0] : [1, 3, 13];
+const _bunMinimum: readonly [number, number, number] = [1, 4, 0];
 const [_requiredBunMaj, _requiredBunMin, _requiredBunPat] = _bunMinimum;
 const _bunTooOld = _bunMaj < _requiredBunMaj
   || (_bunMaj === _requiredBunMaj

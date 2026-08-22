@@ -71,7 +71,10 @@ export function invalidateDatabankCache(userId: string, databankId: string): voi
   }
 }
 
-/** Test-only reset for keeping module-global cache state isolated. */
-export function resetDatabankCacheForTests(): void {
+/** Drop every reconstructable retrieval result. */
+export function clearAllDatabankCache(): void {
   resultCache.clear();
 }
+
+/** Test-only alias for keeping module-global cache state isolated. */
+export const resetDatabankCacheForTests = clearAllDatabankCache;

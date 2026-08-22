@@ -214,6 +214,11 @@ import("./services/tokenizer.service").then(({ prewarm }) => prewarm()).catch(()
 // Import app after database is ready (auth config needs getDb())
 const { default: app, websocket } = await import("./app");
 
+// Bun 1.4 surfaces native low-memory notifications. Release reconstructable
+// caches before the OS resorts to terminating this long-running server.
+const { installMemoryPressureHandler } = await import("./services/memory-pressure.service");
+installMemoryPressureHandler();
+
 // Register push notification EventBus listeners
 const { initPushListeners } = await import("./services/push.service");
 initPushListeners();

@@ -5391,10 +5391,15 @@ function setCachedVectorWiResult(
 
 export const __vectorWiCacheTest = {
   buildFingerprint: buildVectorWiCacheFingerprint,
-  clear: () => vectorWiCache.clear(),
+  clear: clearVectorWorldInfoCache,
   get: getCachedVectorWiResult,
   set: setCachedVectorWiResult,
 };
+
+/** Drop reconstructable vector world-info results under host memory pressure. */
+export function clearVectorWorldInfoCache(): void {
+  vectorWiCache.clear();
+}
 
 export const __vectorWiRetrievalTest = {
   getSearchableWorldBookIds: getVectorSearchableWorldBookIds,

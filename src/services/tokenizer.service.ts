@@ -733,12 +733,17 @@ function collectPrewarmTokenizerIds(): string[] {
   return tokenizerIds;
 }
 
+/** Release reconstructable tokenizer state when the host reports low memory. */
+export function releaseTokenizerMemory(): void {
+  instanceCache.clear();
+  tokenCountCache.clear();
+}
+
 /** @internal Only intended for unit tests — resets in-memory state. */
 export function _resetForTests(): void {
-  instanceCache.clear();
+  releaseTokenizerMemory();
   pendingInstanceLoads.clear();
   patternCache = null;
-  tokenCountCache.clear();
 }
 
 /** @internal Only intended for unit tests — exposes current LRU order. */

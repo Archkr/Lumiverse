@@ -6,6 +6,7 @@ import {
   countBreakdown,
   countWithTokenizer,
   prewarm,
+  releaseTokenizerMemory,
 } from "./tokenizer.service";
 
 function createTokenizerTables(): void {
@@ -147,6 +148,16 @@ describe("tokenizer instance cache", () => {
 
     await countWithTokenizer("tok-5", "five");
     expect(_getCachedTokenizerIdsForTests()).toEqual(["tok-1", "tok-3", "tok-4", "tok-2", "tok-5"]);
+  });
+
+  test("releases reconstructable tokenizer instances under memory pressure", async () => {
+    insertApproximateTokenizer("tok-pressure");
+    await countWithTokenizer("tok-pressure", "reconstructable");
+    expect(_getCachedTokenizerIdsForTests()).toEqual(["tok-pressure"]);
+
+    releaseTokenizerMemory();
+
+    expect(_getCachedTokenizerIdsForTests()).toEqual([]);
   });
 });
 

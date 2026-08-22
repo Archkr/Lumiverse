@@ -619,6 +619,12 @@ export function invalidateLinkedCortexCache(chatId: string): void {
   linkedCortexResultCache.delete(chatId);
 }
 
+/** Drop completed warm results without disturbing in-flight cortex work. */
+export function clearCortexResultCaches(): void {
+  cortexResultCache.clear();
+  linkedCortexResultCache.clear();
+}
+
 /**
  * Prime the linked-cortex warm cache with a result computed off the main
  * thread (see `primeCortexCache`). `queryLinkedCortex` skips caching on abort;
