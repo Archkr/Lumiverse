@@ -59,7 +59,23 @@ Always stay in character as {{char}}.
 
 ### Category Markers
 
-Visual dividers in the block list — they don't produce output, just help organize your blocks in the editor.
+Categories organize related blocks under a single header row in the block list — they don't produce output themselves. Each category header shows its child count and, when applicable, a mode badge (**Pick one** for radio or **Multi**). The header exposes three controls:
+
+| Control | What It Does |
+|---------|--------------|
+| **Eye icon** | Enables or disables the category marker itself only — child blocks keep their own states. |
+| **Layers icon** | Blanket enable/disable of the category *and all of its contents*. |
+| **Chevron** | Collapses or expands the category view (purely visual). |
+
+#### Blanket enable / disable
+
+The **Layers** control treats a category as one unit:
+
+- **Disabling** snapshots every child's enabled state onto the category.
+- **Re-enabling** restores that exact snapshot instead of turning everything on — if half the children were off when you disabled, they're still off after you re-enable.
+- Radio categories still guarantee exactly one active child after a restore.
+
+This makes it safe to park an entire module mid-story and bring it back exactly as you left it.
 
 ---
 

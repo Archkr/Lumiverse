@@ -85,7 +85,7 @@ The drawer hosts every workspace panel as a tab. You can reorder them with drag-
 | **Weaver** | Author characters and worlds from your idea through a guided interview |
 | **Extensions** | Install and manage [Spindle](../extensions/index.md) extensions |
 
-Spindle extensions can register additional drawer tabs that appear alongside the built-ins.
+Spindle extensions can register additional drawer tabs that appear alongside the built-ins. Tabs that ship with a guide show an **Open guide** help button in the panel header — see [Built-in Guides](guides.md).
 
 ---
 
@@ -137,6 +137,8 @@ Type to search, then press Enter to execute.
 
 When you open Lumiverse (or navigate to the home page), you land on the **Landing Page**. It shows recent chats grouped by character. Click any chat to resume it, or click a character to start a new conversation. The landing page layout (compact list vs. grid) and the number of chats shown are configurable from **Settings → Display**.
 
+The **Guides** button (book icon) in the landing page header opens the [Guides browser](guides.md) — searchable documentation for every feature, readable without leaving the app.
+
 ---
 
 ## Settings
@@ -147,7 +149,7 @@ Click the gear icon (or open the Command Palette and search "Settings") to open 
 | Section | What's Inside |
 |---------|---------------|
 | **Account** | Username, password, avatar |
-| **Display** | Modal sizing, pagination, toast positions, landing layout, chat heads |
+| **Display** | Modal sizing, long-message collapse, pagination, toast positions, landing layout, chat heads |
 | **Productivity** | (Lumiverse Suite) Quick Toolbar, composer actions, connection picker, and optional advanced surfaces |
 | **Chat** | Message-per-page, enter-to-send, draft saving, message render options |
 | **Notifications** | Push notification preferences |

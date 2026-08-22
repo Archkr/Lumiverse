@@ -79,6 +79,7 @@ nav = [
     { "Host Surfaces" = "frontend-api/host-surfaces.md" },
     { "Mount Points" = "frontend-api/mount-points.md" },
     { "Backend Communication" = "frontend-api/backend-communication.md" },
+    { "Chats" = "frontend-api/chats-api.md" },
     { "Frontend Process Lifecycle" = "frontend-api/processes.md" },
     { "Message Tags" = "frontend-api/message-tags.md" },
     { "File Uploads" = "frontend-api/file-uploads.md" },
