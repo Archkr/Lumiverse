@@ -23,7 +23,7 @@ import WallpaperLayer from '@/components/shared/WallpaperLayer'
 import useSwipeKeyboard from '@/hooks/useSwipeKeyboard'
 import useEditKeyboard from '@/hooks/useEditKeyboard'
 import useIsMobile from '@/hooks/useIsMobile'
-import { chatLoreDockMode, chatTopDockMode } from '@/lib/chatSurfaceLayout'
+import { chatLoreDockMode, chatTopDockMode, effectiveQuickToolbarDockRequest } from '@/lib/chatSurfaceLayout'
 import { measureLayoutHeight } from '@/lib/uiScale'
 import { resolveCouncilForChat } from '@/hooks/useCouncilProfiles'
 import MessageList from './MessageList'
@@ -36,6 +36,15 @@ import CouncilPill from './CouncilPill'
 import PortraitPanel from './PortraitPanel'
 import ExpressionDisplay from './expressions/ExpressionDisplay'
 import FloatingAvatarViewer from './FloatingAvatarViewer'
+import { QuickToolbar } from '../quick-toolbar/QuickToolbar'
+import {
+  isShowNativeBrowseMessages,
+  isShowNativeScrollToTop,
+  isShowNativeSelectMessages,
+  readQuickToolbarPlacement,
+} from '../quick-toolbar/quickToolbarDock'
+import { registerChatDockerActionOwners } from './chatDockerActionCatalog'
+import { keepDockEnabledWhenFloating } from '@/lib/uiProductivityDefaults'
 import { wsClient } from '@/ws/client'
 import { EventType } from '@/ws/events'
 import type { SpindlePreGenerationActivityPayload } from '@/types/ws-events'
@@ -70,7 +79,13 @@ function prefersReducedMotion(): boolean {
 function findExtensionChild(anchor: HTMLElement): Element | null {
   for (const child of anchor.children) {
     const marked = child.hasAttribute('data-spindle-extension-root') || child.hasAttribute('data-spindle-ext')
-    const hasMountedContent = child.children.length > 0 || Boolean(child.textContent?.trim())
+    // A retained extension root can contain the canonical host-surface wrapper
+    // even when that surface intentionally renders no content. Inspect the
+    // surface's contents, not the wrapper itself, otherwise delegated
+    // chat_top_dock leaves an invisible host claiming the rail after reload.
+    const surface = child.querySelector<HTMLElement>('[data-surface-id]')
+    const contentRoot = surface ?? child
+    const hasMountedContent = contentRoot.children.length > 0 || Boolean(contentRoot.textContent?.trim())
     if (marked && hasMountedContent) return child
   }
   return null
@@ -225,6 +240,14 @@ export default function ChatView() {
   const togglePortraitPanel = useStore((s) => s.togglePortraitPanel)
   const portraitPanelSide = useStore((s) => s.portraitPanelSide)
   const [portraitSurfaceOccupied, setPortraitSurfaceOccupied] = useState(false)
+  const quickToolbarSettings = useStore((s) => s.quickToolbarSettings)
+  const quickToolbarPlacement = readQuickToolbarPlacement(quickToolbarSettings)
+  const dockQuickToolbar = quickToolbarPlacement === 'chat_top_dock'
+  const keepFloatingDockHost = quickToolbarPlacement === 'floating' && keepDockEnabledWhenFloating(quickToolbarSettings)
+  const chatTopDockRequest = effectiveQuickToolbarDockRequest(
+    dockQuickToolbar || keepFloatingDockHost ? 'strip' : 'floating',
+    quickToolbarSettings,
+  )
   useEffect(() => {
     const readOccupied = () => {
       // The extension root can survive a ChatView transition while its new mount
@@ -316,6 +339,13 @@ export default function ChatView() {
       requestId: Date.now(),
     })
   }, [chatId, messageEditDraft, resumeMessageEdit, totalChatLength])
+
+  useEffect(() => {
+    return registerChatDockerActionOwners({
+      navigateToOldestMessage,
+      openMessageNavigator: () => setMessageNavigatorOpen(true),
+    })
+  }, [navigateToOldestMessage])
 
   useEffect(() => {
     const handleFindShortcut = (event: KeyboardEvent) => {
@@ -981,13 +1011,15 @@ export default function ChatView() {
       else anchor.removeAttribute('data-spindle-occupied')
     }
 
-    const syncDockRequest = (anchor: HTMLElement, resolve: (request: unknown) => string) => {
-      const request = resolve(findExtensionChild(anchor)?.getAttribute('data-dock-request') ?? null)
+    const syncDockRequest = (anchor: HTMLElement, resolve: (request: unknown) => string, defaultRequest: string | null = null) => {
+      const child = findExtensionChild(anchor)
+      const request = resolve(child?.getAttribute('data-dock-request') ?? defaultRequest)
       if (anchor.getAttribute('data-dock-request') !== request) anchor.setAttribute('data-dock-request', request)
+      if (child && child.getAttribute('data-dock-request') !== request) child.setAttribute('data-dock-request', request)
     }
 
     const syncTopDockHeight = () => {
-      const height = findExtensionChild(chatTopDock) ? measureLayoutHeight(chatTopDock) : 0
+      const height = measureLayoutHeight(chatTopDock)
       chatColumnInner.style.setProperty('--lcs-top-dock-height', `${height}px`)
     }
 
@@ -996,8 +1028,8 @@ export default function ChatView() {
       syncOccupied(chatColumnTop)
       syncOccupied(chatTopDock)
       if (composerAbove) syncOccupied(composerAbove)
-      syncDockRequest(chatColumnTop, chatTopDockMode)
-      syncDockRequest(chatTopDock, chatTopDockMode)
+      syncDockRequest(chatColumnTop, (request) => effectiveQuickToolbarDockRequest(request, quickToolbarSettings))
+      syncDockRequest(chatTopDock, (request) => effectiveQuickToolbarDockRequest(request, quickToolbarSettings), dockQuickToolbar || keepFloatingDockHost ? 'strip' : 'floating')
       if (composerAbove) syncDockRequest(composerAbove, chatLoreDockMode)
       syncTopDockHeight()
     }
@@ -1035,7 +1067,7 @@ export default function ChatView() {
       chatColumnInner.style.removeProperty('--lcs-top-dock-height')
       chatComposerAboveRef.current = null
     }
-  }, [chatId])
+  }, [chatId, quickToolbarSettings])
 
   if (!chatId) return null
 
@@ -1077,6 +1109,7 @@ export default function ChatView() {
       />
       <div className={clsx(styles.wallpaperTransitionLayer, wallpaperTransitioning && !sceneBackground && styles.wallpaperTransitionLayerActive)} />
       <div className={styles.body} {...(chatWidthMode !== 'full' ? { 'data-chat-constrained': '' } : {})}>
+        <div data-spindle-mount="chat_sidebar_left" data-spindle-scope={`chat:${chatId}:sidebar-left`} style={{ display: 'contents' }} />
         {!portraitSurfaceOccupied && portraitPanelSide !== 'none' && portraitPanelSide === 'left' && (
           <div className={clsx(styles.portraitSide, styles.portraitSideLeft, portraitPanelOpen && styles.portraitSideOpen)}>
             {!isMobile && !portraitSurfaceOccupied && <PortraitPanel side="left" />}
@@ -1132,16 +1165,24 @@ export default function ChatView() {
             data-chat-chrome-leaving={(wallpaperTransitioning || chatChromeLeaving) || undefined}
           >
             <div ref={chatColumnTopRef} data-spindle-mount="chat_column_top" />
-            <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-dock-request="floating">
-              <button
-                type="button"
-                className={clsx(styles.toolbarBtn, styles.toolbarBtnPrimary, messageSelectMode && styles.toolbarBtnActive)}
-                onClick={toggleSelectMode}
-                title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
-              >
-                <ListChecks size={14} />
-              </button>
-              {totalChatLength > 1 && (
+            <div data-spindle-mount="chat_header_left" data-spindle-scope={`chat:${chatId}:header-left`} style={{ display: 'contents' }} />
+            <div data-spindle-mount="chat_header_center" data-spindle-scope={`chat:${chatId}:header-center`} style={{ display: 'contents' }} />
+            <div data-spindle-mount="chat_header_right" data-spindle-scope={`chat:${chatId}:header-right`} style={{ display: 'contents' }} />
+            <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request={chatTopDockRequest}>
+              {isShowNativeSelectMessages(quickToolbarSettings) && (
+                <button
+                  type="button"
+                  hidden={!(dockQuickToolbar || keepFloatingDockHost)}
+                  className={clsx(styles.toolbarBtn, messageSelectMode && styles.toolbarBtnActive)}
+                  onClick={toggleSelectMode}
+                  title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
+                  aria-label={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
+                  aria-pressed={messageSelectMode}
+                >
+                  <ListChecks size={14} />
+                </button>
+              )}
+              {isShowNativeScrollToTop(quickToolbarSettings) && totalChatLength > 1 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}
@@ -1155,7 +1196,7 @@ export default function ChatView() {
                     : <ArrowUp size={14} />}
                 </button>
               )}
-              {totalChatLength > 0 && (
+              {isShowNativeBrowseMessages(quickToolbarSettings) && totalChatLength > 0 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}
@@ -1177,6 +1218,7 @@ export default function ChatView() {
                   <Pencil size={14} />
                 </button>
               )}
+              {dockQuickToolbar && <QuickToolbar />}
             </div>
             <ChatFindBar
               chatId={chatId}
@@ -1203,7 +1245,7 @@ export default function ChatView() {
             <ScrollToBottom />
             <CouncilPill />
             {messageSelectMode && <MessageSelectBar chatId={chatId} />}
-            <div data-spindle-mount="chat_bottom_dock" data-dock-request="strip" />
+            <div data-spindle-mount="chat_bottom_dock" data-spindle-scope={`chat:${chatId}:bottom-dock`} data-dock-request="strip" />
             <InputArea chatId={chatId} onNavigateHome={handleNavigateHome} onOpenChatFind={openChatFind} />
           </div>
         </div>
@@ -1221,8 +1263,9 @@ export default function ChatView() {
             {!isMobile && !portraitSurfaceOccupied && <PortraitPanel side="right" />}
           </div>
         )}
-        <div data-spindle-mount="lorebook_half_workspace" />
-        <div data-spindle-mount="chat_surface_side" />
+        <div data-spindle-mount="chat_sidebar_right" data-spindle-scope={`chat:${chatId}:sidebar-right`} style={{ display: 'contents' }} />
+        <div data-spindle-mount="lorebook_half_workspace" data-spindle-scope={`chat:${chatId}:lorebook-half-workspace`} />
+        <div data-spindle-mount="chat_surface_side" data-spindle-scope={`chat:${chatId}:surface-side`} />
       </div>
       {isMobile && !portraitSurfaceOccupied && portraitPanelSide !== 'none' && (
         <PortraitPanel

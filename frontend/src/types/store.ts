@@ -125,6 +125,7 @@ export interface StartupSettings {
   drawerSettings?: DrawerSettings
   spindleSettings?: Partial<SpindleSettings>
   connectionsOrder?: Partial<Record<'llm' | 'imageGen' | 'stt' | 'tts', string[]>>
+  activeProfileId?: string | null
 }
 
 export interface CharactersSlice {
@@ -546,11 +547,43 @@ export interface QuickToolbarSettings {
   rectVersion: number
   /** Undefined keeps the responsive default: hide only on mobile overlays. */
   hideWhenOverlaid?: boolean
+  /** Dock-chrome hide only. Undefined/false keeps the docked toolbar in `chat_top_dock`. */
+  hideInChatTopDock?: boolean
   modalRestoreHandle: boolean
   v2IconSize: number
   v2LabelTextSize: number
   v2LabelVisible: boolean
   v2Density: QuickToolbarDensity
+  /** Optional V2 chrome overrides used by the host surface. */
+  gap?: number
+  padding?: number
+  /** One-time migration marker for stale V2 floating rail rectangles. */
+  v2ViewportGeometryVersion?: 2
+  quickToolbarPlacement?: 'floating' | 'chat_top_dock'
+  autoFitBounds?: boolean
+  v2IconOnly?: boolean
+  /** Stretch docked V2 across leftover `.chatToolbar` width. Default on. */
+  fillTopDockWidth?: boolean
+  /** Native ChatView ListChecks. Default on (`!== false`). */
+  showNativeSelectMessages?: boolean
+  /** Native ChatView ArrowUp (Go to oldest message). Default on (`!== false`). */
+  showNativeScrollToTop?: boolean
+  /** Native ChatView List (Browse messages). Default on (`!== false`). */
+  showNativeBrowseMessages?: boolean
+  /** Paint a solid backdrop behind the toolbar when enabled. */
+  opaqueToolbarBackdrop?: boolean
+  /** Optional solid backdrop color for the opaque toolbar plate. */
+  backdropColor?: string
+  /** Card width override in px (0 or undefined for auto content width). */
+  cardWidth?: number
+  /** Card minimum width override in px. */
+  cardMinWidth?: number
+  /** Card maximum width override in px. */
+  cardMaxWidth?: number
+  /** Card padding-inline (space between text and border) in px. */
+  cardPadding?: number
+  /** Card gap (space between icon, text, chevron) in px. */
+  cardGap?: number
 }
 
 export interface ConnectionsPickerSettings {
@@ -575,6 +608,7 @@ export interface ConnectionsPickerSettings {
   rowGap: number
   sectionSpacing: number
   columnWidths: Record<string, number>
+  modelLayout?: 'grid' | 'list'
 }
 
 export interface LoreIndicatorSettings {
@@ -757,6 +791,11 @@ export interface SettingsSlice {
   characterTabDisplaySettings: CharacterTabDisplaySettings
   portraitDockSettings: PortraitDockSettings
   lorebookEditorSettings: LorebookEditorSettings
+  showEmbeddingFallbackUi: boolean
+  showCortexSecondaryUi: boolean
+  showEditAndSend: boolean
+  enableToolbarIconReorder: boolean
+  productivityTabPosition: string
   hydrateStartupSettings: (settings: StartupSettings) => void
   setVoiceSettings: (partial: Partial<VoiceSettings>) => void
   setWallpaper: (settings: Partial<WallpaperSettings>) => void
@@ -843,11 +882,18 @@ export interface PresetsSlice {
 }
 
 // ---- Connections Slice ----
+export type ActiveProfileSwitchReason =
+  | 'user_selection'
+  | 'bootstrap_reconcile'
+  | 'profile_deleted'
+  | 'profile_invalidated'
+  | 'settings_reconcile'
+
 export interface ConnectionsSlice {
   profiles: ConnectionProfile[]
   activeProfileId: string | null
   setProfiles: (profiles: ConnectionProfile[]) => void
-  setActiveProfile: (id: string | null) => void
+  setActiveProfile: (id: string | null, reason?: ActiveProfileSwitchReason) => void
 
   addProfile: (profile: ConnectionProfile) => void
   updateProfile: (id: string, updates: Partial<ConnectionProfile>) => void

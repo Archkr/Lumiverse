@@ -22,37 +22,111 @@ export const DEFAULT_SURFACE_RECT: SurfaceRectPrefs = {
   height: 420,
 }
 
-export function shouldHideQuickToolbarWhenOverlaid({
-  hideWhenOverlaid,
-  isMobile,
-  activeModal,
-  settingsModalOpen,
-  drawerOpen,
-  characterEditorOpen,
-  lorebookHalfEditorOpen,
-  lorebookWorkspaceOpen,
-}: {
-  hideWhenOverlaid: boolean | undefined
-  isMobile: boolean
+export type QuickToolbarOverlayState = {
   activeModal: unknown
   settingsModalOpen: boolean
   drawerOpen: boolean
   characterEditorOpen: boolean
   lorebookHalfEditorOpen: boolean
   lorebookWorkspaceOpen: boolean
-}) {
-  const overlayOpen = Boolean(activeModal)
+}
+
+export function isQuickToolbarOverlayOpen({
+  activeModal,
+  settingsModalOpen,
+  drawerOpen,
+  characterEditorOpen,
+  lorebookHalfEditorOpen,
+  lorebookWorkspaceOpen,
+}: QuickToolbarOverlayState): boolean {
+  return Boolean(activeModal)
     || settingsModalOpen
     || drawerOpen
     || characterEditorOpen
     || lorebookHalfEditorOpen
     || lorebookWorkspaceOpen
-  return overlayOpen && (hideWhenOverlaid ?? isMobile)
+}
+
+export function quickToolbarOverlayFingerprint({
+  activeModal,
+  settingsModalOpen,
+  drawerOpen,
+  characterEditorOpen,
+  lorebookHalfEditorOpen,
+  lorebookWorkspaceOpen,
+}: QuickToolbarOverlayState): string {
+  return [
+    activeModal ?? '',
+    settingsModalOpen ? 'settings' : '',
+    drawerOpen ? 'drawer' : '',
+    characterEditorOpen ? 'character' : '',
+    lorebookHalfEditorOpen ? 'lore-half' : '',
+    lorebookWorkspaceOpen ? 'lore-workspace' : '',
+  ].join('|')
+}
+
+export function shouldHideQuickToolbarWhenOverlaid({
+  hideWhenOverlaid,
+  isMobile,
+  modalRestoreHandle,
+  ...overlay
+}: QuickToolbarOverlayState & {
+  hideWhenOverlaid: boolean | undefined
+  isMobile: boolean
+  modalRestoreHandle?: boolean
+}) {
+  return isQuickToolbarOverlayOpen(overlay)
+    && ((hideWhenOverlaid ?? isMobile) || modalRestoreHandle === true)
+}
+
+export function resolveQuickToolbarOverlayPresentation(
+  input: QuickToolbarOverlayState & {
+    hideWhenOverlaid: boolean | undefined
+    isMobile: boolean
+    modalRestoreHandle: boolean
+    restoredOverModal: boolean
+  },
+): 'toolbar' | 'restore-tab' | 'hidden' {
+  const overlayOpen = isQuickToolbarOverlayOpen(input)
+  if (input.restoredOverModal && overlayOpen) return 'toolbar'
+  if (!shouldHideQuickToolbarWhenOverlaid(input)) return 'toolbar'
+  if (input.modalRestoreHandle && overlayOpen && !input.restoredOverModal) return 'restore-tab'
+  return 'hidden'
 }
 
 export function isMobileViewportOrDevice(): boolean {
   if (typeof window === 'undefined') return false
   return window.matchMedia?.('(pointer: coarse)').matches || window.innerWidth <= 600
+}
+
+export type PendingConnectionsDeepLink = {
+  target?: string
+  provider?: string
+  connectionId?: string | null
+}
+
+export async function acknowledgePendingConnectionsDeepLink(options: {
+  pending: PendingConnectionsDeepLink
+  setActiveProfile: (id: string, reason?: 'user_selection') => void
+  acknowledgeActive?: (request: { id: string | null; reason: 'user_selection' }) => void | Promise<void>
+}): Promise<void> {
+  if (options.pending.target !== 'connections' || !options.pending.connectionId) return
+  options.setActiveProfile(options.pending.connectionId, 'user_selection')
+  await options.acknowledgeActive?.({
+    id: options.pending.connectionId,
+    reason: 'user_selection',
+  })
+}
+
+export async function acknowledgeConnectionProfileSelection(options: {
+  profileId: string
+  setActiveProfile: (id: string | null, reason?: 'user_selection') => void
+  acknowledgeActive?: (request: { id: string | null; reason: 'user_selection' }) => void | Promise<void>
+  closePopover: () => void
+}): Promise<void> {
+  options.setActiveProfile(options.profileId, 'user_selection')
+  await options.acknowledgeActive?.({ id: options.profileId, reason: 'user_selection' })
+  options.closePopover()
 }
 
 export const DEFAULT_CHARACTER_DISPLAY_SETTINGS: CharacterDisplaySettings = {
@@ -67,7 +141,27 @@ export const DEFAULT_CHARACTER_DISPLAY_SETTINGS: CharacterDisplaySettings = {
   defaultFilter: 'characters',
 }
 
-export const DEFAULT_QUICK_TOOLBAR_SETTINGS: QuickToolbarSettings = {
+export const DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR = '#1C1826'
+
+export function normalizeQuickToolbarBackdropColor(value: unknown): string {
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) return trimmed.toUpperCase()
+  if (/^#[0-9a-f]{3}$/i.test(trimmed)) return `#${trimmed.slice(1).split('').map((char) => char + char).join('')}`.toUpperCase()
+  return DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR
+}
+
+export const DEFAULT_QUICK_TOOLBAR_SETTINGS: QuickToolbarSettings & {
+  quickToolbarPlacement: 'floating' | 'chat_top_dock'
+  autoFitBounds: boolean
+  v2IconOnly: boolean
+  fillTopDockWidth: boolean
+  hideInChatTopDock: boolean
+  showNativeSelectMessages: boolean
+  showNativeScrollToTop: boolean
+  showNativeBrowseMessages: boolean
+  opaqueToolbarBackdrop: boolean
+  backdropColor: string
+} = {
   enabled: true,
   variant: 'v1-free',
   visibleTabIds: [
@@ -121,6 +215,29 @@ export const DEFAULT_QUICK_TOOLBAR_SETTINGS: QuickToolbarSettings = {
   // The confirmed two-line card design, so an existing row backfilled with this
   // default looks exactly as it did before the setting existed.
   v2Density: 'comfortable',
+  quickToolbarPlacement: 'floating',
+  autoFitBounds: true,
+  v2IconOnly: false,
+  fillTopDockWidth: true,
+  // Off by default. Dock-chrome hide only — floating placement is unaffected.
+  hideInChatTopDock: false,
+  showNativeSelectMessages: true,
+  showNativeScrollToTop: true,
+  showNativeBrowseMessages: true,
+  opaqueToolbarBackdrop: false,
+  backdropColor: DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR,
+  cardWidth: 0,
+  cardMinWidth: 0,
+  cardMaxWidth: 190,
+  cardPadding: 8,
+  cardGap: 8,
+  // chat-column-relative geometry and are reset once during hydration.
+  v2ViewportGeometryVersion: 2,
+}
+
+/** Positive adapter for the legacy persisted inverse flag. */
+export function keepDockEnabledWhenFloating(settings: Pick<QuickToolbarSettings, 'hideInChatTopDock'> | null | undefined): boolean {
+  return settings?.hideInChatTopDock !== true
 }
 
 export const DEFAULT_CONNECTIONS_PICKER_SETTINGS: ConnectionsPickerSettings = {
@@ -145,6 +262,7 @@ export const DEFAULT_CONNECTIONS_PICKER_SETTINGS: ConnectionsPickerSettings = {
   rowGap: 7,
   sectionSpacing: 10,
   columnWidths: { profiles: 180, models: 220 },
+  modelLayout: 'grid',
 }
 
 export const DEFAULT_LORE_INDICATOR_SETTINGS: LoreIndicatorSettings = {
@@ -316,12 +434,35 @@ export const PRODUCTIVITY_DEFAULTS = freezeDeep({
   characterTabDisplaySettings: DEFAULT_CHARACTER_TAB_DISPLAY_SETTINGS,
   portraitDockSettings: DEFAULT_PORTRAIT_DOCK_SETTINGS,
   lorebookEditorSettings: DEFAULT_LOREBOOK_EDITOR_SETTINGS,
+  showEmbeddingFallbackUi: true,
+  showCortexSecondaryUi: true,
+  showEditAndSend: true,
+  enableToolbarIconReorder: true,
+  showComposerCustomizeGear: true,
+  productivityTabPosition: 'after-display',
 })
 
 export function migrateProductivitySetting(key: string, value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const row = { ...(value as Record<string, unknown>) }
-  if (key === 'quickToolbarSettings' && row.variant === 'v3-adaptive') row.variant = 'v1-free'
+  if (key === 'quickToolbarSettings') {
+    if (Object.prototype.hasOwnProperty.call(row, 'backdropColor')) row.backdropColor = normalizeQuickToolbarBackdropColor(row.backdropColor)
+    if (row.variant === 'v3-adaptive') row.variant = 'v1-free'
+    // V2 floating rows written before the viewport-rail fix commonly contain
+    // the old centered chat-column rectangle (for example x=554, width=763).
+    // Preserve the user's position, but release the stale width so the current
+    // fit code can measure the real viewport. The marker makes this one-shot.
+    const rect = row.rect
+    if (
+      row.variant === 'v2-settings-adjacent'
+      && row.v2ViewportGeometryVersion !== 2
+      && rect && typeof rect === 'object' && !Array.isArray(rect)
+      && Number((rect as Record<string, unknown>).width) > 0
+    ) {
+      row.rect = { ...(rect as Record<string, unknown>), width: 0, height: 0 }
+      row.v2ViewportGeometryVersion = 2
+    }
+  }
   if (key === 'loreIndicatorSettings') {
     row.entryTypeAppearance = normalizeLoreIndicatorEntryTypeAppearance(row.entryTypeAppearance)
   }

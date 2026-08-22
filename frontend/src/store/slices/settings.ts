@@ -1118,6 +1118,8 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
       })
       if (!isCurrentLoad()) return
       const patch: Record<string, any> = {}
+      const migratedProductivityKeys = new Set<string>()
+      const promotedProductivityFallbacks = new Set<string>()
       const defaults = get()
       const pendingImageGenerationPatch = {
         ...(readPendingImageGenerationPatch() ?? {}),
@@ -1135,7 +1137,20 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         if (!isCurrentLoad()) return
         settingsApi.delete('activeLumiPresetId').catch(() => {})
       }
-      for (const row of rows) {
+      // A legacy host may have persisted only the namespaced compatibility row.
+      // Promote that row into the canonical hydration stream once; after this
+      // point the canonical blob is the sole authority and the mirror is
+      // repaired from it below.
+      const hydrationRows = [...rows]
+      const rowsByKey = new Map(rows.map((row) => [row.key, row]))
+      for (const [key, fallbackKeys] of Object.entries(PRODUCTIVITY_PRIVATE_FALLBACKS)) {
+        if (rowsByKey.has(key)) continue
+        const fallback = fallbackKeys.map((fallbackKey) => rowsByKey.get(fallbackKey)).find(Boolean)
+        if (!fallback) continue
+        hydrationRows.push({ ...fallback, key })
+        promotedProductivityFallbacks.add(key)
+      }
+      for (const row of hydrationRows) {
         const canonicalKey = LEGACY_SETTINGS_KEY_RENAMES[row.key] ?? row.key
         if (
           !DATA_KEYS.has(canonicalKey)
@@ -1144,9 +1159,12 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
           // names are present in the account.
           || (canonicalKey !== row.key && rows.some((candidate) => candidate.key === canonicalKey))
         ) continue
-          const storedValue = canonicalKey === 'imageGeneration'
-            ? migrateStoredImageGeneration(row.value)
-            : migrateProductivitySetting(canonicalKey, row.value)
+        const storedValue = canonicalKey === 'imageGeneration'
+          ? migrateStoredImageGeneration(row.value)
+          : migrateProductivitySetting(canonicalKey, row.value)
+        if (canonicalKey === 'quickToolbarSettings' && !pendingValuesMatch(storedValue, row.value)) {
+          migratedProductivityKeys.add(canonicalKey)
+        }
         patch[canonicalKey] = mergeStoredSetting((defaults as any)[canonicalKey], storedValue)
         if (canonicalKey !== row.key) legacySettingsToPersist[canonicalKey] = patch[canonicalKey]
       }
@@ -1179,6 +1197,9 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
           const pendingValue = k === 'imageGeneration'
             ? migrateStoredImageGeneration(v)
             : migrateProductivitySetting(k, v)
+          if (k === 'quickToolbarSettings' && !pendingValuesMatch(pendingValue, v)) {
+            migratedProductivityKeys.add(k)
+          }
           patch[k] = mergeStoredSetting(patch[k] ?? (defaults as any)[k], pendingValue)
         }
       }
@@ -1324,6 +1345,17 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
       })
       // Compatibility rows are repaired only after canonical hydration has
       // completed; they are never allowed to race or lead the initial load.
+      // Persist one-shot productivity migrations as well. Without this
+      // write-through, every SETTINGS_UPDATED/load cycle re-reads the stale
+      // V2 chat-column rectangle and the extension can put it back in memory.
+      for (const key of migratedProductivityKeys) {
+        const value = patch[key]
+        if (value !== undefined) persistKey(key, value, 'suite-normalization')
+      }
+      for (const key of promotedProductivityFallbacks) {
+        const value = patch[key]
+        if (value !== undefined) persistKey(key, value, 'suite-normalization')
+      }
       persistProductivityFallbacks(patch, new Map(rows.map((row) => [row.key, row.value])))
       for (const [key, value] of Object.entries(legacySettingsToPersist)) {
         if (!isCurrentLoad()) return

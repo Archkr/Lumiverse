@@ -11,6 +11,7 @@ import type {
   FrontendWorldBooksAPI,
 } from './frontend-domain-api'
 import type { StateSelectors } from './state-selectors'
+import type { DecoratorOptions } from './dom-decorator-service'
 import {
   createResizeController as createCoreResizeController,
   getUiScale as readUiScale,
@@ -134,6 +135,7 @@ export interface FrontendContextAdditions {
       component: unknown
       priority?: number
     }) => { destroy(): void }
+    registerDomDecorator?: (options: Omit<DecoratorOptions, 'owner' | 'generation'>) => () => void
   }
   state: StateSelectors
   connections: FrontendConnectionsAPI

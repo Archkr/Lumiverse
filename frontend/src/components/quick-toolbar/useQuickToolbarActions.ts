@@ -1,5 +1,12 @@
-import { useCallback, useMemo, type ComponentType } from 'react'
-import { Columns2, Maximize2, Puzzle, Settings, Waypoints, Zap } from 'lucide-react'
+import { useCallback, useMemo, useSyncExternalStore, type ComponentType } from 'react'
+import { Columns2, Maximize2, Settings, Waypoints, Zap } from 'lucide-react'
+import { createDynamicExtensionIcon } from '@/components/icons/DynamicExtensionIcon'
+import {
+  buildChatDockerActionCatalog,
+  CHAT_DOCKER_ACTION_IDS,
+  getChatDockerActionOwners,
+  subscribeChatDockerActionOwners,
+} from '@/components/chat/chatDockerActionCatalog'
 import { COMMANDS } from '@/lib/commands'
 import { adaptExtensionTabs, DRAWER_TABS, extensionCommandsToCommands } from '@/lib/drawer-tab-registry'
 import { getVisibleSettingsTabs } from '@/lib/settings-tab-registry'
@@ -11,6 +18,7 @@ import { router } from '@/router'
 import { useStore } from '@/store'
 import type { QuickToolbarSettings } from '@/types/store'
 import type { InputBarActionState } from '@/store/slices/spindle-placement'
+import { nextToolbarIconOrder } from './toolbarPointerHold'
 
 export type ToolbarActionIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 
@@ -48,6 +56,13 @@ export interface ToolbarAction {
    */
   surface: ToolbarSurface
   run: () => void
+  disabled?: boolean
+  hidden?: boolean
+  /**
+   * Explicit pressed state. When defined, toolbar render uses this for
+   * `aria-pressed` / active styling even if `surface.kind === 'command'`.
+   */
+  active?: boolean
 }
 
 /** The view the catalog-root "Settings" button opens. */
@@ -80,8 +95,18 @@ const EXTENSION_QUICK_TOOLBAR_ACTION_IDS = new Set([
   EXTENSION_CONNECTIONS_PICKER_ACTION_ID,
 ])
 
+const NON_DEFAULT_DOCKER_IDS = new Set<string>([
+  'chat.select-messages',
+  'chat.scroll-to-top',
+  'chat.browse-messages',
+  'chat.customize-composer',
+])
+
 /** Ids from the confirmed toolbar designs, used when nothing has been customised. */
-export const DESIGN_DEFAULT_IDS = [
+export const DESIGN_DEFAULT_IDS = CHAT_DOCKER_ACTION_IDS.filter((id) => !NON_DEFAULT_DOCKER_IDS.has(id))
+/** The previous built-in defaults. Treated as "untouched" so they upgrade cleanly. */
+const PREVIOUS_DESIGN_DEFAULT_IDS = ['profile', 'connections', 'council', 'lorebook', 'presets', 'settings']
+const PREVIOUS_SUITE_DEFAULT_IDS = [
   'profile',
   'connections',
   'council',
@@ -91,8 +116,6 @@ export const DESIGN_DEFAULT_IDS = [
   'presets',
   'settings',
 ]
-/** The previous built-in defaults. Treated as "untouched" so they upgrade cleanly. */
-const PREVIOUS_DESIGN_DEFAULT_IDS = ['profile', 'connections', 'council', 'lorebook', 'presets', 'settings']
 /** The pre-redesign default set. Treated as "untouched" so it upgrades cleanly. */
 const LEGACY_DEFAULT_IDS = ['characters', 'lorebook', 'connections']
 
@@ -128,7 +151,9 @@ export function quickToolbarInputActionIcon(action: QuickToolbarInputAction): To
   if (action.contributionId === EXTENSION_HALF_LOREBOOK_ACTION_ID) return Columns2
   if (action.contributionId === EXTENSION_ENHANCED_LOREBOOK_ACTION_ID) return Maximize2
   if (action.contributionId === EXTENSION_CONNECTIONS_PICKER_ACTION_ID) return Waypoints
-  return action.iconSvg || action.iconUrl ? Puzzle : Zap
+  return action.iconSvg || action.iconUrl
+    ? createDynamicExtensionIcon({ iconSvg: action.iconSvg, iconUrl: action.iconUrl })
+    : Zap
 }
 
 /** Keep first-party suite names stable even while an older extension instance is still registered. */
@@ -149,6 +174,13 @@ export function useQuickToolbarActions() {
   const extensionDrawerTabs = useStore((s) => s.drawerTabs)
   const extensionCommands = useStore((s) => s.extensionCommands)
   const inputBarActions = useStore((s) => s.inputBarActions)
+  const activeCharacterId = useStore((s) => s.activeCharacterId)
+  const activeChatId = useStore((s) => s.activeChatId)
+  const isGroupChat = useStore((s) => s.isGroupChat)
+  const activeLoomPresetId = useStore((s) => s.activeLoomPresetId)
+  const messageSelectMode = useStore((s) => s.messageSelectMode)
+  const openModal = useStore((s) => s.openModal)
+  useSyncExternalStore(subscribeChatDockerActionOwners, getChatDockerActionOwners, getChatDockerActionOwners)
   const openDrawer = useStore((s) => s.openDrawer)
   const closeDrawer = useStore((s) => s.closeDrawer)
   const setDrawerTab = useStore((s) => s.setDrawerTab)
@@ -259,7 +291,39 @@ export function useQuickToolbarActions() {
           ),
         }
       })
+    const owners = getChatDockerActionOwners()
+    const chatDockerActions: ToolbarAction[] = buildChatDockerActionCatalog({
+      owners: {
+        ...owners,
+        openModal: owners.openModal ?? openModal,
+        navigate: router.navigate,
+      },
+      scope: {
+        activeCharacterId,
+        activeChatId,
+        isGroupChat,
+        activeLoomPresetId,
+        promptVariablesLoading: owners.promptVariablesLoading,
+        memoryCortexAvailable: owners.memoryCortexAvailable,
+        memoryCortexInFlight: owners.memoryCortexInFlight,
+        groupChatCreatorRegistered: owners.groupChatCreatorRegistered,
+      },
+    }).map((action) => ({
+      id: action.id,
+      label: action.id === 'chat.select-messages' && messageSelectMode
+        ? 'Exit selection mode'
+        : action.label,
+      description: action.description,
+      keywords: action.keywords,
+      icon: action.icon,
+      surface: { kind: 'command' } as const,
+      run: action.run,
+      disabled: action.disabled,
+      hidden: action.hidden,
+      active: action.id === 'chat.select-messages' ? Boolean(messageSelectMode) : undefined,
+    }))
     const catalog: ToolbarAction[] = [
+      ...chatDockerActions,
       {
         id: 'settings',
         label: 'Settings',
@@ -276,9 +340,15 @@ export function useQuickToolbarActions() {
     ]
     return [...new Map(catalog.map((action) => [action.id, action])).values()]
   }, [
+    activeCharacterId,
+    activeChatId,
+    activeLoomPresetId,
     extensionCommands,
     extensionDrawerTabs,
     inputBarActions,
+    isGroupChat,
+    messageSelectMode,
+    openModal,
     runSurface,
     userRole,
   ])
@@ -293,6 +363,7 @@ export function useQuickToolbarActions() {
       settings.visibleTabIds.length === 0
       || arraysEqual(settings.visibleTabIds, LEGACY_DEFAULT_IDS)
       || arraysEqual(settings.visibleTabIds, PREVIOUS_DESIGN_DEFAULT_IDS)
+      || arraysEqual(settings.visibleTabIds, PREVIOUS_SUITE_DEFAULT_IDS)
     ) {
       return DESIGN_DEFAULT_IDS
     }
@@ -304,6 +375,7 @@ export function useQuickToolbarActions() {
       settings.iconOrder.length === 0
       || arraysEqual(settings.iconOrder, LEGACY_DEFAULT_IDS)
       || arraysEqual(settings.iconOrder, PREVIOUS_DESIGN_DEFAULT_IDS)
+      || arraysEqual(settings.iconOrder, PREVIOUS_SUITE_DEFAULT_IDS)
     )
       ? DESIGN_DEFAULT_IDS
       : settings.iconOrder
@@ -316,7 +388,7 @@ export function useQuickToolbarActions() {
   const actions = useMemo(() => {
     const resolved = orderedIds
       .map((id) => actionById.get(id))
-      .filter((action): action is ToolbarAction => Boolean(action))
+      .filter((action): action is ToolbarAction => Boolean(action) && !action.hidden)
     // A-S4: the catalog dedupes on `id`, and `'settings'` vs
     // `'settings:productivity'` are different keys — so both can be visible at
     // once, two buttons opening the same view, each closing the other's modal.
@@ -356,6 +428,12 @@ export function useQuickToolbarActions() {
   const reorderActions = useCallback((ids: string[]) => {
     updateSettings({ iconOrder: ids.filter((id) => visibleIds.includes(id)) })
   }, [updateSettings, visibleIds])
+
+  const reorderActionPair = useCallback((activeId: string, overId: string) => {
+    const next = nextToolbarIconOrder(orderedIds, activeId, overId)
+    if (!next) return
+    reorderActions(next)
+  }, [orderedIds, reorderActions])
 
   /**
    * The chevron write path for a list that is being filtered by a search box.
@@ -433,6 +511,7 @@ export function useQuickToolbarActions() {
     moveAction,
     moveActionWithin,
     reorderActions,
+    reorderActionPair,
     toggleAction,
     resetCurrentVariant,
   }
