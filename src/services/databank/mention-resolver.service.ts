@@ -101,6 +101,7 @@ export function lookupSlugsInScope(
 // ─── Heavy Resolution (async, cached) ─────────────────────────
 
 const RESOLVE_CACHE_TTL_MS = 5 * 60 * 1000;
+const RESOLVE_CACHE_MAX_ENTRIES = 256;
 
 interface CachedResolve {
   result: ResolvedMention[];
@@ -127,6 +128,33 @@ export function clearResolveCache(userId: string, chatId: string): void {
   }
 }
 
+/** Drop all reconstructable mention resolutions. */
+export function clearAllResolveCache(): void {
+  resolveCache.clear();
+}
+
+function cacheResolvedMentions(key: string, result: ResolvedMention[], now: number): void {
+  for (const [cachedKey, cached] of resolveCache) {
+    if (now - cached.cachedAt > RESOLVE_CACHE_TTL_MS) resolveCache.delete(cachedKey);
+  }
+  resolveCache.delete(key);
+  while (resolveCache.size >= RESOLVE_CACHE_MAX_ENTRIES) {
+    const oldest = resolveCache.keys().next().value;
+    if (oldest === undefined) break;
+    resolveCache.delete(oldest);
+  }
+  resolveCache.set(key, { result, cachedAt: now });
+}
+
+export const __mentionResolveCacheTest = {
+  clear: clearAllResolveCache,
+  keys: (): string[] => [...resolveCache.keys()],
+  set: (key: string, result: ResolvedMention[], cachedAt = Date.now()): void => {
+    cacheResolvedMentions(key, result, cachedAt);
+  },
+  size: (): number => resolveCache.size,
+};
+
 /**
  * Resolve a set of slugs to their injectable content.
  *  - Small docs (≤ DIRECT_INJECT_TOKEN_BUDGET): full text inline.
@@ -151,6 +179,8 @@ export async function resolveSlugContent(
   const key = resolveCacheKey(userId, chatId, slugArr, queryContext);
   const cached = resolveCache.get(key);
   if (cached && Date.now() - cached.cachedAt <= RESOLVE_CACHE_TTL_MS) {
+    resolveCache.delete(key);
+    resolveCache.set(key, cached);
     return cached.result;
   }
   if (cached) resolveCache.delete(key);
@@ -217,7 +247,7 @@ export async function resolveSlugContent(
   }
 
   if (!signal?.aborted) {
-    resolveCache.set(key, { result: resolved, cachedAt: Date.now() });
+    cacheResolvedMentions(key, resolved, Date.now());
   }
   return resolved;
 }

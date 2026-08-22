@@ -1,6 +1,7 @@
 import type { DatabankRetrievalResult } from "./types";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 256;
 
 interface CachedResult {
   result: DatabankRetrievalResult;
@@ -11,6 +12,18 @@ interface CachedResult {
 }
 
 const resultCache = new Map<string, CachedResult>();
+
+function pruneResultCache(now: number): void {
+  for (const [key, cached] of resultCache) {
+    if (now - cached.cachedAt > CACHE_TTL_MS) resultCache.delete(key);
+  }
+
+  while (resultCache.size >= CACHE_MAX_ENTRIES) {
+    const oldestKey = resultCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    resultCache.delete(oldestKey);
+  }
+}
 
 export function databankCacheKey(
   userId: string,
@@ -36,6 +49,8 @@ export function getCachedDatabankResult(
     resultCache.delete(key);
     return null;
   }
+  resultCache.delete(key);
+  resultCache.set(key, cached);
   return cached.result;
 }
 
@@ -47,9 +62,13 @@ export function setCachedDatabankResult(
   limit: number,
   result: DatabankRetrievalResult,
 ): void {
-  resultCache.set(databankCacheKey(userId, chatId, databankIds, queryText, limit), {
+  const key = databankCacheKey(userId, chatId, databankIds, queryText, limit);
+  const now = Date.now();
+  resultCache.delete(key);
+  pruneResultCache(now);
+  resultCache.set(key, {
     result,
-    cachedAt: Date.now(),
+    cachedAt: now,
     userId,
     chatId,
     databankIds: [...databankIds],

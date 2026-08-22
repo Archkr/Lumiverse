@@ -116,6 +116,18 @@ function destroyWorker(pw: PoolWorker): void {
   pw.worker.terminate();
 }
 
+/** Terminate only workers that are not serving a prompt or queueing work. */
+export function releaseIdlePromptAssemblyWorkers(): number {
+  if (waiting.length > 0) return 0;
+  let released = 0;
+  for (const pw of [...pool]) {
+    if (pw.job) continue;
+    destroyWorker(pw);
+    released++;
+  }
+  return released;
+}
+
 function markIdle(pw: PoolWorker): void {
   if (pw.idleTimer) clearTimeout(pw.idleTimer);
   pw.idleTimer = setTimeout(() => {

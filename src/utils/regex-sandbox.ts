@@ -180,6 +180,17 @@ class RegexWorkerPool {
     }
   }
 
+  releaseIdle(): number {
+    if (this.queue.length > 0) return 0;
+    const idle = this.idle;
+    this.idle = [];
+    for (const worker of idle) {
+      this.workers.delete(worker);
+      try { worker.terminate(); } catch { /* ignore */ }
+    }
+    return idle.length;
+  }
+
   /** Tear down the pool — call from shutdown hooks. */
   shutdown(): void {
     for (const w of this.workers) {
@@ -259,6 +270,10 @@ export function shutdownRegexSandbox(): void {
     _pool.shutdown();
     _pool = null;
   }
+}
+
+export function releaseIdleRegexWorkers(): number {
+  return _pool?.releaseIdle() ?? 0;
 }
 
 /** Validate the pattern compiles before sending to a worker. */

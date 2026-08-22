@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { extractMentionSlugs, stripMentions } from "./mention-resolver.service";
+import {
+  __mentionResolveCacheTest,
+  clearAllResolveCache,
+  extractMentionSlugs,
+  stripMentions,
+} from "./mention-resolver.service";
 
 describe("extractMentionSlugs", () => {
   test("extracts a basic slug", () => {
@@ -72,5 +77,25 @@ describe("stripMentions", () => {
   test("strips longer slug exactly when present in validSlugs", () => {
     const out = stripMentions("read #foo-bar please", new Set(["foo-bar"]));
     expect(out).toBe("read please");
+  });
+});
+
+describe("mention resolution cache", () => {
+  test("caps retained results and clears them under memory pressure", () => {
+    clearAllResolveCache();
+    for (let index = 0; index <= 256; index++) {
+      __mentionResolveCacheTest.set(`key-${index}`, [{
+        slug: `doc-${index}`,
+        documentName: `Document ${index}`,
+        content: "content",
+        truncated: false,
+      }]);
+    }
+
+    expect(__mentionResolveCacheTest.size()).toBe(256);
+    expect(__mentionResolveCacheTest.keys()).not.toContain("key-0");
+
+    clearAllResolveCache();
+    expect(__mentionResolveCacheTest.size()).toBe(0);
   });
 });
