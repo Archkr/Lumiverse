@@ -342,6 +342,8 @@ export interface SafeFetchOptions {
   headers?: HeadersInit;
   allowLoopback?: boolean;
   allowPrivate?: boolean;
+  /** Restrict the initial URL and every redirect hop to these exact origins. */
+  allowedOrigins?: readonly string[];
 }
 
 export async function safeFetch(
@@ -350,6 +352,9 @@ export async function safeFetch(
 ): Promise<Response> {
   const maxBytes = options?.maxBytes ?? DEFAULT_MAX_BYTES;
   const timeoutMs = options?.timeoutMs ?? 30_000;
+  const allowedOrigins = options?.allowedOrigins
+    ? new Set(options.allowedOrigins.map((origin) => new URL(origin).origin.toLowerCase()))
+    : null;
 
   let currentUrl = url;
   let method = options?.method ?? "GET";
@@ -365,6 +370,9 @@ export async function safeFetch(
 
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       throw new SSRFError(`Only http and https URLs are allowed, got: ${parsed.protocol}`);
+    }
+    if (allowedOrigins && !allowedOrigins.has(parsed.origin.toLowerCase())) {
+      throw new SSRFError(`URL origin is not allowed: ${parsed.origin.toLowerCase()}`);
     }
 
     await validateHost(parsed.hostname, {

@@ -128,6 +128,18 @@ describe("embeddings routes provider registry", () => {
     expect(ids).not.toContain("other-user-embed");
   });
 
+  test("an omitted caller is restricted to system providers", () => {
+    providerRegistry.register({ kind: "embedding", id: "private-embed" }, host);
+    providerRegistry.register(
+      { kind: "embedding", id: "system-embed" },
+      { installationId: "inst-system", installScope: "system" },
+    );
+
+    const ids = listEmbeddingDrivers().map((driver) => driver.id);
+    expect(ids).not.toContain("private-embed");
+    expect(ids).toContain("system-embed");
+  });
+
   test("provider failure is isolated", () => {
     providerRegistry.register({ kind: "embedding", id: "good-embed" }, host);
     providerRegistry.register(
