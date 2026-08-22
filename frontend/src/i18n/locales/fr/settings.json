@@ -128,9 +128,14 @@
       "enabled": "Réduire les messages longs",
       "enabledHint": "S’applique à tous les modes d’affichage, y compris pendant la génération d’une réponse.",
       "height": "HAUTEUR RÉDUITE",
+      "depth": "RÉDUIRE À PARTIR DE LA PROFONDEUR",
+      "depthHint": "La profondeur 0 correspond au message le plus récent. Les messages longs à cette profondeur ou plus anciens peuvent être réduits.",
       "compact": "Compacte",
       "comfortable": "Confortable",
-      "tall": "Haute"
+      "tall": "Haute",
+      "custom": "Personnalisé",
+      "customHeight": "HAUTEUR PERSONNALISÉE (PX)",
+      "customHeightHint": "Hauteur maximale des messages longs réduits lorsque Personnalisé est sélectionné."
     },
     "modalWidth": {
       "title": "Largeur modale",

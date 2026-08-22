@@ -1545,6 +1545,8 @@ export default function MessageContent({
   const lumiaOOCStyle = useStore((s) => s.lumiaOOCStyle)
   const longMessageCollapseEnabled = useStore((s) => s.longMessageCollapseEnabled)
   const longMessageCollapsePreset = useStore((s) => s.longMessageCollapsePreset)
+  const longMessageCollapseCustomHeight = useStore((s) => s.longMessageCollapseCustomHeight)
+  const longMessageCollapseDepth = useStore((s) => s.longMessageCollapseDepth)
   const expansionKey = chatId && messageId ? longMessageExpansionKey(chatId, messageId) : null
   const longMessageExpanded = useStore((s) => (
     expansionKey ? s.expandedLongMessageKeys.includes(expansionKey) : false
@@ -1553,10 +1555,15 @@ export default function MessageContent({
   const longMessageEligible = isLongMessageCollapseEligible({
     enabled: longMessageCollapseEnabled,
     isUser,
+    depth,
+    collapseDepth: longMessageCollapseDepth,
     chatId,
     messageId,
   })
-  const longMessageMaxHeight = getLongMessageCollapseHeight(longMessageCollapsePreset)
+  const longMessageMaxHeight = getLongMessageCollapseHeight(
+    longMessageCollapsePreset,
+    longMessageCollapseCustomHeight,
+  )
   const containerRef = useRef<HTMLDivElement>(null)
   const contentBodyRef = useRef<HTMLDivElement>(null)
   const prevTextLenRef = useRef(0)

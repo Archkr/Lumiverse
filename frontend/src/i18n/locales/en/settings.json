@@ -134,9 +134,14 @@
       "enabled": "Collapse long messages",
       "enabledHint": "Applies in every chat display mode, including while a reply is generating.",
       "height": "COLLAPSED HEIGHT",
+      "depth": "COLLAPSE AT DEPTH",
+      "depthHint": "Depth 0 is the newest message. Long messages at this depth or older can collapse.",
       "compact": "Compact",
       "comfortable": "Comfortable",
-      "tall": "Tall"
+      "tall": "Tall",
+      "custom": "Custom",
+      "customHeight": "CUSTOM HEIGHT (PX)",
+      "customHeightHint": "Maximum height for collapsed long messages when Custom is selected."
     },
     "modalWidth": {
       "title": "Modal Width",

@@ -12,10 +12,13 @@ import {
 } from './longMessageCollapse'
 
 describe('long message collapse policy', () => {
-  test('maps the three display presets to their fixed pixel heights', () => {
+  test('maps fixed presets and resolves a clamped custom pixel height', () => {
     expect(getLongMessageCollapseHeight('compact')).toBe(300)
     expect(getLongMessageCollapseHeight('comfortable')).toBe(500)
     expect(getLongMessageCollapseHeight('tall')).toBe(800)
+    expect(getLongMessageCollapseHeight('custom', 347)).toBe(347)
+    expect(getLongMessageCollapseHeight('custom', 10)).toBe(100)
+    expect(getLongMessageCollapseHeight('custom', 99999)).toBe(4000)
   })
 
   test('only enables collapsing for identified assistant chat messages', () => {

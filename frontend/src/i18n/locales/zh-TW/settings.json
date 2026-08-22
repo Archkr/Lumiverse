@@ -128,9 +128,14 @@
       "enabled": "摺疊較長的訊息",
       "enabledHint": "適用於所有聊天顯示模式，包括回覆產生期間。",
       "height": "摺疊高度",
+      "depth": "從此深度開始摺疊",
+      "depthHint": "深度 0 是最新訊息。位於此深度或更早的長訊息可以摺疊。",
       "compact": "緊湊",
       "comfortable": "舒適",
-      "tall": "較高"
+      "tall": "較高",
+      "custom": "自訂",
+      "customHeight": "自訂高度（PX）",
+      "customHeightHint": "選擇「自訂」時，摺疊長訊息的最大高度。"
     },
     "modalWidth": {
       "title": "彈窗寬度",

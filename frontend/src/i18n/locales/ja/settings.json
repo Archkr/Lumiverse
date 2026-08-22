@@ -128,9 +128,14 @@
       "enabled": "長いメッセージを折りたたむ",
       "enabledHint": "返信の生成中を含む、すべてのチャット表示モードに適用されます。",
       "height": "折りたたみ時の高さ",
+      "depth": "折りたたみ開始深度",
+      "depthHint": "深度 0 が最新のメッセージです。この深度以降の長いメッセージを折りたためます。",
       "compact": "コンパクト",
       "comfortable": "標準",
-      "tall": "高め"
+      "tall": "高め",
+      "custom": "カスタム",
+      "customHeight": "カスタムの高さ (PX)",
+      "customHeightHint": "カスタム選択時の、折りたたまれた長いメッセージの最大高さです。"
     },
     "modalWidth": {
       "title": "モーダル幅",
