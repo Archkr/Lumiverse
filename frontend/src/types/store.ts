@@ -704,7 +704,7 @@ export interface LorebookEditorSettings {
 }
 
 // ---- Settings Slice ----
-export type LongMessageCollapsePreset = 'compact' | 'comfortable' | 'tall'
+export type LongMessageCollapsePreset = 'compact' | 'comfortable' | 'tall' | 'custom'
 
 export interface SettingsSlice {
   settingsLoaded: boolean
@@ -721,6 +721,8 @@ export interface SettingsSlice {
   chatDisplayMode: 'minimal' | 'immersive' | 'bubble'
   longMessageCollapseEnabled: boolean
   longMessageCollapsePreset: LongMessageCollapsePreset
+  longMessageCollapseCustomHeight: number
+  longMessageCollapseDepth: number
   minimalUseFullAvatar: boolean
   bubbleUserAlign: 'left' | 'right'
   bubbleDisableHover: boolean

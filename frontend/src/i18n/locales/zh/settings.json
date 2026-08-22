@@ -44,9 +44,14 @@
       "enabled": "折叠较长的消息",
       "enabledHint": "适用于所有聊天显示模式，包括回复生成期间。",
       "height": "折叠高度",
+      "depth": "从此深度开始折叠",
+      "depthHint": "深度 0 是最新消息。位于此深度或更早的长消息可以折叠。",
       "compact": "紧凑",
       "comfortable": "舒适",
-      "tall": "较高"
+      "tall": "较高",
+      "custom": "自定义",
+      "customHeight": "自定义高度（PX）",
+      "customHeightHint": "选择“自定义”时，折叠长消息的最大高度。"
     },
     "modalWidth": {
       "title": "弹窗宽度",
