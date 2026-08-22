@@ -14,6 +14,11 @@ app.get("/config", async (c) => {
   return c.json(await embeddingsSvc.getEmbeddingConfig(userId));
 });
 
+app.get("/providers", (c) => {
+  const userId = c.get("userId");
+  return c.json({ providers: embeddingsSvc.listEmbeddingDrivers({ userId }) });
+});
+
 app.put("/config", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json();

@@ -1726,10 +1726,8 @@ function embeddingDriverStatus(record: RegisteredProvider): EmbeddingDriverStatu
 function visibleEmbeddingRecords(userId?: string): RegisteredProvider[] {
   const scopes = userId
     ? [`user:${userId}`, "system"] as const
-    : undefined;
-  return scopes
-    ? providerRegistry.listVisible([...scopes])
-    : providerRegistry.getProviders();
+    : ["system"] as const;
+  return providerRegistry.listVisible([...scopes]);
 }
 
 /** Built-in embedding engines plus live spindle-registered embedding drivers. */

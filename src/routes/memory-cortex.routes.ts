@@ -855,6 +855,13 @@ app.get("/config", (c) => {
   return c.json(memoryCortex.getCortexConfig(userId));
 });
 
+/** GET /providers — Configured sidecar endpoints plus live registry sidecars. */
+app.get("/providers", (c) => {
+  const userId = c.get("userId");
+  const config = memoryCortex.getCortexConfig(userId);
+  return c.json({ providers: memoryCortex.listCortexSidecarProviders({ userId, config }) });
+});
+
 /** PUT /config — Update cortex configuration (partial merge) */
 app.put("/config", async (c) => {
   const userId = c.get("userId");

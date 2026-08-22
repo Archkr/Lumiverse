@@ -49,8 +49,10 @@ function sidecarRecordStatus(record: RegisteredProvider): CortexSidecarProviderS
 }
 
 function visibleSidecarRecords(userId?: string): RegisteredProvider[] {
-  const scopes = userId ? [`user:${userId}` as const, "system" as const] : undefined;
-  const records = scopes ? providerRegistry.listVisible([...scopes]) : providerRegistry.getProviders();
+  const scopes = userId
+    ? [`user:${userId}` as const, "system" as const]
+    : ["system" as const];
+  const records = providerRegistry.listVisible([...scopes]);
   const extra: RegisteredProvider[] = [];
   for (const record of records) {
     try {

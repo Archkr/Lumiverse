@@ -136,6 +136,18 @@ describe("memory-cortex routes provider registry", () => {
     expect(ids).not.toContain("other-sidecar");
   });
 
+  test("an omitted caller is restricted to system providers", () => {
+    providerRegistry.register({ kind: "sidecar", id: "private-sidecar" }, host);
+    providerRegistry.register(
+      { kind: "sidecar", id: "system-sidecar" },
+      { installationId: "inst-system", installScope: "system" },
+    );
+
+    const ids = memoryCortex.listCortexSidecarProviders().map((provider) => provider.id);
+    expect(ids).not.toContain("private-sidecar");
+    expect(ids).toContain("system-sidecar");
+  });
+
   test("provider failure is isolated", () => {
     providerRegistry.register({ kind: "sidecar", id: "good-sidecar" }, host);
     providerRegistry.register(

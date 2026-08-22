@@ -258,17 +258,23 @@ export function deriveEffectiveScope(ctx: HostScopeContext): ProviderScope {
 }
 
 export function measureJsonBytes(value: unknown): number {
-  return new TextEncoder().encode(stableSerialize(value)).length;
+  let binaryBytes = 0;
+  const serialized = JSON.stringify(value ?? null, (_key, nested) => {
+    const byteLength = binaryByteLength(nested);
+    if (byteLength === null) return nested;
+    binaryBytes += byteLength;
+    return { $bin: byteLength };
+  });
+  return binaryBytes + new TextEncoder().encode(serialized).length;
 }
 
-function stableSerialize(value: unknown): string {
-  if (value instanceof Uint8Array) {
-    return JSON.stringify({ $bin: value.byteLength });
+function binaryByteLength(value: unknown): number | null {
+  if (value instanceof ArrayBuffer) return value.byteLength;
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer) {
+    return value.byteLength;
   }
-  if (ArrayBuffer.isView(value)) {
-    return JSON.stringify({ $bin: value.byteLength });
-  }
-  return JSON.stringify(value ?? null);
+  if (ArrayBuffer.isView(value)) return value.byteLength;
+  return null;
 }
 
 export function isBrokerKind(kind: string): kind is ProviderBrokerKind {
@@ -738,15 +744,19 @@ export class ProviderRegistry {
       timeoutMs: this.timeoutMs,
       maxBytes: PROVIDER_RESULT_MAX_BYTES,
     };
+    if (this.approvedBrokerOrigins.size > 0) {
+      init.allowedOrigins = [...this.approvedBrokerOrigins];
+    }
     if (prepared.body !== undefined) {
       init.body = this.encodeBody(prepared.body, prepared.binary);
     }
 
     try {
       const response = await this.fetchImpl(prepared.url, init);
+      const responseBytes = await this.readResponseBytes(response);
       const body = prepared.binary
-        ? new Uint8Array(await response.arrayBuffer())
-        : await this.readResponseBody(response);
+        ? responseBytes
+        : this.decodeResponseBody(response, responseBytes);
       const result: BrokerResponse = {
         ok: response.ok,
         status: response.status,
@@ -882,24 +892,78 @@ export class ProviderRegistry {
   }
 
   private encodeBody(body: unknown, binary: boolean): BodyInit {
-    if (body instanceof Uint8Array) return body;
+    if (body instanceof Uint8Array) {
+      const copy = new Uint8Array(body.byteLength);
+      copy.set(body);
+      return copy;
+    }
     if (ArrayBuffer.isView(body)) {
-      return new Uint8Array(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength));
+      const view = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+      const copy = new Uint8Array(view.byteLength);
+      copy.set(view);
+      return copy;
     }
     if (typeof body === "string" || body instanceof ArrayBuffer) return body;
     if (binary && body && typeof body === "object" && "data" in (body as object)) {
       const data = (body as { data: unknown }).data;
-      if (data instanceof Uint8Array) return data;
+      if (data instanceof Uint8Array) {
+        const copy = new Uint8Array(data.byteLength);
+        copy.set(data);
+        return copy;
+      }
     }
     return JSON.stringify(body ?? null);
   }
 
-  private async readResponseBody(response: Response): Promise<unknown> {
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      return response.json();
+  private async readResponseBytes(response: Response): Promise<Uint8Array> {
+    if (!response.body) return new Uint8Array();
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`provider response timed out after ${this.timeoutMs}ms`)),
+        this.timeoutMs,
+      );
+    });
+
+    try {
+      while (true) {
+        const { done, value } = await Promise.race([reader.read(), timeoutPromise]);
+        if (done) break;
+        total += value.byteLength;
+        if (total > PROVIDER_RESULT_MAX_BYTES) {
+          throw new Error(
+            `provider response exceeds ${PROVIDER_RESULT_MAX_BYTES} bytes (${total})`,
+          );
+        }
+        chunks.push(value);
+      }
+    } catch (err) {
+      await reader.cancel(err).catch(() => undefined);
+      throw err;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      reader.releaseLock();
     }
-    return response.text();
+
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return body;
+  }
+
+  private decodeResponseBody(response: Response, bytes: Uint8Array): unknown {
+    const contentType = response.headers.get("content-type") || "";
+    const text = new TextDecoder().decode(bytes);
+    if (contentType.includes("application/json")) {
+      return JSON.parse(text);
+    }
+    return text;
   }
 
   private requireSubject(host: HostScopeContext): string {

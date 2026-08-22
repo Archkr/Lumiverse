@@ -847,3 +847,131 @@ function extractJson(text: string): any | null {
     return null;
   }
 }
+
+// ─── Summary Parsing & Quality Gate ────────────────────────────
+
+export type SummaryKind = "scene" | "arc";
+type GeneratedSummary = { summary: string; title: string | null };
+
+const SUMMARY_TOOL_NAMES: Record<SummaryKind, string> = {
+  scene: "write_scene_continuity",
+  arc: "write_arc_continuity",
+};
+
+function cleanSummaryResponse(content: string): string {
+  let cleaned = content.trim();
+  cleaned = cleaned.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "");
+  cleaned = cleaned.replace(/<(think|thinking|reasoning)>[\s\S]*$/gi, "");
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json|text)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  }
+  return cleaned.trim();
+}
+
+export function parseGeneratedSummary(content: string): GeneratedSummary | null {
+  const json = extractJson(content);
+  if (json) {
+    const summary = typeof json.summary === "string" ? json.summary.trim() : "";
+    if (!summary) return null;
+    return {
+      summary,
+      title: typeof json.title === "string" && json.title.trim() ? json.title.trim() : null,
+    };
+  }
+
+  // JSON is preferred for titles and diagnostics, but many smaller or local
+  // models produce a perfectly usable note as plain text. Treat that as a
+  // candidate and let the semantic quality gate decide whether it needs retry.
+  const plain = cleanSummaryResponse(content);
+  if (!plain || /[{}]/.test(plain)) return null;
+  const summary = plain
+    .replace(/^(?:summary|continuity note)\s*:\s*/i, "")
+    .trim();
+  return summary ? { summary, title: null } : null;
+}
+
+export function parseGeneratedSummaryResponse(
+  response: {
+    content: string;
+    tool_calls?: Array<{ name: string; args: Record<string, unknown> }>;
+  },
+  kind: SummaryKind,
+): GeneratedSummary | null {
+  const expectedName = SUMMARY_TOOL_NAMES[kind];
+  const call = response.tool_calls?.find((candidate) => candidate.name === expectedName);
+  if (call) {
+    const summary = typeof call.args.summary === "string" ? call.args.summary.trim() : "";
+    if (!summary) return null;
+    const title = typeof call.args.title === "string" && call.args.title.trim()
+      ? call.args.title.trim()
+      : null;
+    return { summary, title };
+  }
+  return parseGeneratedSummary(response.content);
+}
+
+/** Return the reason a candidate should be retried, or null when it is compact enough. */
+export function getSummaryQualityIssue(
+  summary: string,
+  source: string,
+  maxWords: number,
+): string | null {
+  const summaryWords = summary.trim().match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+  const sourceWords = source.trim().match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+  if (summaryWords.length < 8) return "it is too short to preserve useful continuity";
+  if (summaryWords.length > maxWords) return `it exceeds the ${maxWords}-word limit`;
+  if (sourceWords.length >= maxWords * 2 && summaryWords.length / sourceWords.length > 0.45) {
+    return "it does not compress the source enough";
+  }
+
+  // A weak model often emits source sentences unchanged. Flag sustained
+  // seven-word overlap, while allowing names and short factual phrases.
+  const normalize = (words: string[]) => words.map((word) => word.toLowerCase());
+  const sourcePhrases = new Set<string>();
+  const normalizedSource = normalize(sourceWords);
+  for (let index = 0; index + 7 <= normalizedSource.length; index++) {
+    sourcePhrases.add(normalizedSource.slice(index, index + 7).join(" "));
+  }
+  const normalizedSummary = normalize(summaryWords);
+  let phraseCount = 0;
+  let copiedPhrases = 0;
+  for (let index = 0; index + 7 <= normalizedSummary.length; index++) {
+    phraseCount++;
+    if (sourcePhrases.has(normalizedSummary.slice(index, index + 7).join(" "))) copiedPhrases++;
+  }
+  if (copiedPhrases >= 2 && copiedPhrases / phraseCount >= 0.35) {
+    return "it copies too much source wording instead of synthesizing changes";
+  }
+  return null;
+}
+
+/**
+ * Drain an existing chunk backlog after a rebuild. Rebuild ingestion uses
+ * pre-computed extraction responses, so consolidation must run separately
+ * with the real sidecar adapter after all chunks have been persisted.
+ */
+export async function consolidateBacklog(
+  userId: string,
+  chatId: string,
+  config: ConsolidationConfig,
+  generateRawFn?: ConsolidationGenerateRawFn,
+  sidecarConnectionId?: string,
+  sidecarTimeoutMs?: number,
+  samplingParameters?: Record<string, unknown>,
+  extraScaffoldTags?: string[],
+): Promise<number> {
+  let created = 0;
+  while (await maybeConsolidate(
+    userId,
+    chatId,
+    config,
+    generateRawFn,
+    sidecarConnectionId,
+    sidecarTimeoutMs,
+    samplingParameters,
+    extraScaffoldTags,
+  )) {
+    created++;
+  }
+  return created;
+}
