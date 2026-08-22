@@ -43,6 +43,7 @@ Frontend UI can follow two supported rendering paths:
 | [UI Placement](ui-placement.md) | Varies | Drawer tabs, float widgets, dock panels, modals, context menus, input bar actions |
 | [Shared Components](shared-components.md) | Free | Mount Lumiverse's first-party React components — model picker, form atoms, searchable selects, pagination, and the native Loom block editor — into extension-owned DOM |
 | [Host Surfaces](host-surfaces.md) | Varies | DOM decorators, native component overrides, settings tabs, message actions, and `components.mountHostSurface` host surface IDs (QuickToolbar, ConnectionsPicker, portrait dock, world-book editor, and more) |
+| [Mount Points](mount-points.md) | Free | Complete catalog of `ctx.ui.mount()` anchor points across chat, composer, messages, landing page, drawer, editors, settings, and overlays |
 | [Backend Communication](backend-communication.md) | Free | Send/receive messages to/from backend worker |
 | [Frontend Process Lifecycle](processes.md) | Free | Register backend-spawned frontend process handlers |
 | [Message Tags](message-tags.md) | Free | Intercept custom XML tags in chat messages |
