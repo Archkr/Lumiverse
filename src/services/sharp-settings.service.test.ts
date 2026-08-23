@@ -36,19 +36,28 @@ describe("Sharp cache pressure handling", () => {
     });
   });
 
-  test("resolves thumbnail codec and per-codec quality defaults", () => {
-    expect(getSharpSettingsStatus().effectiveSettings).toMatchObject({
+  test("resolves codec-aware automatic concurrency and per-codec quality defaults", () => {
+    const initial = getSharpSettingsStatus();
+    expect(initial.effectiveSettings).toMatchObject({
+      concurrency: initial.automaticConcurrency.webp,
       thumbnailCodec: "webp",
       webpQuality: 80,
       avifQuality: 54,
     });
+    expect(initial.automaticConcurrency.avif).toBeLessThanOrEqual(4);
+    expect(initial.automaticConcurrency.avif).toBeLessThanOrEqual(initial.automaticConcurrency.webp);
 
     applySharpSettings({ thumbnailCodec: "avif", webpQuality: 77, avifQuality: 51 });
-    expect(getSharpSettingsStatus().effectiveSettings).toMatchObject({
+    const automaticAvif = getSharpSettingsStatus();
+    expect(automaticAvif.effectiveSettings).toMatchObject({
+      concurrency: automaticAvif.automaticConcurrency.avif,
       thumbnailCodec: "avif",
       webpQuality: 77,
       avifQuality: 51,
     });
+
+    applySharpSettings({ thumbnailCodec: "avif", concurrency: 7 });
+    expect(getSharpSettingsStatus().effectiveSettings.concurrency).toBe(7);
   });
 
   test("rejects unsupported thumbnail codecs and clamps quality values", () => {

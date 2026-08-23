@@ -1,4 +1,4 @@
-import { get, del, upload, uploadWithProgress, BASE_URL } from './client'
+import { get, del, post, upload, uploadWithProgress, BASE_URL } from './client'
 import type { Image } from '@/types/api'
 
 export type ImageSize = 'sm' | 'lg'
@@ -106,7 +106,7 @@ export const imagesApi = {
     if (options?.onProgress) {
       return new Promise(async (resolve, reject) => {
         try {
-          const res = await fetch(`/api/v1/images/rebuild-thumbnails`, {
+          const res = await fetch(joinApiPath('/images/rebuild-thumbnails'), {
             method: 'POST',
             headers: { Accept: 'text/event-stream' },
             credentials: 'include',
@@ -116,12 +116,18 @@ export const imagesApi = {
             reject(new Error(err.error || `HTTP ${res.status}`))
             return
           }
+          if (!res.headers.get('content-type')?.includes('text/event-stream')) {
+            const contentType = res.headers.get('content-type') || 'unknown content type'
+            reject(new Error(`Rebuild endpoint returned ${contentType} instead of an event stream`))
+            return
+          }
           const reader = res.body?.getReader()
           if (!reader) { reject(new Error('No response body')); return }
 
           const decoder = new TextDecoder()
           let buffer = ''
           let finalResult: any = null
+          let eventType = ''
 
           while (true) {
             const { done, value } = await reader.read()
@@ -130,7 +136,6 @@ export const imagesApi = {
             const lines = buffer.split('\n')
             buffer = lines.pop() || ''
 
-            let eventType = ''
             for (const line of lines) {
               if (line.startsWith('event: ')) {
                 eventType = line.slice(7).trim()
@@ -139,6 +144,7 @@ export const imagesApi = {
                 if (eventType === 'progress') options.onProgress!(data)
                 else if (eventType === 'done') finalResult = data
                 else if (eventType === 'error') { reject(new Error(data.error)); return }
+                eventType = ''
               }
             }
           }
@@ -149,9 +155,6 @@ export const imagesApi = {
       })
     }
 
-    return fetch(`/api/v1/images/rebuild-thumbnails`, {
-      method: 'POST',
-      credentials: 'include',
-    }).then((r) => r.json())
+    return post<ThumbnailRebuildProgress>('/images/rebuild-thumbnails', undefined, { timeout: 0 })
   },
 }

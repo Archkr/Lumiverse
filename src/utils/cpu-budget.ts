@@ -56,6 +56,21 @@ export function currentWorkerBudget(): WorkerBudget {
   return budgetOverride ?? deriveWorkerBudget();
 }
 
+/**
+ * Bound Sharp's per-image thread pool for thumbnail encoding. AVIF's libaom
+ * encoder creates additional threads of its own, while the image service also
+ * runs multiple jobs concurrently, so large-host CPU scaling is counterproductive.
+ */
+export function deriveThumbnailSharpConcurrency(
+  codec: "webp" | "avif",
+  cpuDerivedConcurrency: number = currentWorkerBudget().sharpConcurrency,
+): number {
+  const concurrency = Number.isFinite(cpuDerivedConcurrency)
+    ? Math.max(1, Math.floor(cpuDerivedConcurrency))
+    : 1;
+  return Math.min(codec === "avif" ? 4 : 16, concurrency);
+}
+
 export function setWorkerBudgetOverride(budget: WorkerBudget | null): void {
   budgetOverride = budget;
 }

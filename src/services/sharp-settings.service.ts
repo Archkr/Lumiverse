@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { currentWorkerBudget } from "../utils/cpu-budget";
+import { currentWorkerBudget, deriveThumbnailSharpConcurrency } from "../utils/cpu-budget";
 import { getFirstUserId } from "../auth/seed";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
@@ -34,10 +34,17 @@ export interface SharpSettingsStatus {
   configuredSettings: SharpSettings;
   effectiveSettings: ResolvedSharpSettings;
   defaults: ResolvedSharpSettings;
+  automaticConcurrency: Record<ThumbnailCodec, number>;
 }
 
+const cpuDerivedSharpConcurrency = currentWorkerBudget().sharpConcurrency;
+const AUTOMATIC_CONCURRENCY: Record<ThumbnailCodec, number> = {
+  webp: deriveThumbnailSharpConcurrency("webp", cpuDerivedSharpConcurrency),
+  avif: deriveThumbnailSharpConcurrency("avif", cpuDerivedSharpConcurrency),
+};
+
 const DEFAULT_SHARP_SETTINGS: ResolvedSharpSettings = {
-  concurrency: currentWorkerBudget().sharpConcurrency,
+  concurrency: AUTOMATIC_CONCURRENCY.webp,
   cacheMemoryMb: 64,
   cacheFiles: 128,
   cacheItems: 256,
@@ -85,12 +92,13 @@ export function normalizeSharpSettings(input: unknown): SharpSettings {
 }
 
 function resolveSharpSettings(configured: SharpSettings | null | undefined): ResolvedSharpSettings {
+  const thumbnailCodec = configured?.thumbnailCodec ?? DEFAULT_SHARP_SETTINGS.thumbnailCodec;
   return {
-    concurrency: configured?.concurrency ?? DEFAULT_SHARP_SETTINGS.concurrency,
+    concurrency: configured?.concurrency ?? AUTOMATIC_CONCURRENCY[thumbnailCodec],
     cacheMemoryMb: configured?.cacheMemoryMb ?? DEFAULT_SHARP_SETTINGS.cacheMemoryMb,
     cacheFiles: configured?.cacheFiles ?? DEFAULT_SHARP_SETTINGS.cacheFiles,
     cacheItems: configured?.cacheItems ?? DEFAULT_SHARP_SETTINGS.cacheItems,
-    thumbnailCodec: configured?.thumbnailCodec ?? DEFAULT_SHARP_SETTINGS.thumbnailCodec,
+    thumbnailCodec,
     webpQuality: configured?.webpQuality ?? DEFAULT_SHARP_SETTINGS.webpQuality,
     avifQuality: configured?.avifQuality ?? DEFAULT_SHARP_SETTINGS.avifQuality,
   };
@@ -130,6 +138,7 @@ export function getSharpSettingsStatus(): SharpSettingsStatus {
     configuredSettings: { ...currentConfiguredSettings },
     effectiveSettings: { ...currentEffectiveSettings },
     defaults: { ...DEFAULT_SHARP_SETTINGS },
+    automaticConcurrency: { ...AUTOMATIC_CONCURRENCY },
   };
 }
 

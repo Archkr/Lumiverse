@@ -16,7 +16,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { writeInsideAvif, writeInsideWebp } from "../src/utils/image-pipeline";
-import { currentWorkerBudget } from "../src/utils/cpu-budget";
+import { currentWorkerBudget, deriveThumbnailSharpConcurrency } from "../src/utils/cpu-budget";
 
 const DATA_DIR = process.env.DATA_DIR || "data";
 const DB_PATH = join(DATA_DIR, "lumiverse.db");
@@ -74,7 +74,7 @@ const quality = configuredInt(
 );
 const sharpConcurrency = configuredInt(
   sharpSettings.concurrency,
-  currentWorkerBudget().sharpConcurrency,
+  deriveThumbnailSharpConcurrency(codec, currentWorkerBudget().sharpConcurrency),
   1,
   16,
 );

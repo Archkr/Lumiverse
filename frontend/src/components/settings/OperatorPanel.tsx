@@ -510,6 +510,16 @@ export default function OperatorPanel() {
   const activeThumbnailCodec = sharpSettings.thumbnailCodec
     ?? sharpStatus?.effectiveSettings.thumbnailCodec
     ?? 'webp'
+  const activeAutomaticConcurrency = sharpStatus?.automaticConcurrency?.[activeThumbnailCodec]
+    ?? (activeThumbnailCodec === 'avif'
+      ? Math.min(4, sharpStatus?.defaults.concurrency ?? 4)
+      : sharpStatus?.defaults.concurrency ?? 4)
+  const activeThumbnailQuality = activeThumbnailCodec === 'avif'
+    ? sharpSettings.avifQuality
+    : sharpSettings.webpQuality
+  const activeThumbnailQualityDefault = activeThumbnailCodec === 'avif'
+    ? sharpStatus?.defaults.avifQuality ?? 54
+    : sharpStatus?.defaults.webpQuality ?? 80
 
   // Track the operation that triggered a server restart so we can
   // show "Reconnecting..." once the WS drops and recover on reconnect.
@@ -997,7 +1007,7 @@ export default function OperatorPanel() {
       clearInterval(disconnectPoll)
       unsub()
     }
-  }, [reconnecting, refreshDatabase, refreshDiskWarningSettings, refreshDnsSettings, refreshSharpSettings, refreshSmartctl, refreshStatus, refreshTrustedHosts])
+  }, [reconnecting, refreshBrokerOrigins, refreshDatabase, refreshDiskWarningSettings, refreshDnsSettings, refreshSharpSettings, refreshSmartctl, refreshStatus, refreshTrustedHosts])
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
@@ -2567,7 +2577,7 @@ export default function OperatorPanel() {
               <span className={styles.dbInlineText}>
                 {sharpStatus
                   ? t('operator.sharpEffectiveValue', {
-                    concurrency: sharpStatus.defaults.concurrency,
+                    concurrency: activeAutomaticConcurrency,
                     cacheMb: sharpStatus.defaults.cacheMemoryMb,
                     cacheFiles: sharpStatus.defaults.cacheFiles,
                     cacheItems: sharpStatus.defaults.cacheItems,
@@ -2607,36 +2617,30 @@ export default function OperatorPanel() {
           </div>
 
           <div className={styles.tuningGrid}>
-            <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>{t('operator.thumbnailWebpQuality')}</span>
+            <label key={activeThumbnailCodec} className={styles.fieldGroup}>
+              <span className={styles.fieldLabel}>
+                {t(activeThumbnailCodec === 'avif'
+                  ? 'operator.thumbnailAvifQuality'
+                  : 'operator.thumbnailWebpQuality')}
+              </span>
               <NumericInput
                 min={1}
                 max={100}
                 step={1}
                 className={styles.fieldInput}
-                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.webpQuality ?? 80 })}
-                value={sharpSettings.webpQuality ?? null}
+                placeholder={t('operator.placeholderDefault', { value: activeThumbnailQualityDefault })}
+                value={activeThumbnailQuality ?? null}
                 integer
                 allowEmpty
-                onChange={(value) => setSharpSettings((prev) => ({ ...prev, webpQuality: value }))}
+                onChange={(value) => setSharpSettings((prev) => activeThumbnailCodec === 'avif'
+                  ? { ...prev, avifQuality: value }
+                  : { ...prev, webpQuality: value })}
               />
-              <span className={styles.fieldHint}>{t('operator.thumbnailWebpQualityHint')}</span>
-            </label>
-
-            <label className={styles.fieldGroup}>
-              <span className={styles.fieldLabel}>{t('operator.thumbnailAvifQuality')}</span>
-              <NumericInput
-                min={1}
-                max={100}
-                step={1}
-                className={styles.fieldInput}
-                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.avifQuality ?? 54 })}
-                value={sharpSettings.avifQuality ?? null}
-                integer
-                allowEmpty
-                onChange={(value) => setSharpSettings((prev) => ({ ...prev, avifQuality: value }))}
-              />
-              <span className={styles.fieldHint}>{t('operator.thumbnailAvifQualityHint')}</span>
+              <span className={styles.fieldHint}>
+                {t(activeThumbnailCodec === 'avif'
+                  ? 'operator.thumbnailAvifQualityHint'
+                  : 'operator.thumbnailWebpQualityHint')}
+              </span>
             </label>
           </div>
 
@@ -2648,13 +2652,18 @@ export default function OperatorPanel() {
                 max={16}
                 step={1}
                 className={styles.fieldInput}
-                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.concurrency ?? 4 })}
+                placeholder={t('operator.placeholderDefault', { value: activeAutomaticConcurrency })}
                 value={sharpSettings.concurrency ?? null}
                 integer
                 allowEmpty
                 onChange={(value) => setSharpSettings((prev) => ({ ...prev, concurrency: value }))}
               />
-              <span className={styles.fieldHint}>{t('operator.sharpConcurrencyHint')}</span>
+              <span className={styles.fieldHint}>
+                {t('operator.sharpConcurrencyHint', {
+                  codec: activeThumbnailCodec.toUpperCase(),
+                  value: activeAutomaticConcurrency,
+                })}
+              </span>
             </label>
 
             <label className={styles.fieldGroup}>

@@ -1455,7 +1455,7 @@
     "thumbnailAvifQuality": "AVIF quality",
     "thumbnailAvifQualityHint": "Used by Sharp AVIF encoding. Blank uses 54.",
     "sharpConcurrency": "Concurrency",
-    "sharpConcurrencyHint": "Blank uses the backend default. New image work picks up changes immediately.",
+    "sharpConcurrencyHint": "Blank automatically uses {{value}} for {{codec}}. New image work picks up changes immediately.",
     "sharpThumbnailTitle": "Deferred thumbnails",
     "sharpThumbnailIdle": "Queue idle",
     "sharpThumbnailCounts": "{{processed}} processed · {{remaining}} left · {{total}} total",

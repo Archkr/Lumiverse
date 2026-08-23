@@ -58,6 +58,7 @@ export interface OperatorSharpStatus {
   configuredSettings: SharpSettings
   effectiveSettings: ResolvedSharpSettings
   defaults: ResolvedSharpSettings
+  automaticConcurrency?: Record<'webp' | 'avif', number>
   thumbnailQueue?: ImageThumbnailQueuePayload
   thumbnailRecovery?: ThumbnailQueueRecovery
 }

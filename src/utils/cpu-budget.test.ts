@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   currentWorkerBudget,
   deriveWorkerBudget,
+  deriveThumbnailSharpConcurrency,
   logicalThreadCount,
   setWorkerBudgetOverride,
 } from "./cpu-budget";
@@ -73,5 +74,13 @@ describe("cpu-budget", () => {
     expect(currentWorkerBudget()).toEqual(override);
     setWorkerBudgetOverride(null);
     expect(currentWorkerBudget().logicalThreads).toBeGreaterThanOrEqual(1);
+  });
+
+  test("caps automatic thumbnail concurrency by codec on large hosts", () => {
+    const dualSocketBudget = deriveWorkerBudget(72);
+    expect(dualSocketBudget.sharpConcurrency).toBe(21);
+    expect(deriveThumbnailSharpConcurrency("webp", dualSocketBudget.sharpConcurrency)).toBe(16);
+    expect(deriveThumbnailSharpConcurrency("avif", dualSocketBudget.sharpConcurrency)).toBe(4);
+    expect(deriveThumbnailSharpConcurrency("avif", 2)).toBe(2);
   });
 });
