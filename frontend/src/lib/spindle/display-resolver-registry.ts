@@ -39,7 +39,6 @@ export function registerDisplayResolver(
   identifier: string,
   resolver: SpindleDisplayResolver,
 ): () => void {
-  const reRegistration = everRegistered
   everRegistered = true
   const entry: RegisteredDisplayResolver = { identifier, resolver }
   active = entry
