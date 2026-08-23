@@ -1,4 +1,5 @@
 import sharp from "../utils/sharp-config";
+import { convertImageToPng, readImageMetadata } from "../utils/image-pipeline";
 import { extname } from "path";
 import { zipSync } from "fflate";
 import { LANDING_PERSPECTIVE_LAYERS_KEY, getCharacter, normalizeLandingPerspectiveLayers } from "./characters.service";
@@ -341,9 +342,9 @@ export async function exportAsPng(userId: string, characterId: string): Promise<
   }
 
   // Ensure it's PNG format
-  const metadata = await sharp(avatarBuffer).metadata();
+  const metadata = await readImageMetadata(avatarBuffer);
   if (metadata.format !== "png") {
-    avatarBuffer = await sharp(avatarBuffer).png().toBuffer();
+    avatarBuffer = await convertImageToPng(avatarBuffer);
   }
 
   // The on-disk avatar is often the original card upload, which still carries

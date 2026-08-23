@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { closeDatabase, getDb, initDatabase } from "../db/connection";
 import { env } from "../env";
 import { embedPngTextChunk } from "../services/character-export.service";
+import { waitForDeferredImageProcessing } from "../services/images.service";
 import {
   listCharacterSourceFilenameIds,
   listCharacterSummaries,
@@ -153,7 +154,15 @@ describe("SillyTavern character bulk migration", () => {
         "SELECT has_thumbnail, owner_character_id FROM images WHERE user_id = ?",
       ).all(USER_ID) as Array<{ has_thumbnail: number; owner_character_id: string | null }>;
       expect(images).toHaveLength(2);
-      expect(images.every((image) => image.has_thumbnail === 0 && !!image.owner_character_id)).toBe(true);
+      // Deferred thumbnail work can now finish before this assertion when the
+      // Bun.Image path handles these tiny PNGs, so ownership is the stable
+      // post-upload contract. Verify the eventual thumbnail state explicitly.
+      expect(images.every((image) => !!image.owner_character_id)).toBe(true);
+      await waitForDeferredImageProcessing();
+      const processedImages = getDb().query(
+        "SELECT has_thumbnail FROM images WHERE user_id = ?",
+      ).all(USER_ID) as Array<{ has_thumbnail: number }>;
+      expect(processedImages.every((image) => image.has_thumbnail === 1)).toBe(true);
 
       expect([...listCharacterSourceFilenameIds(USER_ID).keys()].sort()).toEqual([
         "alice.png",

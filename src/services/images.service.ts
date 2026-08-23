@@ -1,10 +1,14 @@
-import sharp from "../utils/sharp-config";
 import { getDb } from "../db/connection";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { env } from "../env";
 import { currentWorkerBudget } from "../utils/cpu-budget";
 import { classifyUserMediaContentType } from "../utils/user-media-headers";
+import {
+  convertImageToWebp,
+  readImageMetadata,
+  writeInsideWebp,
+} from "../utils/image-pipeline";
 import type { Image } from "../types/image";
 import { mkdirSync, existsSync, lstatSync, readdirSync, statSync, unlinkSync } from "fs";
 import { unlink } from "fs/promises";
@@ -326,9 +330,9 @@ async function deriveMediaMetadataAndThumbnails(
   if (!thumbnailSource) return { width, height, hasThumbnail };
 
   try {
-    const metadata = await sharp(thumbnailSource).metadata();
-    width = metadata.width ?? null;
-    height = metadata.height ?? null;
+    const metadata = await readImageMetadata(thumbnailSource);
+    width = metadata.width;
+    height = metadata.height;
 
     const sizes = getThumbnailSettings(userId);
     const [smOk, lgOk] = await Promise.all([
@@ -389,10 +393,9 @@ async function generateThumbnail(
   size: number
 ): Promise<boolean> {
   try {
-    await sharp(source)
-      .resize(size, size, { fit: "inside", withoutEnlargement: true })
-      .webp({ quality: WEBP_QUALITY })
-      .toFile(outputPath);
+    await writeInsideWebp(source, outputPath, size, size, WEBP_QUALITY, {
+      withoutEnlargement: true,
+    });
     return true;
   } catch {
     return false;
@@ -606,15 +609,12 @@ export async function uploadOptimizedWebpImage(userId: string, file: File, optio
   let height: number | null = null;
   const hasThumbnail = false;
 
-  const webpBuffer = await sharp(inputBuffer)
-    .rotate()
-    .webp({ quality: WEBP_QUALITY })
-    .toBuffer({ resolveWithObject: true })
-    .then(({ data, info }) => {
-      width = info.width ?? null;
-      height = info.height ?? null;
-      return Buffer.from(data);
-    });
+  const webpBuffer = await convertImageToWebp(inputBuffer, WEBP_QUALITY, {
+    autoOrient: true,
+  });
+  const metadata = await readImageMetadata(webpBuffer);
+  width = metadata.width;
+  height = metadata.height;
 
   await writeImageFile(filepath, webpBuffer);
 
@@ -905,9 +905,9 @@ async function processDeferredImage(
   let width: number | null = null;
   let height: number | null = null;
   try {
-    const meta = await sharp(filepath).metadata();
-    width = meta.width ?? null;
-    height = meta.height ?? null;
+    const meta = await readImageMetadata(filepath);
+    width = meta.width;
+    height = meta.height;
   } catch {
     return;
   }

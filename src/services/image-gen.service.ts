@@ -18,7 +18,7 @@ import {
 import { buildMacroEnvForChat } from "./chats.service";
 import { getActivatedWorldInfoEntriesForChat, resolveWorldInfoOutlets } from "./prompt-assembly.service";
 import { evaluate as evaluateMacros, registry as macroRegistry } from "../macros";
-import sharp from "../utils/sharp-config";
+import { resizeInsideToWebp } from "../utils/image-pipeline";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
@@ -60,10 +60,9 @@ async function buildRelayImagePreview(dataUrl: string): Promise<string | undefin
   for (const size of [640, 480, 320]) {
     for (const quality of [75, 60, 45, 30]) {
       try {
-        const output = await sharp(input)
-          .resize(size, size, { fit: "inside", withoutEnlargement: true })
-          .webp({ quality })
-          .toBuffer();
+        const output = await resizeInsideToWebp(input, size, size, quality, {
+          withoutEnlargement: true,
+        });
         const preview = `data:image/webp;base64,${output.toString("base64")}`;
         if (preview.length <= RELAY_IMAGE_PREVIEW_MAX_CHARS) return preview;
       } catch {

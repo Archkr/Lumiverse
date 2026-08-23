@@ -14,6 +14,7 @@ import { clearCortexResultCaches } from "./memory-cortex";
 import { releaseIdleHeuristicWorkers } from "./memory-cortex/heuristic-worker-host";
 import { clearStmtCache } from "./pagination";
 import { releaseIdlePromptAssemblyWorkers } from "./prompt-assembly-worker-client";
+import { releaseSharpCacheMemory } from "./sharp-settings.service";
 import { clearVectorWorldInfoCache } from "./prompt-assembly.service";
 import { releaseTokenizerMemory } from "./tokenizer.service";
 import { clearWorldInfoActivationCache } from "./world-info-activation.service";
@@ -33,6 +34,7 @@ const releasers: ReadonlyArray<readonly [string, () => unknown]> = [
   ["ComfyUI capabilities", clearCapabilityCache],
   ["OpenRouter metadata", clearOpenRouterMetadataCache],
   ["prepared statements", clearStmtCache],
+  ["Sharp cache", releaseSharpCacheMemory],
   ["prompt assembly workers", releaseIdlePromptAssemblyWorkers],
   ["cortex heuristic workers", releaseIdleHeuristicWorkers],
   ["regex workers", releaseIdleRegexWorkers],

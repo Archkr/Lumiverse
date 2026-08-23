@@ -108,6 +108,17 @@ export function getSharpSettingsStatus(): SharpSettingsStatus {
   };
 }
 
+/** Drop Sharp/libvips caches while keeping the configured limits active for later work. */
+export function releaseSharpCacheMemory(): void {
+  const effective = { ...currentEffectiveSettings };
+  sharp.cache(false);
+  sharp.cache({
+    memory: effective.cacheMemoryMb,
+    files: effective.cacheFiles,
+    items: effective.cacheItems,
+  });
+}
+
 export function putSharpSettings(userId: string, input: unknown): SharpSettingsStatus {
   const normalized = normalizeSharpSettings(input);
   putSetting(userId, SHARP_SETTINGS_KEY, normalized);
