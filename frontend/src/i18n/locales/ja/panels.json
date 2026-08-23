@@ -693,6 +693,7 @@
     "requestFailed": "リクエスト失敗",
     "slowDisplayTitle": "遅い正規表現スクリプト",
     "slowDisplayTimedOut": "表示正規表現「{{name}}」がタイムアウトになり、正規表現スクリプトでフラグが立てられました。",
+        "quarantinedDisplay": "表示正規表現「{{name}}」が実行制限時間を超えたため隔離されました。再有効化または編集されるまでスキップされます。",
     "slowDisplaySlow": "表示正規表現「{{name}}」が {{duration}} に対して実行され、正規表現スクリプトでフラグが立てられました。",
     "timedOut": "正規表現の実行中にタイムアウトしました",
     "slowDetected": "遅い正規表現が検出されました({{seconds}}s)",

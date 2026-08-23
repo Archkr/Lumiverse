@@ -56,7 +56,7 @@ export interface SpindleSettingsAPI {
   readonly core: {
     get<T>(key: string): T | undefined
     watch<T>(key: string, callback: (value: T) => void): () => void
-    list(): Array<{ key: string; permission: string | null }>
+    list(): string[]
     isReady(): boolean
   }
 }
@@ -344,9 +344,9 @@ export function createSettingsBridge(options: SettingsBridgeOptions): SpindleSet
           unsubscribe()
         }
       },
-      list(): Array<{ key: string; permission: string | null }> {
+      list(): string[] {
         assertActive()
-        return options.coreSettingKeys.map(({ key, permission }) => ({ key, permission }))
+        return options.coreSettingKeys.map(({ key }) => key)
       },
       isReady(): boolean {
         return options.core.isReady?.() ?? true

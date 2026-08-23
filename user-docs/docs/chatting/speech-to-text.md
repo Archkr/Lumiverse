@@ -31,6 +31,11 @@ For an STT connection:
 
 Extension-provided STT options may expose different models or requirements. See the extension's own instructions and [Extension-Provided AI Providers](../extensions/index.md#extension-provided-ai-providers).
 
+Extension-registered providers appear in the provider picker live — as soon as the extension registers them over WebSocket, no page reload is needed. If an extension provider can't be reached, it is shown with a status badge: **unavailable** (the endpoint could not be reached or rejected the request) or **timeout** (it did not respond in time).
+
+!!! note "Private connections are per-user"
+    On multi-user instances, STT connections are scoped to the account that created them. Another user can never invoke your private connection through their chats or extensions. System-provided connections remain usable by everyone.
+
 ---
 
 ## Voice & Speech Panel Options

@@ -7,6 +7,15 @@ interface RegisteredDisplayResolver {
 }
 
 let active: RegisteredDisplayResolver | null = null
+// True once ANY resolver registration happened in this page session. A later
+// registration therefore means an extension bundle re-evaluated (hot reload /
+// restart) while the host page stayed alive — cached rendered text from the
+// previous bundle generation must not be served.
+let everRegistered = false
+
+export function hasDisplayResolverRegisteredBefore(): boolean {
+  return everRegistered
+}
 
 export function getDisplayOwnerIdentifier(chatId: string): string | null {
   const st = useStore.getState()
@@ -30,6 +39,7 @@ export function registerDisplayResolver(
   identifier: string,
   resolver: SpindleDisplayResolver,
 ): () => void {
+  everRegistered = true
   const entry: RegisteredDisplayResolver = { identifier, resolver }
   active = entry
   return () => {

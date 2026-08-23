@@ -22,6 +22,7 @@ nav = [
     { "Desktop Tray Companion" = "getting-started/desktop-tray.md" },
     { "First Steps" = "getting-started/first-steps.md" },
     { "Interface Overview" = "getting-started/interface-overview.md" },
+    { "Built-in Guides" = "getting-started/guides.md" },
   ] },
   { "Characters" = [
     { "Overview" = "characters/index.md" },

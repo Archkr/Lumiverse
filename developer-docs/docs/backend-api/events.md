@@ -172,6 +172,32 @@ No `action` discriminator is provided — if you need add/update/delete/navigate
 | `SPINDLE_EXTENSION_UNLOADED` | `{ extensionId }` |
 | `SPINDLE_EXTENSION_ERROR` | `{ extensionId, error }` |
 | `SPINDLE_RUNTIME_STATS` | `{ extensionId, identifier, name, runtimeMode, phase, pid, rssKb, startupMs? }` — emitted only when `LUMIVERSE_SPINDLE_RUNTIME_STATS` is enabled |
+| `SPINDLE_PROVIDER_CHANGED` | `{ userId, scope, action, generation, revision, payload }` — recipient-scoped provider registry change. See below. |
+
+#### `SPINDLE_PROVIDER_CHANGED`
+
+Fired when a provider registration changes within the recipient's scope (for example an embedding, TTS, STT, or sidecar provider is registered, updated, or removed). The event is **never broadcast on the system topic**: it is emitted only on the explicit `user:{userId}` topic, so only the owning user's connections receive it.
+
+```ts
+spindle.on('SPINDLE_PROVIDER_CHANGED', (payload) => {
+  // payload: ProviderRegistryChangedPayload
+  if (payload.action === 'remove') {
+    // payload.payload identifies the removed registration; refetch if needed
+  }
+})
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `userId` | `string` | Owning user the event is scoped to. |
+| `scope` | `string` | Registry scope: `system`, `operator:<id>`, or `user:<subject>`. |
+| `action` | `'add' \| 'change' \| 'remove' \| 'snapshot'` | What happened. `'snapshot'` is emitted during reconnect resync so clients can replace their local projection wholesale instead of applying a delta. |
+| `generation` | `number` | Monotonic registry generation counter. |
+| `revision` | `number` | Monotonic per-scope revision counter; use it to order/deduplicate updates. |
+| `payload` | `unknown` | Provider-specific projection of the affected registration(s). |
+
+!!! note "Scope isolation"
+    Because delivery is pinned to the owning user's topic, other users and system-topic listeners never observe your provider registrations through this event.
 
 ### Permissions
 

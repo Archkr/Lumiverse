@@ -56,6 +56,11 @@ function assertPlacement(row: PhysicalMountPlacement | undefined, scope: string)
   })
   document.body.append(host)
   const service = getDomDecoratorService()
+  service.registerDecorator({
+    mount: row.literal,
+    owner: OWNER,
+    generation: GENERATION,
+  })
   service.registerAnchor({
     mount: row.literal,
     scope,

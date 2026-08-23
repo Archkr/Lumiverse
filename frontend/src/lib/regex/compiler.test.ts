@@ -1,12 +1,24 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, mock, spyOn, test } from 'bun:test'
+import type { DisplayMacroContext } from '@/lib/resolveDisplayMacros'
 import type { RegexScript } from '@/types/regex'
 
 mock.module('@/lib/spindle/display-resolver-registry', () => ({
   isDisplayChatOwned: () => false,
   getDisplayResolverForChat: () => undefined,
 }))
+mock.module('@/i18n', () => ({ default: { t: (key: string) => key } }))
+mock.module('@/store', () => ({ useStore: { getState: () => ({}) } }))
+mock.module('@/lib/cssModuleRegistry', () => ({ CSS_MODULE_REGISTRY: [], generateSelector: () => '' }))
 
-const { applyDisplayRegex } = await import('./compiler')
+const { applyDisplayRegex, applyDisplayRegexLocalLoop, collectRegexMatches, compileRegex } = await import('./compiler')
+
+function captureWarns(): { warns: string[]; restore: () => void } {
+  const warns: string[] = []
+  const spy = spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+    warns.push(args.map((arg) => String(arg)).join(' '))
+  })
+  return { warns, restore: () => spy.mockRestore() }
+}
 
 function script(overrides: Partial<RegexScript>): RegexScript {
   return {
@@ -49,6 +61,15 @@ describe('find-only macro substitution', () => {
         macroCtx: { charName: 'Alice', userName: 'Bob' },
       },
     )).toBe('{{user}}')
+  })
+})
+
+describe('compiled regex cache state', () => {
+  test('resets sticky lastIndex around match collection', () => {
+    const regex = compileRegex('a', 'y')!
+    expect(collectRegexMatches('a', regex, 'a', 'y', 'x')).toHaveLength(1)
+    expect(regex.lastIndex).toBe(0)
+    expect(collectRegexMatches('a', regex, 'a', 'y', 'x')).toHaveLength(1)
   })
 })
 
@@ -154,5 +175,191 @@ describe('display regex performance reporting', () => {
 
     expect(recovered).toHaveLength(1)
     expect(recovered[0].elapsedMs).toBeLessThan(5000)
+  })
+})
+
+describe('trim_strings safety', () => {
+  test('sync: rejoining trim reaches empty under the iteration cap', () => {
+    const { warns, restore } = captureWarns()
+    try {
+      expect(applyDisplayRegex(
+        'seed',
+        [script({
+          id: 'trim-parity-sync',
+          name: 'Trim parity sync',
+          find_regex: 'seed',
+          replace_string: 'bbcc',
+          trim_strings: ['bc'],
+        })],
+        { isUser: false, depth: 0 },
+      )).toBe('')
+      expect(warns).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+
+  test('async: rejoining trim reaches empty under the iteration cap', async () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const outcome = await applyDisplayRegexLocalLoop(
+        'seed',
+        [script({
+          id: 'trim-parity-async',
+          name: 'Trim parity async',
+          find_regex: 'seed',
+          replace_string: 'bbcc',
+          trim_strings: ['bc'],
+        })],
+        { isUser: false, depth: 0 },
+        async (templates) => templates,
+      )
+      expect(outcome.result).toBe('')
+      expect(warns).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+
+  test('sync: cap-hit stops iterating and warns with script identity', () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const output = applyDisplayRegex(
+        'seed',
+        [script({
+          id: 'trim-cap-sync',
+          name: 'Trim cap sync',
+          find_regex: 'seed',
+          replace_string: `${'b'.repeat(33)}${'c'.repeat(33)}`,
+          trim_strings: ['bc'],
+        })],
+        { isUser: false, depth: 0 },
+      )
+      expect(output).toBe('bc')
+      expect(warns).toHaveLength(1)
+      expect(warns[0]).toContain('trim-cap-sync')
+      expect(warns[0]).toContain('Trim cap sync')
+      expect(warns[0]).toContain('"bc"')
+    } finally {
+      restore()
+    }
+  })
+
+  test('async: cap-hit stops iterating and warns with script identity', async () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const outcome = await applyDisplayRegexLocalLoop(
+        'seed',
+        [script({
+          id: 'trim-cap-async',
+          name: 'Trim cap async',
+          find_regex: 'seed',
+          replace_string: `${'b'.repeat(33)}${'c'.repeat(33)}`,
+          trim_strings: ['bc'],
+        })],
+        { isUser: false, depth: 0 },
+        async (templates) => templates,
+      )
+      expect(outcome.result).toBe('bc')
+      expect(warns).toHaveLength(1)
+      expect(warns[0]).toContain('trim-cap-async')
+      expect(warns[0]).toContain('Trim cap async')
+    } finally {
+      restore()
+    }
+  })
+
+  test('sync: empty trim string is a no-op and never warns', () => {
+    const { warns, restore } = captureWarns()
+    try {
+      expect(applyDisplayRegex(
+        'hello world',
+        [script({
+          id: 'trim-empty-sync',
+          find_regex: 'world',
+          replace_string: 'world',
+          trim_strings: [''],
+        })],
+        { isUser: false, depth: 0 },
+      )).toBe('hello world')
+      expect(warns).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+
+  test('async: empty trim string is a no-op and never warns', async () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const outcome = await applyDisplayRegexLocalLoop(
+        'hello world',
+        [script({
+          id: 'trim-empty-async',
+          find_regex: 'world',
+          replace_string: 'world',
+          trim_strings: [''],
+        })],
+        { isUser: false, depth: 0 },
+        async (templates) => templates,
+      )
+      expect(outcome.result).toBe('hello world')
+      expect(warns).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+
+  test('sync: throwing script warns with identity instead of failing silently', () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const explodingMacros = new Proxy({}, {
+        get() {
+          throw new Error('macro resolution exploded')
+        },
+      }) as unknown as DisplayMacroContext
+      const output = applyDisplayRegex(
+        'x',
+        [script({
+          id: 'error-path-sync',
+          name: 'Error path sync',
+          find_regex: 'x',
+          replace_string: '{{boom}}',
+          substitute_macros: 'raw',
+        })],
+        { isUser: false, depth: 0, macroCtx: explodingMacros },
+      )
+      expect(output).toBe('x')
+      expect(warns).toHaveLength(1)
+      expect(warns[0]).toContain('error-path-sync')
+      expect(warns[0]).toContain('Error path sync')
+    } finally {
+      restore()
+    }
+  })
+
+  test('async: rejecting raw-template resolver warns with identity', async () => {
+    const { warns, restore } = captureWarns()
+    try {
+      const outcome = await applyDisplayRegexLocalLoop(
+        'x',
+        [script({
+          id: 'error-path-async',
+          name: 'Error path async',
+          find_regex: 'x',
+          replace_string: '{{boom}}',
+          substitute_macros: 'raw',
+        })],
+        { isUser: false, depth: 0 },
+        async () => {
+          throw new Error('template resolution exploded')
+        },
+      )
+      expect(outcome.result).toBe('x')
+      expect(warns).toHaveLength(1)
+      expect(warns[0]).toContain('error-path-async')
+      expect(warns[0]).toContain('Error path async')
+    } finally {
+      restore()
+    }
   })
 })

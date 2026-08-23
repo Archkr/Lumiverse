@@ -127,7 +127,7 @@ For maximum accuracy, you can assign a secondary LLM connection to assist the co
 
 1. In **Memory Cortex settings**, select a **Connection Profile** under the Sidecar section
 2. Choose a **Model** (smaller, faster models work well here — the sidecar doesn't need to be creative)
-3. Optionally add separate fallback connections for extraction and memory summaries
+3. Optionally add separate fallback connections for extraction and memory summaries. Each chain starts with a secondary slot and grows with the **Add fallback** button; **Remove fallback** deletes a slot you no longer need. Fallbacks are tried in the order they appear
 4. Adjust **Temperature** (0.1 recommended for factual extraction)
 5. Set **Parallel Requests** to control how many concurrent LLM calls run during a rebuild
 6. Set **Requests Per Minute** to throttle the sidecar against your provider's rate limits (0 = unlimited)
@@ -157,6 +157,18 @@ Memory Cortex keeps two independent ordered chains because extraction and summar
 The primary connection is attempted first, including its configured retries. If it remains unavailable or times out, Lumiverse tries the corresponding secondary connection and then each additional fallback in order. Only after that chain is exhausted does the **Fallback** reliability setting decide whether to use heuristics or leave the work for a later pass.
 
 Fallback connections keep their own models and credentials. Removing a fallback from one chain does not remove it from the other.
+
+### Sidecar Health Indicator
+
+The Memory Cortex settings page shows a status badge for sidecar availability with three states:
+
+| State | Meaning |
+|-------|---------|
+| **ok** | The sidecar endpoint answered normally. |
+| **unavailable** | The endpoint could not be reached or is misconfigured (e.g. missing API key). |
+| **timeout** | The endpoint was reachable but did not respond in time — a distinct state from *unavailable*, since the connection itself may be fine and just slow. |
+
+Availability is reported per endpoint group: query generation (extraction) and summarization each carry their own state in the health panel, so one chain can be healthy while the other is degraded. When the sidecar times out, the primary retries first, then the secondary, then the configured fallbacks.
 
 ### Arbitration
 

@@ -3,10 +3,13 @@ import { describe, expect, test } from 'bun:test'
 const source = await Bun.file(new URL('./cssModuleRegistry.ts', import.meta.url)).text()
 
 describe('CSS module registry Vite contract', () => {
-  test('keeps component discovery as unconditional literal Vite macro calls', () => {
+  test('keeps component discovery as direct key-only Vite macro calls', () => {
     expect(source).toContain("import.meta.glob('/src/**/*.module.css', { eager: false })")
     expect(source).toContain("import.meta.glob('/src/**/*.tsx', { eager: false })")
     expect(source).not.toContain('typeof import.meta.glob')
+    expect(source).toMatch(/Object\.keys\(\s*import\.meta\.glob\('\/src\/\*\*\/\*\.module\.css'/)
+    expect(source).toMatch(/Object\.keys\(\s*import\.meta\.glob\('\/src\/\*\*\/\*\.tsx'/)
+    expect(source).not.toContain('catch {')
   })
 
   test('Vite expands the globs into a populated native component registry', async () => {

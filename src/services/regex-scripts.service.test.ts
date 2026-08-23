@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { Hono } from "hono";
 import { closeDatabase, getDb, initDatabase } from "../db/connection";
+import { regexScriptsRoutes } from "../routes/regex-scripts.routes";
 import {
   activatePresetBoundRegexScripts,
   applyRegexScripts,
@@ -18,6 +20,7 @@ import {
   resolveLumiHubPresetRegexInstallFolder,
   retireLumiHubPresetRegexScriptsForUpdate,
   reportRegexScriptPerformance,
+  reportRegexScriptEvidence,
   switchPresetBoundRegexScripts,
   toggleRegexScript,
   toggleRegexScriptsByIds,
@@ -1650,5 +1653,80 @@ describe("associative regex actions", () => {
       },
     ]);
     expect(multiActions.every((action) => action.multi_select === true)).toBe(true);
+  });
+});
+
+describe("regex evidence reporting", () => {
+  test("rejects cross-user evidence writes without touching the owner script", () => {
+    const created = createRegexScript("user-alpha", {
+      name: "Alpha evidence",
+      find_regex: "alpha",
+    }) as RegexScript;
+
+    const result = reportRegexScriptEvidence("user-beta", created.id, {
+      lastOkMs: 12,
+      lastOkAt: Date.now(),
+    });
+
+    expect(result).toBeNull();
+    const owned = getRegexScript("user-alpha", created.id);
+    expect(owned).not.toBeNull();
+    expect(owned!.metadata.regex_evidence).toBeUndefined();
+  });
+
+  test("a pattern edit strips ok-evidence but preserves an explicit quarantine", () => {
+    const created = createRegexScript(USER_ID, {
+      name: "Quarantined evidence",
+      find_regex: "old",
+    }) as RegexScript;
+    reportRegexScriptEvidence(USER_ID, created.id, {
+      lastOkMs: 15,
+      lastOkAt: 12345,
+      quarantined: true,
+    });
+    expect(mustGetScript(created.id).metadata.regex_evidence).toMatchObject({
+      last_ok_ms: 15,
+      last_ok_at: 12345,
+      quarantined: true,
+    });
+
+    updateRegexScript(USER_ID, created.id, { find_regex: "new" });
+
+    const evidence = mustGetScript(created.id).metadata.regex_evidence;
+    expect(evidence.quarantined).toBe(true);
+    expect(evidence.last_ok_ms).toBeUndefined();
+    expect(evidence.last_ok_at).toBeUndefined();
+  });
+
+  test("report-evidence route rejects invalid bodies with 400 and accepts a valid patch", async () => {
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("userId", USER_ID);
+      await next();
+    });
+    app.route("/", regexScriptsRoutes);
+
+    const created = createRegexScript(USER_ID, {
+      name: "Route evidence",
+      find_regex: "route",
+    }) as RegexScript;
+    const url = `http://localhost/${created.id}/report-evidence`;
+    const post = (body: unknown) =>
+      app.request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    expect((await post({})).status).toBe(400);
+    expect((await post({ last_ok_ms: -5 })).status).toBe(400);
+    expect((await post({ last_ok_ms: "abc" })).status).toBe(400);
+
+    const accepted = await post({ quarantined: true, last_ok_ms: 8 });
+    expect(accepted.status).toBe(200);
+    expect(mustGetScript(created.id).metadata.regex_evidence).toMatchObject({
+      quarantined: true,
+      last_ok_ms: 8,
+    });
   });
 });

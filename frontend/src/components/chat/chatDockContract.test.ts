@@ -202,7 +202,7 @@ describe('P12 chat dock preservation contracts', () => {
 
     expect(chatCss).toMatch(/\.chatToolbar\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?padding:\s*6px 8px;[\s\S]*?gap:\s*6px;/)
     expect(chatCss).toMatch(/\.toolbarBtn\s*\{[\s\S]*?order:\s*0;/)
-    expect(chatCss).not.toMatch(/\.toolbarBtn\s*\{[\s\S]*?margin-left:\s*auto;/)
+    expect(chatCss).not.toMatch(/\.toolbarBtn\s*\{[^}]*?margin-left:\s*auto;/)
     expect(toolbarCss).toMatch(/\.cardStrip\s*\{[^}]*?justify-content:\s*center;/)
   })
 
@@ -244,8 +244,8 @@ describe('P12 chat dock preservation contracts', () => {
     expect(cardSlotRules).toMatch(/flex:\s*1 1 0px !important;/)
     const dockCardSlotRules = toolbarCss.slice(toolbarCss.indexOf(".root[data-fill-top-dock='1'] .cardSlot"), toolbarCss.indexOf('}', toolbarCss.indexOf(".root[data-fill-top-dock='1'] .cardSlot")) + 1)
     expect(dockCardSlotRules).toMatch(/flex:\s*1 1 0px !important;/)
-    expect(toolbarCss).toMatch(/\.root\[data-fill-screen='1'\] \.cardSlot \.card[\s\S]*?width:\s*100% !important;/)
-    expect(toolbarCss).toMatch(/\.root\[data-fill-top-dock='1'\] \.cardSlot \.card[\s\S]*?width:\s*100% !important;/)
+    expect(toolbarCss).toMatch(/\.root\[data-fill-screen='1'\] \.cardSlot \.card[\s\S]*?width:\s*var\(--quick-toolbar-card-width, 100%\) !important;/)
+    expect(toolbarCss).toMatch(/\.root\[data-fill-top-dock='1'\] \.cardSlot \.card[\s\S]*?width:\s*var\(--quick-toolbar-card-width, 100%\) !important;/)
     const fillDockSelector = ".root[data-quick-toolbar-placement='chat_top_dock'][data-fill-top-dock='1'] .cardStrip"
     expect(toolbarCss).toContain(fillDockSelector)
     const fillDockStart = toolbarCss.indexOf(fillDockSelector)
@@ -302,4 +302,3 @@ describe('P12 chat dock preservation contracts', () => {
     expect(chatCss).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)/)
   })
 })
-

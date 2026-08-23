@@ -98,3 +98,60 @@ All values are clamped to `[1000, 300000]` ms (1 second to 5 minutes).
 ```
 
 Use this when your interceptor performs real work before the LLM call — multi-step retrieval, graph traversal, external API lookups, or controller-driven context assembly — and needs a larger budget than the 10 second default. See [Interceptors → Timeout](../backend-api/interceptors.md#timeout) for the full behavior, including what happens when the budget is exceeded.
+
+## Contextual Guides
+
+Guides are **not** declared in `spindle.json`. They are declared at runtime from your frontend module by passing a `guide` object (`SpindleGuideDefinition`) in the options of these registration calls:
+
+- `ctx.ui.registerDrawerTab(options)` — drawer tabs
+- `ctx.ui.registerCharacterEditorTab(options)` — character editor tabs
+- `ctx.ui.registerPresetEditorTab(options)` — Loom preset editor tabs
+
+When the user opens such a tab, Lumiverse shows a help affordance that renders your Markdown in the native guide viewer. The content is rendered and sanitized by the host application.
+
+### `SpindleGuideDefinition`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `markdown` | `string` | Yes | Markdown content for the guide |
+| `title` | `string` | No | Title shown by the guide viewer. Falls back to the title of the owning tab |
+
+### Example
+
+```ts
+ctx.ui.registerDrawerTab({
+  id: 'my_panel',
+  title: 'My Panel',
+  description: 'Configure my extension',
+  iconSvg: '<svg>...</svg>',
+  guide: {
+    title: 'Using My Panel',
+    markdown: `
+# Using My Panel
+
+!!! note "Quick start"
+    Pick a character, then press Apply.
+
+=== "Basics"
+    The panel reads your recent chats via \`ctx.chats.listRecent\`.
+
+=== "Advanced"
+    Metadata overrides live under \`metadata.my_extension\`.
+`,
+  },
+})
+```
+
+### Supported Markdown Features
+
+The guide viewer supports:
+
+- YAML frontmatter — stripped before rendering; a `title:` field there overrides the displayed document title
+- Admonitions — `!!! type "Optional Custom Title"` followed by a four-space-indented body
+- Content tabs — `=== "Label"` headers followed by four-space-indented bodies (admonitions may be nested inside tabs)
+
+Beyond these extensions, standard Markdown applies. All rendered HTML passes through DOM sanitization before display.
+
+!!! tip "Bundled-doc serving"
+
+    The same viewer also browses Lumiverse's built-in documentation, which the backend serves under `/api/v1/docs` (a searchable catalog plus a document endpoint). Extension-declared guides are self-contained strings and do not participate in that catalog.

@@ -1522,7 +1522,10 @@ export interface SpindlePlacementSlice {
 
   registerSettingsTab: (tab: SettingsTabState) => void
   unregisterSettingsTab: (tabId: string) => void
-  updateSettingsTab: (tabId: string, updates: Partial<Pick<SettingsTabState, 'title'>>) => void
+  updateSettingsTab: (
+    tabId: string,
+    updates: Partial<Pick<SettingsTabState, 'title' | 'shortName' | 'description' | 'iconSvg' | 'keywords' | 'sections' | 'position' | 'order'>>,
+  ) => void
 
   registerCharacterEditorTab: (tab: CharacterEditorTabState) => void
   unregisterCharacterEditorTab: (tabId: string) => void

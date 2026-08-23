@@ -8,13 +8,16 @@ export { I18N_NAMESPACES, type I18nNamespace } from './resources.types'
 
 type LocaleJsonLoader = () => Promise<{ default: Record<string, unknown> }>
 
+const isViteRuntime = typeof import.meta.env.DEV === 'boolean'
+const emptyGlob: Record<string, LocaleJsonLoader> = {}
+
 const languageGlobs = {
-  en: import.meta.glob('./locales/en/*.json') as Record<string, LocaleJsonLoader>,
-  zh: import.meta.glob('./locales/zh/*.json') as Record<string, LocaleJsonLoader>,
-  'zh-TW': import.meta.glob('./locales/zh-TW/*.json') as Record<string, LocaleJsonLoader>,
-  ja: import.meta.glob('./locales/ja/*.json') as Record<string, LocaleJsonLoader>,
-  fr: import.meta.glob('./locales/fr/*.json') as Record<string, LocaleJsonLoader>,
-  it: import.meta.glob('./locales/it/*.json') as Record<string, LocaleJsonLoader>,
+  en: isViteRuntime ? import.meta.glob('./locales/en/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
+  zh: isViteRuntime ? import.meta.glob('./locales/zh/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
+  'zh-TW': isViteRuntime ? import.meta.glob('./locales/zh-TW/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
+  ja: isViteRuntime ? import.meta.glob('./locales/ja/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
+  fr: isViteRuntime ? import.meta.glob('./locales/fr/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
+  it: isViteRuntime ? import.meta.glob('./locales/it/*.json') as Record<string, LocaleJsonLoader> : emptyGlob,
 }
 
 export type UiLanguage = keyof typeof languageGlobs

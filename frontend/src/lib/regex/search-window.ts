@@ -136,8 +136,16 @@ export function replaceWithinRegexSearchWindow(
 ): string {
   const searchEnd = getRegexSearchEnd(input, pattern, flags, replacementTemplate)
   const searchable = searchEnd === input.length ? input : input.slice(0, searchEnd)
-  const replaced = typeof replacement === "string"
-    ? searchable.replace(regex, replacement)
-    : searchable.replace(regex, replacement)
-  return searchEnd === input.length ? replaced : replaced + input.slice(searchEnd)
+  // Cached sticky RegExp instances retain lastIndex after a successful
+  // non-global replacement. Reset around every use so cache hits are
+  // observationally identical to a freshly compiled RegExp.
+  regex.lastIndex = 0
+  try {
+    const replaced = typeof replacement === "string"
+      ? searchable.replace(regex, replacement)
+      : searchable.replace(regex, replacement)
+    return searchEnd === input.length ? replaced : replaced + input.slice(searchEnd)
+  } finally {
+    regex.lastIndex = 0
+  }
 }

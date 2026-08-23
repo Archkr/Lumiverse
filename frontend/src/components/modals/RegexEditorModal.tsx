@@ -12,6 +12,7 @@ import { toast } from '@/lib/toast'
 import { useFolders } from '@/hooks/useFolders'
 import FolderDropdown from '@/components/shared/FolderDropdown'
 import type { RegexPlacement, RegexTarget, RegexScope, RegexMacroMode, RegexAction, RegexActionEffect } from '@/types/regex'
+import { analyzeRegexRisk, type RegexRiskResult } from '@/lib/regex/risk-analyzer'
 import styles from './RegexEditorModal.module.css'
 import clsx from 'clsx'
 
@@ -178,6 +179,8 @@ export default function RegexEditorModal() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(false)
+  const [riskWarning, setRiskWarning] = useState<RegexRiskResult | null>(null)
+  const riskAcknowledgedRef = useRef(false)
 
   // Live test
   const [testInput, setTestInput] = useState('')
@@ -261,6 +264,7 @@ export default function RegexEditorModal() {
         }
       }
 
+      const analysis = analyzeRegexRisk(findRegex)
       await updateRegexScript(scriptId, {
         name: name.trim(),
         script_id: userScriptId,
@@ -275,19 +279,29 @@ export default function RegexEditorModal() {
         min_depth: minDepth ? parseInt(minDepth) : null,
         max_depth: maxDepth ? parseInt(maxDepth) : null,
         substitute_macros: substituteMacros,
-        metadata: updateRegexMetadata(
-          script.metadata,
-          moveBehavior,
-          repeatBack,
-          repeatPosition,
-          repeatRawMatch,
-        ),
+        metadata: {
+          ...updateRegexMetadata(
+            script.metadata,
+            moveBehavior,
+            repeatBack,
+            repeatPosition,
+            repeatRawMatch,
+          ),
+          analyzer_risk: { risk: analysis.risk, reasons: analysis.reasons, analyzed_at: Date.now() },
+        },
         trim_strings: trimStrings ? trimStrings.split(',').map((s) => s.trim()).filter(Boolean) : [],
         sort_order: sortOrder === '' ? 0 : (parseInt(sortOrder, 10) || 0),
         run_on_edit: runOnEdit,
         description,
         folder,
       })
+      if (analysis.risk !== 'low' && !riskAcknowledgedRef.current) {
+        riskAcknowledgedRef.current = true
+        setRiskWarning(analysis)
+        return
+      }
+      riskAcknowledgedRef.current = false
+      setRiskWarning(null)
       closeModal()
     } catch (err: any) {
       toast.error(err.body?.error || err.message)
@@ -386,6 +400,27 @@ export default function RegexEditorModal() {
         </div>
 
         <div className={styles.body}>
+          {riskWarning && (
+            <div className={styles.riskBanner} role="alert" data-testid="regex-risk-banner">
+              <div className={styles.riskBannerHeader}>
+                <strong>Pattern risk warning ({riskWarning.risk})</strong>
+                <button
+                  type="button"
+                  className={styles.riskBannerDismiss}
+                  aria-label="Dismiss warning"
+                  onClick={() => setRiskWarning(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <ul className={styles.riskBannerList}>
+                {riskWarning.reasons.map((reason, index) => (
+                  <li key={index}>{reason}</li>
+                ))}
+              </ul>
+              <span className={styles.riskBannerHint}>Saved anyway — this script will run in the sandboxed worker path. Edit the pattern to clear this.</span>
+            </div>
+          )}
           {/* Identity row: Name + Folder side by side */}
           <div className={styles.identityRow}>
             <div className={clsx(styles.field, styles.fieldGrow)}>

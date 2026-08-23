@@ -1,6 +1,7 @@
 import { router } from '@/router'
 import { useStore } from '@/store'
 import { wsClient } from '@/ws/client'
+import type { SpindleHostSurfaceAPI, SpindleHostSurfaceInfo } from 'lumiverse-spindle-types'
 import {
   COMMANDS,
   type Command,
@@ -28,13 +29,14 @@ import {
   type HostActionRuntime,
   type HostSurfaceKind,
   type HostSurfaceRef,
+  isHostSurfaceKind,
 } from './host-actions'
 import {
   frontendAuthorityRowFor,
   type AuthorityRow,
 } from './frontend-authority-map'
 
-export interface HostSurface {
+export interface HostSurface extends SpindleHostSurfaceInfo {
   kind: HostSurfaceKind
   id: string
   label: string
@@ -66,10 +68,13 @@ export interface HostSurfaceRegistryInputs {
   userRole?: string | null
 }
 
-export interface HostSurfaceAPI {
+export interface HostSurfaceAPI extends SpindleHostSurfaceAPI {
+  list(): HostSurface[]
   list(kinds?: readonly HostSurfaceKind[]): HostSurface[]
   subscribe(handler: (surfaces: HostSurface[]) => void): () => void
+  invoke(surfaceId: string, method: string, params?: unknown): Promise<unknown>
   invoke(ref: HostSurfaceRef, params?: HostActionParams): void | Promise<void>
+  registerDeepLinkTarget(target: string, handler: (params: Record<string, string>) => void): () => void
   registerDeepLinkTarget(kind: string, id: string, handler: HostSurfaceTargetHandler): () => void
 }
 
@@ -216,6 +221,8 @@ export function buildHostSurfaceCatalog(inputs: HostSurfaceRegistryInputs = {}):
     return true
   }).map((surface) => ({
     ...surface,
+    title: surface.title ?? surface.label,
+    capabilities: surface.capabilities ?? [surface.kind],
     keywords: surface.keywords ? [...surface.keywords] : undefined,
   }))
 }
@@ -354,8 +361,54 @@ export function createHostSurfaceAPI(options: HostSurfaceAPIFactoryOptions): Hos
     assertActive()
   }
 
-  return {
-    list(kinds) {
+  const invokeRef = (ref: HostSurfaceRef, params?: HostActionParams): void | Promise<void> => {
+    const surface = find(ref)
+    const authority = frontendAuthorityRowFor(authorityReference(ref.kind, ref.id, surface?.owner, options.extensionId))
+    if (!authority) throw new Error(`HOST_ACTION_UNMAPPED:${ref.kind}:${ref.id}`)
+    if (!surface) throw new Error(`HOST_ACTION_UNAVAILABLE:${ref.kind}:${ref.id}`)
+    if (surface.invocable === false) throw new Error('HOST_ACTION_NOT_EXTERNALLY_INVOCABLE')
+    if (authority.permission !== null && !getGranted().includes(authority.permission)) {
+      throw permissionError(authority.permission, ref.id)
+    }
+    if (ref.kind === 'settings_tab' && surface.role && !getVisibleSettingsTabs(getInputs().userRole ?? null).some((entry) => entry.id === ref.id)) {
+      throw new Error(`HOST_ACTION_UNAVAILABLE:settings_tab:${ref.id}`)
+    }
+    if (ref.kind === 'drawer_tab' && params?.target !== undefined) {
+      assertTarget(params.target)
+      targetHandlers.get(targetKey(params.target.kind, params.target.id))?.(params.target)
+    }
+    return applyHostAction(ref, params, runtime)
+  }
+
+  function invoke(surfaceId: string, method: string, params?: unknown): Promise<unknown>
+  function invoke(ref: HostSurfaceRef, params?: HostActionParams): void | Promise<void>
+  function invoke(refOrId: HostSurfaceRef | string, paramsOrMethod?: HostActionParams | string, publicParams?: unknown): void | Promise<unknown> {
+    assertUsable()
+    if (typeof refOrId !== 'string') {
+      return invokeRef(refOrId, paramsOrMethod as HostActionParams | undefined)
+    }
+
+    const method = paramsOrMethod
+    if (typeof method !== 'string') return Promise.reject(new Error('HOST_SURFACE_INVALID_METHOD'))
+    const separator = refOrId.indexOf(':')
+    const encodedKind = separator > 0 ? refOrId.slice(0, separator) : undefined
+    const kind = isHostSurfaceKind(method)
+      ? method
+      : isHostSurfaceKind(encodedKind)
+        ? encodedKind
+        : undefined
+    const id = encodedKind && kind === encodedKind ? refOrId.slice(separator + 1) : refOrId
+    if (!kind || (method !== 'invoke' && method !== kind)) {
+      return Promise.reject(new Error(`HOST_SURFACE_INVALID_METHOD:${method}`))
+    }
+    if (publicParams !== undefined && (!publicParams || typeof publicParams !== 'object' || Array.isArray(publicParams))) {
+      return Promise.reject(new Error('HOST_ACTION_INVALID_PARAMS:object'))
+    }
+    return Promise.resolve(invokeRef({ kind, id }, publicParams as HostActionParams | undefined))
+  }
+
+  const api: HostSurfaceAPI = {
+    list(kinds?: readonly HostSurfaceKind[]) {
       assertUsable()
       const allowed = kinds ? new Set(kinds) : undefined
       subscribeStore()
@@ -379,8 +432,19 @@ export function createHostSurfaceAPI(options: HostSurfaceAPIFactoryOptions): Hos
         }
       }
     },
-    registerDeepLinkTarget(kind, id, handler) {
+    registerDeepLinkTarget(kindOrTarget: string, idOrHandler: string | ((params: Record<string, string>) => void), legacyHandler?: HostSurfaceTargetHandler) {
       assertUsable()
+      const publicCall = typeof idOrHandler === 'function'
+      const separator = publicCall ? kindOrTarget.indexOf(':') : -1
+      const kind = publicCall ? kindOrTarget.slice(0, separator) : kindOrTarget
+      const id = publicCall ? kindOrTarget.slice(separator + 1) : idOrHandler
+      const handler: HostSurfaceTargetHandler | undefined = publicCall
+        ? (target) => idOrHandler({
+            kind: target.kind,
+            id: target.id,
+            ...(target.parentId ? { parentId: target.parentId } : {}),
+          })
+        : legacyHandler
       if (!kind || !id || typeof handler !== 'function') throw new Error('HOST_SURFACE_INVALID_TARGET')
       const key = targetKey(kind, id)
       if (targetHandlers.has(key)) throw new Error(`HOST_SURFACE_DUPLICATE_TARGET:${key}`)
@@ -392,26 +456,9 @@ export function createHostSurfaceAPI(options: HostSurfaceAPIFactoryOptions): Hos
         if (targetHandlers.get(key) === handler) targetHandlers.delete(key)
       }
     },
-    invoke(ref, params) {
-      assertUsable()
-      const surface = find(ref)
-      const authority = frontendAuthorityRowFor(authorityReference(ref.kind, ref.id, surface?.owner, options.extensionId))
-      if (!authority) throw new Error(`HOST_ACTION_UNMAPPED:${ref.kind}:${ref.id}`)
-      if (!surface) throw new Error(`HOST_ACTION_UNAVAILABLE:${ref.kind}:${ref.id}`)
-      if (surface.invocable === false) throw new Error('HOST_ACTION_NOT_EXTERNALLY_INVOCABLE')
-      if (authority.permission !== null && !getGranted().includes(authority.permission)) {
-        throw permissionError(authority.permission, ref.id)
-      }
-      if (ref.kind === 'settings_tab' && surface.role && !getVisibleSettingsTabs(getInputs().userRole ?? null).some((entry) => entry.id === ref.id)) {
-        throw new Error(`HOST_ACTION_UNAVAILABLE:settings_tab:${ref.id}`)
-      }
-      if (ref.kind === 'drawer_tab' && params?.target !== undefined) {
-        assertTarget(params.target)
-        targetHandlers.get(targetKey(params.target.kind, params.target.id))?.(params.target)
-      }
-      return applyHostAction(ref, params, runtime)
-    },
+    invoke,
   }
+  return api
 }
 
 export { HOST_ROUTE_PATTERNS }

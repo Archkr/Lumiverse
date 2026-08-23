@@ -103,4 +103,8 @@ export const regexApi = {
   reportPerformance(id: string, payload: { elapsed_ms: number; timed_out?: boolean; threshold_ms?: number; source?: RegexPerformanceMetadata['source'] }) {
     return post<RegexScript>(`/regex-scripts/${id}/report-performance`, payload)
   },
+
+  reportEvidence(id: string, payload: { last_ok_ms?: number; last_ok_at?: number; quarantined?: boolean }) {
+    return post<RegexScript>(`/regex-scripts/${id}/report-evidence`, payload)
+  },
 }

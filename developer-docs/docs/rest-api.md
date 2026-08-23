@@ -59,6 +59,57 @@ Extensions can also be managed via the HTTP API.
 | `GET` | `/api/v1/spindle/tools` | List all registered LLM tools |
 | `GET` | `/api/v1/spindle/:id/frontend` | Serve frontend JS bundle |
 
+## Chat Edit-and-Send
+
+Edits a user message and immediately re-sends it for generation in one atomic call.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/chats/:chatId/edit-and-send` | Edit a user message and trigger regeneration |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `messageId` | `string` | *required.* ID of the user message to edit. Only user messages can be edited. |
+| `content` | `string` | *required.* The edited, non-empty message content. |
+| `expectedVersion` | `number` | *required.* Positive integer. The message's current revision for optimistic concurrency. |
+| `requestId` | `string` | *required.* Client-generated id used for idempotent replay of this request. |
+
+```bash
+curl -X POST http://localhost:7860/api/v1/chats/my-chat-id/edit-and-send \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messageId": "msg-123",
+    "content": "Edited prompt text",
+    "expectedVersion": 4,
+    "requestId": "8f0c1e5a-..."
+  }'
+```
+
+Behavior:
+
+- **Optimistic concurrency**: when `expectedVersion` does not match the stored message revision the endpoint returns `409 Conflict`. Unknown chat or message returns `404 Not Found`.
+- **History branch**: the edit is written on a newly created history branch of the chat rather than mutating the visible timeline. If an assistant reply already follows the edited message, the new generation routes through the swipe generation path (a new swipe slot on the branch's assistant copy); otherwise a normal generation is started.
+- **Idempotent replay**: repeating the same `requestId` with an identical payload returns the original response (`replayed: true`) instead of branching again; reusing a `requestId` with a different payload is a `409`.
+- **Durable outbox dispatch**: the generation request is tracked in a persistent outbox. If the server crashes after accepting the request, startup recovery inspects orphaned rows — verifying persisted output before completing them, retrying with backoff (up to 8 attempts), and marking exhausted rows terminally failed.
+
+Success response:
+
+```json
+{
+  "branchChatId": "...",
+  "editedMessageId": "...",
+  "immediateAssistantId": "...",
+  "generationCursor": {
+    "generationId": "...",
+    "chatId": "...",
+    "requestId": "...",
+    "mode": "swipe"
+  }
+}
+```
+
 ## Install
 
 ```bash

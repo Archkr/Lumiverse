@@ -94,6 +94,10 @@ mock.module('@/i18n', () => ({
   initI18n: async () => ({ t: translate }),
   UI_LANGUAGE_STORAGE_KEY: 'lumiverse-ui-language',
 }))
+mock.module('@/lib/cssModuleRegistry', () => ({
+  CSS_MODULE_REGISTRY: [],
+  generateSelector: () => '',
+}))
 
 let createRoot: typeof CreateRoot
 let MessageContent: typeof MessageContentType
