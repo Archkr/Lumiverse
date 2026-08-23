@@ -93,12 +93,30 @@ function decorateMatchReplacement(replacement: string, script: RegexScript, matc
     : replacement
 }
 
+// Compiled-regex cache: applyDisplayRegex recompiled every script's pattern
+// on every message render (per streaming chunk). Instances are shared, which
+// is safe here because all consumers match via String.replace or
+// collectRegexMatches — neither leaves lastIndex drifted.
+const COMPILED_REGEX_CACHE_MAX = 256
+const compiledRegexCache = new Map<string, RegExp | null>()
+
 export function compileRegex(pattern: string, flags: string): RegExp | null {
+  const key = `${flags}\u0000${pattern}`
+  const cached = compiledRegexCache.get(key)
+  if (cached !== undefined) return cached
+  let regex: RegExp | null
   try {
-    return new RegExp(pattern, flags)
+    regex = new RegExp(pattern, flags)
   } catch {
-    return null
+    regex = null
   }
+  compiledRegexCache.set(key, regex)
+  while (compiledRegexCache.size > COMPILED_REGEX_CACHE_MAX) {
+    const oldest = compiledRegexCache.keys().next().value
+    if (oldest === undefined) break
+    compiledRegexCache.delete(oldest)
+  }
+  return regex
 }
 
 function hasMacroSyntax(value: string): boolean {
