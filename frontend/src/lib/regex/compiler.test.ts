@@ -6,8 +6,11 @@ mock.module('@/lib/spindle/display-resolver-registry', () => ({
   isDisplayChatOwned: () => false,
   getDisplayResolverForChat: () => undefined,
 }))
+mock.module('@/i18n', () => ({ default: { t: (key: string) => key } }))
+mock.module('@/store', () => ({ useStore: { getState: () => ({}) } }))
+mock.module('@/lib/cssModuleRegistry', () => ({ CSS_MODULE_REGISTRY: [], generateSelector: () => '' }))
 
-const { applyDisplayRegex, applyDisplayRegexAsync } = await import('./compiler')
+const { applyDisplayRegex, applyDisplayRegexLocalLoop, collectRegexMatches, compileRegex } = await import('./compiler')
 
 function captureWarns(): { warns: string[]; restore: () => void } {
   const warns: string[] = []
@@ -58,6 +61,15 @@ describe('find-only macro substitution', () => {
         macroCtx: { charName: 'Alice', userName: 'Bob' },
       },
     )).toBe('{{user}}')
+  })
+})
+
+describe('compiled regex cache state', () => {
+  test('resets sticky lastIndex around match collection', () => {
+    const regex = compileRegex('a', 'y')!
+    expect(collectRegexMatches('a', regex, 'a', 'y', 'x')).toHaveLength(1)
+    expect(regex.lastIndex).toBe(0)
+    expect(collectRegexMatches('a', regex, 'a', 'y', 'x')).toHaveLength(1)
   })
 })
 
@@ -190,7 +202,7 @@ describe('trim_strings safety', () => {
   test('async: rejoining trim reaches empty under the iteration cap', async () => {
     const { warns, restore } = captureWarns()
     try {
-      const outcome = await applyDisplayRegexAsync(
+      const outcome = await applyDisplayRegexLocalLoop(
         'seed',
         [script({
           id: 'trim-parity-async',
@@ -236,7 +248,7 @@ describe('trim_strings safety', () => {
   test('async: cap-hit stops iterating and warns with script identity', async () => {
     const { warns, restore } = captureWarns()
     try {
-      const outcome = await applyDisplayRegexAsync(
+      const outcome = await applyDisplayRegexLocalLoop(
         'seed',
         [script({
           id: 'trim-cap-async',
@@ -279,7 +291,7 @@ describe('trim_strings safety', () => {
   test('async: empty trim string is a no-op and never warns', async () => {
     const { warns, restore } = captureWarns()
     try {
-      const outcome = await applyDisplayRegexAsync(
+      const outcome = await applyDisplayRegexLocalLoop(
         'hello world',
         [script({
           id: 'trim-empty-async',
@@ -328,7 +340,7 @@ describe('trim_strings safety', () => {
   test('async: rejecting raw-template resolver warns with identity', async () => {
     const { warns, restore } = captureWarns()
     try {
-      const outcome = await applyDisplayRegexAsync(
+      const outcome = await applyDisplayRegexLocalLoop(
         'x',
         [script({
           id: 'error-path-async',

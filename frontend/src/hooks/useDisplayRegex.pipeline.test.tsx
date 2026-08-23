@@ -95,14 +95,14 @@ function makeCoalesceClock() {
 // Controllable fake worker: jobs are posted and answered manually.
 class FakeWorker {
   static latest: FakeWorker | null = null
-  sent: Array<{ jobId: number; body: string }> = []
+  sent: Array<{ jobId: number; body: string; scripts: unknown[] }> = []
   private handler: ((message: unknown) => void) | null = null
 
   constructor() {
     FakeWorker.latest = this
   }
 
-  postMessage(message: { jobId: number; body: string }): void {
+  postMessage(message: { jobId: number; body: string; scripts: unknown[] }): void {
     this.sent.push(message)
   }
 
@@ -111,7 +111,15 @@ class FakeWorker {
   setErrorHandler(_handler: (error: Error) => void): void {}
 
   respond(jobId: number, result: string): void {
-    this.handler?.({ type: 'result', jobId, op: 'apply', result, elapsedMs: 3 })
+    const job = this.sent.find((entry) => entry.jobId === jobId)
+    this.handler?.({
+      type: 'result',
+      jobId,
+      op: 'apply',
+      result,
+      elapsedMs: 3,
+      scriptElapsedMs: job?.scripts.map(() => 3) ?? [],
+    })
   }
 }
 

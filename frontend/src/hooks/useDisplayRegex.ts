@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '@/store'
-import { applyDisplayRegex } from '@/lib/regex/compiler'
 import { applyDisplayRegexTiered } from '@/lib/regex/pipeline'
-import { getRegexExecTier } from '@/lib/regex/evidence'
 import { resolveMacrosBatch } from '@/api/macros'
 import { isDisplayChatOwned, getDisplayResolverForChat } from '@/lib/spindle/display-resolver-registry'
 import { regexApi } from '@/api/regex'
@@ -939,47 +937,16 @@ export function useDisplayRegex(
     return () => { cancelled = true }
   }, [scriptsNeedingResolution, templateCacheKey, activeChatId, macroCharacterId, activePersonaId, cvSnapshot])
 
-  // Async pipeline engagement: an owned chat or ANY script not on the
-  // proven-safe sync fast path (evidence tiers) routes application through the
-  // effect-driven promise chain. Render-phase sync work then applies nothing;
+  // Async pipeline engagement: all user-authored scripts route through the
+  // isolated effect-driven promise chain. Render-phase sync work applies none;
   // pending renders carry the previous resolved value forward (no blank flash)
   // and raw text shows only on a first render with no cache.
   const hasAsyncMacroScripts = useMemo(
-    () =>
-      displayOwned ||
-      displayScripts.some((s) => getRegexExecTier(s).tier !== 'sync'),
+    () => displayOwned || displayScripts.length > 0,
     [displayOwned, displayScripts],
   )
 
-  const fallbackContent = useMemo(
-    () => {
-      const slowReports: SlowRegexReport[] = []
-      const recoveredReports: SlowRegexReport[] = []
-      if (displayScripts.length === 0 || regexGated || hasAsyncMacroScripts) {
-        pendingSlowReportsRef.current = slowReports
-        pendingRecoveredReportsRef.current = recoveredReports
-        return content
-      }
-      const next = applyDisplayRegex(content, displayScripts, {
-        isUser,
-        depth,
-        macroCtx,
-        resolvedFindPatterns: resolvedTemplates.resolvedFindPatterns,
-        resolvedReplacements: resolvedTemplates.resolvedReplacements,
-        dynamicMacros,
-        ...(messageIndex >= 0 ? { messageIndex } : {}),
-        ...(previousContent !== undefined ? { previousContent } : {}),
-      }, ({ script, elapsedMs, timedOut, thresholdMs }) => {
-        slowReports.push({ script, elapsedMs, timedOut, thresholdMs })
-      }, ({ script, elapsedMs, timedOut, thresholdMs }) => {
-        recoveredReports.push({ script, elapsedMs, timedOut, thresholdMs })
-      })
-      pendingSlowReportsRef.current = slowReports
-      pendingRecoveredReportsRef.current = recoveredReports
-      return next
-    },
-    [content, displayScripts, isUser, depth, macroCtx, resolvedTemplates, dynamicMacros, messageIndex, previousContent, regexGated, hasAsyncMacroScripts],
-  )
+  const fallbackContent = content
 
   useEffect(() => {
     const reports = pendingSlowReportsRef.current

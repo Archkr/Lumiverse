@@ -214,15 +214,20 @@ export function collectRegexMatches(
   const searchEnd = getRegexSearchEnd(input, pattern, flags, replacementTemplate)
   const searchable = searchEnd === input.length ? input : input.slice(0, searchEnd)
 
-  searchable.replace(regex, (fullMatch, ...args) => {
-    const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
-    const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
-    args.pop() as string
-    const offset = args.pop() as number
-    const groups = args as Array<string | undefined>
-    matches.push({ fullMatch, groups, offset, namedGroups })
-    return fullMatch
-  })
+  regex.lastIndex = 0
+  try {
+    searchable.replace(regex, (fullMatch, ...args) => {
+      const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
+      const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
+      args.pop() as string
+      const offset = args.pop() as number
+      const groups = args as Array<string | undefined>
+      matches.push({ fullMatch, groups, offset, namedGroups })
+      return fullMatch
+    })
+  } finally {
+    regex.lastIndex = 0
+  }
 
   return matches
 }
@@ -680,9 +685,8 @@ export async function applyDisplayRegexViaOwnedResolver(
 }
 
 // Main-thread reference loop handling every script feature (raw/after capture
-// substitution, match_actions, action decoration). The tiered pipeline uses it
-// only behind probe gates; direct applyDisplayRegexAsync callers hit it after
-// the backend attempt fails.
+// substitution, match_actions, action decoration). Kept for deterministic
+// reference tests; production display traffic must use the isolated pipeline.
 export async function applyDisplayRegexLocalLoop(
   content: string,
   scripts: RegexScript[],
@@ -823,15 +827,13 @@ export async function applyDisplayRegexLocalLoop(
   return { result, cacheable: false }
 }
 
-// Legacy direct-call path (backend first, local loop as fallback). Production
-// display traffic routes through ./pipeline.ts, which is worker-primary with
-// the backend as fallback and probe-gated sync as last resort. Kept for
-// direct callers and existing tests.
+// Legacy direct-call path retained for compatibility. It no longer falls back
+// to user-authored RegExp execution on the main thread when the backend fails.
 export async function applyDisplayRegexAsync(
   content: string,
   scripts: RegexScript[],
   context: ApplyDisplayRegexContext,
-  resolveRawTemplates: (templates: Record<string, string>) => Promise<Record<string, string>>,
+  _resolveRawTemplates: (templates: Record<string, string>) => Promise<Record<string, string>>,
 ): Promise<DisplayRegexBackendResult> {
   const owned = await applyDisplayRegexViaOwnedResolver(content, scripts, context)
   if (owned) return owned
@@ -839,5 +841,5 @@ export async function applyDisplayRegexAsync(
   const backendResult = await applyDisplayRegexOnBackend(content, scripts, context)
   if (backendResult !== null) return backendResult
 
-  return applyDisplayRegexLocalLoop(content, scripts, context, resolveRawTemplates)
+  return { result: content, cacheable: false }
 }

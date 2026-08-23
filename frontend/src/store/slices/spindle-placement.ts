@@ -375,7 +375,10 @@ export const createSpindlePlacementSlice: StateCreator<SpindlePlacementSlice> = 
     }))
   },
 
-  updateSettingsTab: (registrationId: string, updates: Partial<Pick<SettingsTabState, 'title'>>) => {
+  updateSettingsTab: (
+    registrationId: string,
+    updates: Partial<Pick<SettingsTabState, 'title' | 'shortName' | 'description' | 'iconSvg' | 'keywords' | 'sections' | 'position' | 'order'>>,
+  ) => {
     set((state) => ({
       settingsTabs: state.settingsTabs.map((entry) =>
         entry.id === registrationId ? { ...entry, ...updates } : entry

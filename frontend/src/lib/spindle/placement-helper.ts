@@ -504,6 +504,15 @@ export function createSettingsTabHandle(
   let destroyed = false
   let cleanupComplete = false
   let disposedDuringRegistration = false
+  let renderCleanup: (() => void) | undefined
+
+  const render = (renderer: SpindleSettingsTabOptions['render']): void => {
+    try { renderCleanup?.() } finally { renderCleanup = undefined }
+    root.replaceChildren()
+    if (!renderer) return
+    const cleanup = renderer(root)
+    if (typeof cleanup === 'function') renderCleanup = cleanup
+  }
 
   try {
     registration = registerExtensionSettingsTab({
@@ -520,6 +529,7 @@ export function createSettingsTabHandle(
       destroyed = true
       if (!registered) disposedDuringRegistration = true
       runCleanupSteps(
+        () => { try { renderCleanup?.() } finally { renderCleanup = undefined } },
         () => removePlacementRoot(root, unregisterRoot, extensionId, generation),
         () => { registration?.destroy() },
         () => { if (registered) getStore().unregisterSettingsTab(registrationId) },
@@ -546,6 +556,7 @@ export function createSettingsTabHandle(
       }
       getStore().registerSettingsTab(state)
       registered = true
+      render(options.render)
       if (disposedDuringRegistration) {
         getStore().unregisterSettingsTab(registrationId)
         throw new Error('PLACEMENT_DESTROYED: Extension unloaded during placement registration')
@@ -556,9 +567,29 @@ export function createSettingsTabHandle(
     }
 
     return {
+      id: metadata.tabId,
       root,
       registrationId,
       tabId: metadata.tabId,
+      update(next = {}) {
+        assertPlacementUsable(destroyed)
+        registration?.update(next)
+        const updated = getExtensionSettingsTabRegistrations(metadata.tabId)
+          .find((entry) => entry.registrationId === registrationId)
+        if (updated) {
+          getStore().updateSettingsTab(registrationId, {
+            title: updated.title,
+            shortName: updated.shortName,
+            description: updated.description,
+            iconSvg: updated.iconSvg,
+            keywords: [...updated.keywords],
+            sections: updated.sections.map((section) => ({ ...section, keywords: [...section.keywords] })),
+            position: updated.position,
+            order: updated.order,
+          })
+        }
+        if (Object.prototype.hasOwnProperty.call(next, 'render')) render(next.render)
+      },
       setTitle(title: string) {
         assertPlacementUsable(destroyed)
         registration?.setTitle(title)

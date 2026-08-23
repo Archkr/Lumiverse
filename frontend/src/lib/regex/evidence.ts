@@ -1,32 +1,33 @@
 import { regexApi } from '@/api/regex'
 import type { RegexScript } from '@/types/regex'
-import { KILL_MS } from './worker-client'
 
-// Client-side evidence tiers for display-regex execution (plan F10-amended):
-// - quarantined scripts are skipped entirely (flagged toast once per session)
-// - high analyzer risk / unknown evidence / oversized script bodies are
-//   offloaded to the worker pipeline
-// - only scripts with a recent successful run within budget on a small body
-//   earn the synchronous fast path
+// Client-side evidence for isolated display-regex execution. Quarantine state
+// is persisted; successful timings remain diagnostic only because one fast
+// input cannot prove that a backtracking regex is safe on a different input.
 export interface RegexScriptEvidence {
   last_ok_ms?: number
   last_ok_at?: number
   quarantined?: boolean
 }
 
-export type RegexExecTier = 'quarantined' | 'worker' | 'sync'
+export type RegexExecTier = 'quarantined' | 'worker'
 
-export const SYNC_FAST_PATH_MAX_BODY_CHARS = 8 * 1024
-export const SYNC_FAST_PATH_BUDGET_MS = KILL_MS
+// Session-scoped overlay. Entries include a definition fingerprint so evidence
+// from an older pattern cannot survive an edit under the same script id.
+const sessionEvidence = new Map<string, { definitionKey: string; evidence: RegexScriptEvidence }>()
 
-interface AnalyzerRiskMetadata {
-  risk?: string
+function definitionKey(script: RegexScript): string {
+  return JSON.stringify([
+    script.updated_at,
+    script.find_regex,
+    script.replace_string,
+    script.flags,
+    script.trim_strings,
+    script.substitute_macros,
+    script.actions,
+    script.metadata?.match_actions,
+  ])
 }
-
-// Session-scoped overlay. Seeded lazily from persisted metadata and consulted
-// first thereafter, so tier decisions stay correct even when persistence to
-// the backend fails (extension-owned scripts reject bare metadata writes).
-const sessionEvidence = new Map<string, RegexScriptEvidence>()
 
 function readStoredEvidence(script: RegexScript): RegexScriptEvidence {
   const raw = script.metadata?.regex_evidence
@@ -39,28 +40,18 @@ function readStoredEvidence(script: RegexScript): RegexScriptEvidence {
 }
 
 export function readRegexScriptEvidence(script: RegexScript): RegexScriptEvidence {
-  let entry = sessionEvidence.get(script.id)
-  if (!entry) {
-    entry = readStoredEvidence(script)
-    sessionEvidence.set(script.id, entry)
-  }
-  return entry
+  const key = definitionKey(script)
+  const entry = sessionEvidence.get(script.id)
+  if (entry?.definitionKey === key) return entry.evidence
+  const evidence = readStoredEvidence(script)
+  sessionEvidence.set(script.id, { definitionKey: key, evidence })
+  return evidence
 }
 
 export function getRegexExecTier(script: RegexScript): { tier: RegexExecTier; reason: string } {
   const evidence = readRegexScriptEvidence(script)
   if (evidence.quarantined) return { tier: 'quarantined', reason: 'quarantined' }
-
-  const risk = (script.metadata?.analyzer_risk as AnalyzerRiskMetadata | undefined)?.risk
-  if (risk === 'high') return { tier: 'worker', reason: 'analyzer risk high' }
-  if (risk !== 'low' && risk !== 'medium') return { tier: 'worker', reason: 'analyzer risk unknown' }
-
-  const bodyChars = script.find_regex.length + script.replace_string.length
-  if (bodyChars > SYNC_FAST_PATH_MAX_BODY_CHARS) return { tier: 'worker', reason: `body ${bodyChars} chars > ${SYNC_FAST_PATH_MAX_BODY_CHARS}` }
-  if (evidence.last_ok_ms === undefined) return { tier: 'worker', reason: 'no last_ok evidence' }
-  if (evidence.last_ok_ms > SYNC_FAST_PATH_BUDGET_MS) return { tier: 'worker', reason: `last_ok ${evidence.last_ok_ms}ms over ${SYNC_FAST_PATH_BUDGET_MS}ms budget` }
-
-  return { tier: 'sync', reason: `last_ok ${evidence.last_ok_ms}ms within budget` }
+  return { tier: 'worker', reason: 'user-authored regexes require isolated execution' }
 }
 
 export function isRegexScriptQuarantined(script: RegexScript): boolean {
@@ -74,31 +65,20 @@ function persistEvidence(scriptId: string, patch: RegexScriptEvidence): void {
   })
 }
 
-// Record a successful application. Persists only on tier-relevant transitions
-// (unknown -> known) so steady-state streaming never spams the API.
+// Record diagnostic timing without promoting the script to the main thread or
+// generating steady-state persistence traffic.
 export function recordRegexScriptSuccess(script: RegexScript, elapsedMs: number): void {
-  const before = getRegexExecTier(script)
   const evidence = readRegexScriptEvidence(script)
-  evidence.quarantined = false
   evidence.last_ok_ms = Math.max(0, Math.round(elapsedMs))
   evidence.last_ok_at = Date.now()
-  sessionEvidence.set(script.id, evidence)
-
-  const after = getRegexExecTier(script)
-  if (before.tier !== after.tier && after.tier === 'sync') {
-    persistEvidence(script.id, {
-      last_ok_ms: evidence.last_ok_ms,
-      last_ok_at: evidence.last_ok_at,
-      quarantined: false,
-    })
-  }
+  sessionEvidence.set(script.id, { definitionKey: definitionKey(script), evidence })
 }
 
 export function quarantineRegexScript(script: RegexScript): void {
   const evidence = readRegexScriptEvidence(script)
   if (evidence.quarantined) return
   evidence.quarantined = true
-  sessionEvidence.set(script.id, evidence)
+  sessionEvidence.set(script.id, { definitionKey: definitionKey(script), evidence })
   persistEvidence(script.id, { quarantined: true })
 }
 

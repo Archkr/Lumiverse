@@ -1,7 +1,5 @@
-import type { ApplyWorkerJob, ApplyWorkerOp, ApplyWorkerResponse } from './apply.worker'
+import type { ApplyWorkerJob, ApplyWorkerResponse } from './apply.worker'
 
-// Re-export the original policy constant now that compiler.ts exports it
-// (Task 2 defined a local mirror pending that export).
 export { DISPLAY_SLOW_REGEX_WARNING_MS as WARN_MS } from './compiler'
 
 export const KILL_MS_DEFAULT = 250
@@ -43,10 +41,16 @@ export class RegexWorkerError extends Error {
 
 export class RegexWorkerTimeoutError extends RegexWorkerError {
   readonly jobId: number
-  constructor(jobId: number, message = `regex job ${jobId} exceeded ${KILL_MS}ms deadline`) {
-    super(message)
+  readonly scriptId?: string
+  readonly scriptName?: string
+
+  constructor(jobId: number, script?: { scriptId?: string; scriptName?: string }, message?: string) {
+    const label = script?.scriptId ?? 'unknown'
+    super(message ?? `regex job ${jobId} exceeded ${KILL_MS}ms deadline (script ${label})`)
     this.name = 'RegexWorkerTimeoutError'
     this.jobId = jobId
+    this.scriptId = script?.scriptId
+    this.scriptName = script?.scriptName
   }
 }
 
@@ -85,12 +89,8 @@ function defaultSpawnWorker(): RegexWorkerLike {
   return {
     postMessage: (message) => worker.postMessage(message),
     terminate: () => worker.terminate(),
-    setMessageHandler: (handler) => {
-      messageHandler = handler
-    },
-    setErrorHandler: (handler) => {
-      errorHandler = handler
-    },
+    setMessageHandler: (handler) => { messageHandler = handler },
+    setErrorHandler: (handler) => { errorHandler = handler },
   }
 }
 
@@ -113,39 +113,31 @@ function getDeps(): RegexWorkerDeps {
 }
 
 export function setRegexWorkerDepsForTests(overrides: Partial<RegexWorkerDeps>): void {
-  const current = getDeps()
-  deps = { ...current, ...overrides }
+  deps = { ...getDeps(), ...overrides }
 }
 
 export function setRegexWorkerCallbacks(next: RegexWorkerCallbacks): void {
   callbacks = next
 }
 
-export function resetRegexWorkerForTests(): void {
-  deps = null
-  callbacks = {}
-  pending.clear()
-  if (activeWorker) {
-    activeWorker.terminate()
-    activeWorker = null
-  }
-  nextJobId = 1
-}
-
 export type RegexJobInput = Omit<ApplyWorkerJob, 'jobId'>
-
-export type RegexJobOutcome =
-  | { op: Extract<ApplyWorkerOp, 'apply'>; result: string; elapsedMs: number }
-  | { op: Extract<ApplyWorkerOp, 'probe'>; passed: boolean; elapsedMs: number }
+export type RegexJobOutcome = {
+  op: 'apply'
+  result: string
+  elapsedMs: number
+  scriptElapsedMs: number[]
+}
 
 interface PendingJob {
   job: ApplyWorkerJob
   resolve: (outcome: RegexJobOutcome) => void
   reject: (error: RegexWorkerError) => void
   cancelDeadline: (() => void) | null
+  currentScript: { scriptId?: string; scriptName?: string }
 }
 
-const pending = new Map<number, PendingJob>()
+const queue: PendingJob[] = []
+let active: PendingJob | null = null
 let activeWorker: RegexWorkerLike | null = null
 let nextJobId = 1
 
@@ -156,96 +148,140 @@ export function isSupported(): boolean {
 function ensureWorker(): RegexWorkerLike {
   if (activeWorker) return activeWorker
   const worker = getDeps().spawnWorker()
-  worker.setMessageHandler(handleWorkerMessage)
-  worker.setErrorHandler(handleWorkerError)
+  worker.setMessageHandler((message) => handleWorkerMessage(worker, message))
+  worker.setErrorHandler((error) => handleWorkerError(worker, error))
   activeWorker = worker
   return worker
 }
 
-function settleAll(rejectWithError: (job: PendingJob) => RegexWorkerError): void {
-  for (const entry of pending.values()) {
-    entry.cancelDeadline?.()
-    entry.reject(rejectWithError(entry))
-  }
-  pending.clear()
+function armDeadline(entry: PendingJob): void {
+  entry.cancelDeadline?.()
+  entry.cancelDeadline = getDeps().scheduleTimer(() => handleDeadlineExpired(entry), KILL_MS)
 }
 
-function handleWorkerMessage(message: ApplyWorkerResponse): void {
-  // Out-of-order protection: only the live pending entry for this jobId may
-  // settle, and it is removed before settling so late/stale duplicates are
-  // guaranteed to be ignored.
-  const entry = pending.get(message.jobId)
-  if (!entry) return
-  pending.delete(message.jobId)
+function pumpQueue(): void {
+  if (active || queue.length === 0) return
+  const entry = queue.shift()!
+  let worker: RegexWorkerLike
+  try {
+    worker = ensureWorker()
+  } catch (error) {
+    entry.reject(new RegexWorkerCrashedError(
+      `regex worker construction failed: ${error instanceof Error ? error.message : String(error)}`,
+    ))
+    pumpQueue()
+    return
+  }
+  active = entry
+  armDeadline(entry)
+  try {
+    worker.postMessage(entry.job)
+  } catch (error) {
+    entry.cancelDeadline?.()
+    entry.cancelDeadline = null
+    active = null
+    activeWorker?.terminate()
+    activeWorker = null
+    entry.reject(new RegexWorkerCrashedError(
+      `regex worker postMessage failed: ${error instanceof Error ? error.message : String(error)}`,
+    ))
+    pumpQueue()
+  }
+}
+
+function handleWorkerMessage(worker: RegexWorkerLike, message: ApplyWorkerResponse): void {
+  if (worker !== activeWorker || !active || active.job.jobId !== message.jobId) return
+  if (message.type === 'progress') {
+    active.currentScript = {
+      ...(message.scriptId ? { scriptId: message.scriptId } : {}),
+      ...(message.scriptName ? { scriptName: message.scriptName } : {}),
+    }
+    armDeadline(active)
+    return
+  }
+
+  const entry = active
+  active = null
   entry.cancelDeadline?.()
   entry.cancelDeadline = null
   if (message.type === 'error') {
     callbacks.onScriptFlagged?.({
       jobId: message.jobId,
-      scriptId: entry.job.scriptId,
-      scriptName: entry.job.scriptName,
+      ...entry.currentScript,
       elapsedMs: message.elapsedMs,
     })
     entry.reject(new RegexWorkerError(`regex job ${message.jobId} failed: ${message.error}`))
-    return
-  }
-  if (message.op === 'apply') {
-    entry.resolve({ op: 'apply', result: message.result, elapsedMs: message.elapsedMs })
   } else {
-    entry.resolve({ op: 'probe', passed: message.passed, elapsedMs: message.elapsedMs })
+    entry.resolve({
+      op: 'apply',
+      result: message.result,
+      elapsedMs: message.elapsedMs,
+      scriptElapsedMs: message.scriptElapsedMs,
+    })
   }
+  pumpQueue()
 }
 
-function handleWorkerError(error: Error): void {
-  activeWorker?.terminate()
+function handleWorkerError(worker: RegexWorkerLike, error: Error): void {
+  if (worker !== activeWorker) return
+  worker.terminate()
   activeWorker = null
-  settleAll(() => new RegexWorkerCrashedError(`regex worker crashed: ${error.message}`))
+  const entry = active
+  active = null
+  if (entry) {
+    entry.cancelDeadline?.()
+    entry.reject(new RegexWorkerCrashedError(`regex worker crashed: ${error.message}`))
+  }
+  pumpQueue()
 }
 
 function handleDeadlineExpired(entry: PendingJob): void {
-  // Kill the whole worker: any in-flight script is suspect once one exceeds
-  // the deadline. Respawn immediately so the next job stays warm.
+  if (active !== entry) return
   activeWorker?.terminate()
   activeWorker = null
-  ensureWorker()
-  settleAll((killed) => new RegexWorkerTimeoutError(
-    killed.job.jobId,
-    `regex job ${killed.job.jobId} exceeded ${KILL_MS}ms deadline (script ${killed.job.scriptId ?? 'unknown'})`,
-  ))
-}
-
-function dispatch(entry: PendingJob): void {
-  const worker = ensureWorker()
-  pending.set(entry.job.jobId, entry)
-  worker.postMessage(entry.job)
-  entry.cancelDeadline = getDeps().scheduleTimer(() => handleDeadlineExpired(entry), KILL_MS)
+  active = null
+  entry.cancelDeadline?.()
+  entry.cancelDeadline = null
+  entry.reject(new RegexWorkerTimeoutError(entry.job.jobId, entry.currentScript))
+  pumpQueue()
 }
 
 export function runRegexJobInWorker(input: RegexJobInput): Promise<RegexJobOutcome> {
-  if (!isSupported()) {
-    return Promise.reject(new RegexWorkerUnsupportedError())
-  }
-  const job: ApplyWorkerJob = { ...input, jobId: nextJobId }
-  nextJobId += 1
+  if (!isSupported()) return Promise.reject(new RegexWorkerUnsupportedError())
 
-  // Bounded queue: overflow drops the OLDEST pending job so the NEWEST always
-  // executes. Callers re-arm via coalescing (trailing flush lands in Task 3).
-  while (pending.size >= MAX_PENDING_JOBS) {
-    const oldestKey = pending.keys().next().value
-    if (oldestKey === undefined) break
-    const oldest = pending.get(oldestKey)
-    if (!oldest) break
-    pending.delete(oldestKey)
-    oldest.cancelDeadline?.()
-    callbacks.onDropped?.({
-      jobId: oldest.job.jobId,
-      scriptId: oldest.job.scriptId,
-      scriptName: oldest.job.scriptName,
-    })
-    oldest.reject(new RegexJobDroppedError(oldestKey))
-  }
-
+  const job: ApplyWorkerJob = { ...input, jobId: nextJobId++ }
   return new Promise<RegexJobOutcome>((resolve, reject) => {
-    dispatch({ job, resolve, reject, cancelDeadline: null })
+    while ((active ? 1 : 0) + queue.length >= MAX_PENDING_JOBS) {
+      const oldest = queue.shift()
+      if (!oldest) break
+      callbacks.onDropped?.({
+        jobId: oldest.job.jobId,
+        ...oldest.currentScript,
+      })
+      oldest.reject(new RegexJobDroppedError(oldest.job.jobId))
+    }
+    const first = job.scripts[0]
+    queue.push({
+      job,
+      resolve,
+      reject,
+      cancelDeadline: null,
+      currentScript: {
+        ...(first?.scriptId ? { scriptId: first.scriptId } : {}),
+        ...(first?.scriptName ? { scriptName: first.scriptName } : {}),
+      },
+    })
+    pumpQueue()
   })
+}
+
+export function resetRegexWorkerForTests(): void {
+  deps = null
+  callbacks = {}
+  active?.cancelDeadline?.()
+  active = null
+  queue.length = 0
+  activeWorker?.terminate()
+  activeWorker = null
+  nextJobId = 1
 }

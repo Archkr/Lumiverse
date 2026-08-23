@@ -1,35 +1,34 @@
 import { compileRegex } from './compile-regex'
 import { replaceWithinRegexSearchWindow } from './search-window'
 
-export type ApplyWorkerOp = 'apply' | 'probe'
-
-export interface ApplyWorkerJob {
-  jobId: number
-  op: ApplyWorkerOp
-  body: string
+export interface ApplyWorkerScript {
   pattern: string
   flags: string
-  replaceString?: string
-  trimStrings?: string[]
+  replaceString: string
+  trimStrings: string[]
   scriptId?: string
   scriptName?: string
 }
 
-export type ApplyWorkerResponse =
-  | { type: 'result'; jobId: number; op: 'apply'; result: string; elapsedMs: number }
-  | { type: 'result'; jobId: number; op: 'probe'; passed: boolean; elapsedMs: number }
-  | { type: 'error'; jobId: number; error: string; elapsedMs: number }
-
-const PROBE_SAMPLE_CHARS = 500
-const TRIM_LOOP_MAX_ITERATIONS = 32
-
-function scriptLabel(job: ApplyWorkerJob): string {
-  const id = job.scriptId ?? 'unknown'
-  return job.scriptName ? `${id} (${job.scriptName})` : id
+export interface ApplyWorkerJob {
+  jobId: number
+  op: 'apply'
+  body: string
+  scripts: ApplyWorkerScript[]
 }
 
-// Bounded trim loop with the same semantics as compiler.ts's Task 1 amendment:
-// max 32 iterations per trim string, empty trim is a no-op, cap hit warns once.
+export type ApplyWorkerResponse =
+  | { type: 'progress'; jobId: number; scriptIndex: number; scriptId?: string; scriptName?: string }
+  | { type: 'result'; jobId: number; op: 'apply'; result: string; elapsedMs: number; scriptElapsedMs: number[] }
+  | { type: 'error'; jobId: number; error: string; elapsedMs: number }
+
+const TRIM_LOOP_MAX_ITERATIONS = 32
+
+function scriptLabel(script: ApplyWorkerScript): string {
+  const id = script.scriptId ?? 'unknown'
+  return script.scriptName ? `${id} (${script.scriptName})` : id
+}
+
 function applyBoundedTrim(result: string, trimStrings: readonly string[], label: string): string {
   for (const trim of trimStrings) {
     if (trim === '') continue
@@ -46,42 +45,18 @@ function applyBoundedTrim(result: string, trimStrings: readonly string[], label:
   return result
 }
 
-function runApplyJob(job: ApplyWorkerJob): { result: string; elapsedMs: number } {
-  const startedAt = performance.now()
-  const regex = compileRegex(job.pattern, job.flags)
-  if (!regex) throw new Error(`invalid pattern for script ${scriptLabel(job)}`)
-  // Plain-string replacement path mirrors compiler.ts's non-action branch
-  // (:575/:601) — native $-capture substitution keeps semantics identical to
-  // the main thread for pre-resolved replacement templates. Scripts with
-  // match_actions decoration stay on the main thread (Task 3 tiers them).
+function applyOne(body: string, script: ApplyWorkerScript): string {
+  const regex = compileRegex(script.pattern, script.flags)
+  if (!regex) throw new Error(`invalid pattern for script ${scriptLabel(script)}`)
   const replaced = replaceWithinRegexSearchWindow(
-    job.body,
+    body,
     regex,
-    job.pattern,
-    job.flags,
-    job.replaceString ?? '',
-    job.replaceString ?? '',
+    script.pattern,
+    script.flags,
+    script.replaceString,
+    script.replaceString,
   )
-  const result = applyBoundedTrim(replaced, job.trimStrings ?? [], scriptLabel(job))
-  return { result, elapsedMs: Math.round(performance.now() - startedAt) }
-}
-
-function runProbeJob(job: ApplyWorkerJob): { passed: boolean; elapsedMs: number } {
-  const startedAt = performance.now()
-  let passed = false
-  try {
-    const regex = compileRegex(job.pattern, job.flags)
-    if (regex) {
-      // Identity replace never drifts lastIndex on shared cached RegExp
-      // instances; a completed pass means the pattern executed safely here.
-      const sample = job.body.slice(0, PROBE_SAMPLE_CHARS)
-      sample.replace(regex, (match) => match)
-      passed = true
-    }
-  } catch {
-    passed = false
-  }
-  return { passed, elapsedMs: Math.round(performance.now() - startedAt) }
+  return applyBoundedTrim(replaced, script.trimStrings, scriptLabel(script))
 }
 
 const workerSelf = self as unknown as {
@@ -93,15 +68,30 @@ workerSelf.onmessage = (event) => {
   const job = event.data
   const startedAt = performance.now()
   try {
-    if (job.op === 'apply') {
-      const outcome = runApplyJob(job)
-      workerSelf.postMessage({ type: 'result', jobId: job.jobId, op: 'apply', ...outcome })
-    } else if (job.op === 'probe') {
-      const outcome = runProbeJob(job)
-      workerSelf.postMessage({ type: 'result', jobId: job.jobId, op: 'probe', ...outcome })
-    } else {
-      throw new Error(`unknown op ${(job as ApplyWorkerJob).op}`)
+    if (job.op !== 'apply') throw new Error(`unknown op ${(job as ApplyWorkerJob).op}`)
+    let result = job.body
+    const scriptElapsedMs: number[] = []
+    for (let scriptIndex = 0; scriptIndex < job.scripts.length; scriptIndex += 1) {
+      const script = job.scripts[scriptIndex]!
+      workerSelf.postMessage({
+        type: 'progress',
+        jobId: job.jobId,
+        scriptIndex,
+        ...(script.scriptId ? { scriptId: script.scriptId } : {}),
+        ...(script.scriptName ? { scriptName: script.scriptName } : {}),
+      })
+      const scriptStartedAt = performance.now()
+      result = applyOne(result, script)
+      scriptElapsedMs.push(Math.round(performance.now() - scriptStartedAt))
     }
+    workerSelf.postMessage({
+      type: 'result',
+      jobId: job.jobId,
+      op: 'apply',
+      result,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      scriptElapsedMs,
+    })
   } catch (error) {
     workerSelf.postMessage({
       type: 'error',

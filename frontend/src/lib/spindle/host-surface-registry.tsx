@@ -116,7 +116,7 @@ export type HostSurfaceJsonValue =
 
 export type HostSurfaceProps = Record<string, HostSurfaceJsonValue>
 
-export type HostSurfaceEventHandler = (payload: HostSurfaceJsonValue) => void
+export type HostSurfaceEventHandler = (payload: unknown) => void
 export type HostSurfaceUnsubscribe = () => void
 
 export interface SpindleHostSurfaceHandle {
