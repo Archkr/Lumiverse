@@ -205,8 +205,7 @@ function collectUserFilePaths(userId: string): string[] {
     }
   }
 
-  // Image thumbnails: the registry only knows the v2 suffix; sweep legacy
-  // names too so an old-tier-thumbnail orphan doesn't survive.
+  // Sweep legacy names too so an old-tier-thumbnail orphan doesn't survive.
   try {
     const imgs = getDb()
       .query("SELECT id FROM images WHERE user_id = ?")
@@ -390,4 +389,3 @@ function runDelete(db: ReturnType<typeof getDb>, sql: string, ...params: any[]):
   const res = db.prepare(sql).run(...params);
   return Number(res.changes ?? 0);
 }
-

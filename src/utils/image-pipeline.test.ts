@@ -6,6 +6,7 @@ import {
   convertImageToPng,
   readImageMetadata,
   resizeInsideToWebp,
+  writeInsideAvif,
   writeInsideWebp,
 } from "./image-pipeline";
 
@@ -47,6 +48,18 @@ describe("Bun-native image pipeline", () => {
       width: 1,
       height: 1,
       format: "webp",
+    });
+  });
+
+  test("writes AVIF output through Sharp", async () => {
+    const destination = join(workDir, "thumbnail.avif");
+    await writeInsideAvif(onePixelPng, destination, 32, 32, 54, {
+      withoutEnlargement: true,
+    });
+    expect(await readImageMetadata(destination)).toMatchObject({
+      width: 1,
+      height: 1,
+      format: "avif",
     });
   });
 

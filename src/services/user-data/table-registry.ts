@@ -6,6 +6,8 @@
 // Order matters for import: parents come before children so foreign-key
 // references resolve cleanly under "INSERT OR IGNORE" merge semantics.
 
+import { existsSync } from "node:fs";
+
 export type OwnershipKind =
   | "user"           // row.user_id = importerId
   | "via_chat"       // row.chat_id ∈ user's chats
@@ -89,13 +91,14 @@ export const TABLE_REGISTRY: readonly TableSpec[] = [
       },
       {
         bucket: "thumbnails",
-        resolve: (row, dataDir) =>
-          row.id
-            ? [
-                `${dataDir}/images/${row.id}_thumb_sm_v2.webp`,
-                `${dataDir}/images/${row.id}_thumb_lg_v2.webp`,
-              ]
-            : [],
+        resolve: (row, dataDir) => {
+          if (!row.id) return [];
+          return ["sm", "lg"]
+            .flatMap((tier) => ["webp", "avif"].map(
+              (codec) => `${dataDir}/images/${row.id}_thumb_${tier}_v2.${codec}`,
+            ))
+            .filter(existsSync);
+        },
       },
     ],
   },

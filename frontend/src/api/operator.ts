@@ -32,6 +32,9 @@ export interface SharpSettings {
   cacheMemoryMb?: number | null
   cacheFiles?: number | null
   cacheItems?: number | null
+  thumbnailCodec?: 'webp' | 'avif' | null
+  webpQuality?: number | null
+  avifQuality?: number | null
 }
 
 export interface ResolvedSharpSettings {
@@ -39,6 +42,9 @@ export interface ResolvedSharpSettings {
   cacheMemoryMb: number
   cacheFiles: number
   cacheItems: number
+  thumbnailCodec: 'webp' | 'avif'
+  webpQuality: number
+  avifQuality: number
 }
 
 export interface ThumbnailQueueRecovery {

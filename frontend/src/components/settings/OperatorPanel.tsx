@@ -325,6 +325,9 @@ function normalizeSharpSettings(input: SharpSettings): SharpSettings {
     cacheMemoryMb: normalizeInt(input.cacheMemoryMb, 8, 512),
     cacheFiles: normalizeInt(input.cacheFiles, 0, 2048),
     cacheItems: normalizeInt(input.cacheItems, 1, 4096),
+    thumbnailCodec: input.thumbnailCodec === 'avif' ? 'avif' : input.thumbnailCodec === 'webp' ? 'webp' : null,
+    webpQuality: normalizeInt(input.webpQuality, 1, 100),
+    avifQuality: normalizeInt(input.avifQuality, 1, 100),
   }
 }
 
@@ -504,6 +507,9 @@ export default function OperatorPanel() {
   const [queueAction, setQueueAction] = useState<'recover' | 'discard' | null>(null)
   const smallSize = thumbnailSettings?.smallSize ?? 300
   const largeSize = thumbnailSettings?.largeSize ?? 700
+  const activeThumbnailCodec = sharpSettings.thumbnailCodec
+    ?? sharpStatus?.effectiveSettings.thumbnailCodec
+    ?? 'webp'
 
   // Track the operation that triggered a server restart so we can
   // show "Reconnecting..." once the WS drops and recover on reconnect.
@@ -628,6 +634,9 @@ export default function OperatorPanel() {
         cacheMemoryMb: next.configuredSettings.cacheMemoryMb ?? null,
         cacheFiles: next.configuredSettings.cacheFiles ?? null,
         cacheItems: next.configuredSettings.cacheItems ?? null,
+        thumbnailCodec: next.configuredSettings.thumbnailCodec ?? null,
+        webpQuality: next.configuredSettings.webpQuality ?? null,
+        avifQuality: next.configuredSettings.avifQuality ?? null,
       })
       if (next.thumbnailQueue) setThumbnailQueue(next.thumbnailQueue)
       setThumbnailRecovery(next.thumbnailRecovery ?? { pending: 0, process: 0, rebuild: 0 })
@@ -1202,6 +1211,9 @@ export default function OperatorPanel() {
         cacheMemoryMb: next.configuredSettings.cacheMemoryMb ?? null,
         cacheFiles: next.configuredSettings.cacheFiles ?? null,
         cacheItems: next.configuredSettings.cacheItems ?? null,
+        thumbnailCodec: next.configuredSettings.thumbnailCodec ?? null,
+        webpQuality: next.configuredSettings.webpQuality ?? null,
+        avifQuality: next.configuredSettings.avifQuality ?? null,
       })
       addToast({ type: 'success', message: t('operator.sharpApplySuccess') })
     } catch (err) {
@@ -1220,6 +1232,9 @@ export default function OperatorPanel() {
         cacheMemoryMb: null,
         cacheFiles: null,
         cacheItems: null,
+        thumbnailCodec: null,
+        webpQuality: null,
+        avifQuality: null,
       })
       addToast({ type: 'success', message: t('operator.sharpResetSuccess') })
     } catch (err) {
@@ -2557,9 +2572,72 @@ export default function OperatorPanel() {
                     cacheFiles: sharpStatus.defaults.cacheFiles,
                     cacheItems: sharpStatus.defaults.cacheItems,
                   })
+                : '—'}
+              </span>
+            </div>
+            <div className={styles.dbInfoBlock}>
+              <span className={styles.statusLabel}>{t('operator.thumbnailEncodingEffective')}</span>
+              <span className={styles.dbInlineText}>
+                {sharpStatus
+                  ? t('operator.thumbnailEncodingEffectiveValue', {
+                    codec: sharpStatus.effectiveSettings.thumbnailCodec.toUpperCase(),
+                    quality: sharpStatus.effectiveSettings.thumbnailCodec === 'avif'
+                      ? sharpStatus.effectiveSettings.avifQuality
+                      : sharpStatus.effectiveSettings.webpQuality,
+                  })
                   : '—'}
               </span>
             </div>
+          </div>
+
+          <div className={styles.toggleRow}>
+            <div className={styles.remoteInfo}>
+              <span className={styles.remoteLabel}>{t('operator.thumbnailUseAvif')}</span>
+              <span className={styles.remoteHint}>{t('operator.thumbnailUseAvifHint')}</span>
+            </div>
+            <Toggle.Switch
+              checked={activeThumbnailCodec === 'avif'}
+              onChange={(checked) => setSharpSettings((prev) => ({
+                ...prev,
+                thumbnailCodec: checked ? 'avif' : 'webp',
+              }))}
+              disabled={!!effectiveBusy}
+              aria-label={t('operator.thumbnailUseAvif')}
+            />
+          </div>
+
+          <div className={styles.tuningGrid}>
+            <label className={styles.fieldGroup}>
+              <span className={styles.fieldLabel}>{t('operator.thumbnailWebpQuality')}</span>
+              <NumericInput
+                min={1}
+                max={100}
+                step={1}
+                className={styles.fieldInput}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.webpQuality ?? 80 })}
+                value={sharpSettings.webpQuality ?? null}
+                integer
+                allowEmpty
+                onChange={(value) => setSharpSettings((prev) => ({ ...prev, webpQuality: value }))}
+              />
+              <span className={styles.fieldHint}>{t('operator.thumbnailWebpQualityHint')}</span>
+            </label>
+
+            <label className={styles.fieldGroup}>
+              <span className={styles.fieldLabel}>{t('operator.thumbnailAvifQuality')}</span>
+              <NumericInput
+                min={1}
+                max={100}
+                step={1}
+                className={styles.fieldInput}
+                placeholder={t('operator.placeholderDefault', { value: sharpStatus?.defaults.avifQuality ?? 54 })}
+                value={sharpSettings.avifQuality ?? null}
+                integer
+                allowEmpty
+                onChange={(value) => setSharpSettings((prev) => ({ ...prev, avifQuality: value }))}
+              />
+              <span className={styles.fieldHint}>{t('operator.thumbnailAvifQualityHint')}</span>
+            </label>
           </div>
 
           <div className={styles.tuningGrid}>

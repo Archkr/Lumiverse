@@ -47,6 +47,7 @@ function parseWallpaperUploadProgressId(value: string | undefined): WallpaperUpl
 
 function resolveImageContentType(filepath: string, fallbackMimeType: string): string | null {
   if (filepath.endsWith(".webp")) return "image/webp";
+  if (filepath.endsWith(".avif")) return "image/avif";
   if (filepath.endsWith(".mp4")) return "video/mp4";
   if (filepath.endsWith(".webm")) return "video/webm";
   if (filepath.endsWith(".mov")) return "video/quicktime";

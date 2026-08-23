@@ -88,6 +88,29 @@ export async function writeInsideWebp(
   }
 }
 
+/**
+ * AVIF output always uses Sharp/libvips. Unlike WebP, Bun.Image does not
+ * currently expose an AVIF encoder. Sharp's process-wide cache and concurrency
+ * limits are configured by sharp-settings.service through the shared module.
+ */
+export async function writeInsideAvif(
+  input: ImagePipelineInput,
+  destination: string,
+  width: number,
+  height: number,
+  quality: number,
+  options: ImagePipelineOptions & { withoutEnlargement?: boolean } = {},
+): Promise<void> {
+  const autoOrient = options.autoOrient ?? false;
+  const withoutEnlargement = options.withoutEnlargement ?? false;
+  let pipeline = sharp(input as any);
+  if (autoOrient) pipeline = pipeline.rotate();
+  await pipeline
+    .resize(width, height, { fit: "inside", withoutEnlargement })
+    .avif({ quality, effort: 4, chromaSubsampling: "4:2:0" })
+    .toFile(destination);
+}
+
 export async function convertImageToWebp(
   input: ImagePipelineInput,
   quality: number,

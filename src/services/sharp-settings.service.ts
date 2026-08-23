@@ -7,11 +7,16 @@ import { InvalidSettingError, getSetting, putSetting } from "./settings.service"
 
 export const SHARP_SETTINGS_KEY = "sharpSettings";
 
+export type ThumbnailCodec = "webp" | "avif";
+
 export interface SharpSettings {
   concurrency?: number | null;
   cacheMemoryMb?: number | null;
   cacheFiles?: number | null;
   cacheItems?: number | null;
+  thumbnailCodec?: ThumbnailCodec | null;
+  webpQuality?: number | null;
+  avifQuality?: number | null;
 }
 
 export interface ResolvedSharpSettings {
@@ -19,6 +24,9 @@ export interface ResolvedSharpSettings {
   cacheMemoryMb: number;
   cacheFiles: number;
   cacheItems: number;
+  thumbnailCodec: ThumbnailCodec;
+  webpQuality: number;
+  avifQuality: number;
 }
 
 export interface SharpSettingsStatus {
@@ -33,6 +41,9 @@ const DEFAULT_SHARP_SETTINGS: ResolvedSharpSettings = {
   cacheMemoryMb: 64,
   cacheFiles: 128,
   cacheItems: 256,
+  thumbnailCodec: "webp",
+  webpQuality: 80,
+  avifQuality: 54,
 };
 
 let currentConfiguredSettings: SharpSettings = {};
@@ -47,6 +58,14 @@ function clampInteger(value: unknown, min: number, max: number, label: string): 
   return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
+function normalizeThumbnailCodec(value: unknown): ThumbnailCodec | null {
+  if (value == null || value === "") return null;
+  if (value !== "webp" && value !== "avif") {
+    throw new InvalidSettingError("Thumbnail codec must be webp, avif, or null");
+  }
+  return value;
+}
+
 export function normalizeSharpSettings(input: unknown): SharpSettings {
   if (input == null) return {};
   if (typeof input !== "object" || Array.isArray(input)) {
@@ -59,6 +78,9 @@ export function normalizeSharpSettings(input: unknown): SharpSettings {
     cacheMemoryMb: clampInteger(raw.cacheMemoryMb, 8, 512, "Sharp cache memory"),
     cacheFiles: clampInteger(raw.cacheFiles, 0, 2048, "Sharp cache files"),
     cacheItems: clampInteger(raw.cacheItems, 1, 4096, "Sharp cache items"),
+    thumbnailCodec: normalizeThumbnailCodec(raw.thumbnailCodec),
+    webpQuality: clampInteger(raw.webpQuality, 1, 100, "WebP thumbnail quality"),
+    avifQuality: clampInteger(raw.avifQuality, 1, 100, "AVIF thumbnail quality"),
   };
 }
 
@@ -68,6 +90,9 @@ function resolveSharpSettings(configured: SharpSettings | null | undefined): Res
     cacheMemoryMb: configured?.cacheMemoryMb ?? DEFAULT_SHARP_SETTINGS.cacheMemoryMb,
     cacheFiles: configured?.cacheFiles ?? DEFAULT_SHARP_SETTINGS.cacheFiles,
     cacheItems: configured?.cacheItems ?? DEFAULT_SHARP_SETTINGS.cacheItems,
+    thumbnailCodec: configured?.thumbnailCodec ?? DEFAULT_SHARP_SETTINGS.thumbnailCodec,
+    webpQuality: configured?.webpQuality ?? DEFAULT_SHARP_SETTINGS.webpQuality,
+    avifQuality: configured?.avifQuality ?? DEFAULT_SHARP_SETTINGS.avifQuality,
   };
 }
 

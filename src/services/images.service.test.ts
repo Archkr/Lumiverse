@@ -33,6 +33,8 @@ import {
 } from "./images.service";
 import { recordImageProcessingJob } from "./image-processing-queue";
 import { deriveWorkerBudget, setWorkerBudgetOverride } from "../utils/cpu-budget";
+import { applySharpSettings } from "./sharp-settings.service";
+import { readImageMetadata } from "../utils/image-pipeline";
 
 const originalDataDir = env.dataDir;
 let testDataDir = "";
@@ -157,6 +159,7 @@ function seedChat(id: string, metadata: Record<string, unknown>, updatedAt = 100
 beforeEach(() => {
   resetDeferredImageProcessingForTests();
   setWorkerBudgetOverride(null);
+  applySharpSettings({});
   initImagesTestDb();
   testDataDir = mkdtempSync(join(tmpdir(), "lumiverse-images-test-"));
   env.dataDir = testDataDir;
@@ -165,6 +168,7 @@ beforeEach(() => {
 afterEach(() => {
   resetDeferredImageProcessingForTests();
   setWorkerBudgetOverride(null);
+  applySharpSettings({});
   closeDatabase();
   env.dataDir = originalDataDir;
   if (testDataDir) {
@@ -349,12 +353,15 @@ describe("images.service ownership filters", () => {
     mkdirSync(imagesDir, { recursive: true });
     const primaryPath = join(imagesDir, "clip-2.mp4");
     const hevcPath = join(imagesDir, "clip-2_hevc.mp4");
+    const avifThumbPath = join(imagesDir, "clip-2_thumb_sm_v2.avif");
     writeFileSync(primaryPath, "primary");
     writeFileSync(hevcPath, "hevc");
+    writeFileSync(avifThumbPath, "avif-thumb");
 
     expect(deleteImage("u1", "clip-2")).toBe(true);
     expect(existsSync(primaryPath)).toBe(false);
     expect(existsSync(hevcPath)).toBe(false);
+    expect(existsSync(avifThumbPath)).toBe(false);
   });
 
   test("keeps the image row when deleting its files fails", () => {
@@ -534,6 +541,31 @@ describe("deferred image processing", () => {
     expect(image.mime_type).toBe("image/apng");
     await waitForDeferredImageProcessing();
     expect(getImage("u1", image.id)).toMatchObject({ width: 1, height: 1, has_thumbnail: true });
+  });
+
+  test("uses Sharp AVIF thumbnails when the operator codec is enabled", async () => {
+    applySharpSettings({ thumbnailCodec: "avif", avifQuality: 54 });
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const image = await uploadImageDeferred("u1", new File([ONE_BY_ONE_PNG], "embedded.png"));
+
+    await waitForDeferredImageProcessing();
+    const avifSmPath = join(testDataDir, "images", `${image.id}_thumb_sm_v2.avif`);
+    const avifLgPath = join(testDataDir, "images", `${image.id}_thumb_lg_v2.avif`);
+    expect(existsSync(avifSmPath)).toBe(true);
+    expect(existsSync(avifLgPath)).toBe(true);
+    expect(existsSync(join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`))).toBe(false);
+    expect(await readImageMetadata(avifSmPath)).toMatchObject({ format: "avif" });
+    expect(await getImageFilePath("u1", image.id, "sm")).toBe(avifSmPath);
+
+    applySharpSettings({ thumbnailCodec: "webp", webpQuality: 80 });
+    const webpSmPath = join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`);
+    expect(await getImageFilePath("u1", image.id, "sm")).toBe(webpSmPath);
+    expect(existsSync(webpSmPath)).toBe(true);
+
+    applySharpSettings({ thumbnailCodec: "avif", avifQuality: 54 });
+    await rebuildAllThumbnails("u1");
+    expect(existsSync(webpSmPath)).toBe(false);
+    expect(existsSync(avifSmPath)).toBe(true);
   });
 
   test("thumbnail processing opt-outs survive lazy reads and rebuilds", async () => {
