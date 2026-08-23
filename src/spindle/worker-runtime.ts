@@ -292,6 +292,8 @@ type SpindleUserRole = "operator" | "admin" | "user";
 
 type RuntimeWorkerToHost =
   | WorkerToHost
+  | { type: "register_frontend_runtime_capability"; capability: "message_tag_interceptor" }
+  | { type: "unregister_frontend_runtime_capability"; capability: "message_tag_interceptor" }
   | { type: "dlc_get_catalog"; requestId: string; userId?: string }
   | {
       type: "assemble_prompt";
@@ -686,6 +688,9 @@ type RuntimeWorldBooksAPI = Omit<SpindleAPI["world_books"], "entries"> & {
 // runtime CRUD surface on the native type avoids narrowing data returned by
 // newer hosts when the installed public type package lags a release.
 type RuntimeSpindleAPI = Omit<SpindleAPI, "presets" | "imageGen" | "world_books"> & {
+  frontendCapabilities: {
+    declare(capability: "message_tag_interceptor"): () => void;
+  };
   /** Read-only Lumia DLC catalog. Public extension types expose this as `spindle.dlc`. */
   dlc: {
     getCatalog(options?: { userId?: string }): Promise<LumiaDlcCatalog>;
@@ -1052,6 +1057,7 @@ let oauthCallbackHandler:
   | ((params: Record<string, string>) => Promise<{ html?: string } | void>)
   | null = null;
 const frontendMessageHandlers = new Set<(payload: unknown, userId: string) => void>();
+const frontendRuntimeCapabilityRefCounts = new Map<"message_tag_interceptor", number>();
 const commandInvokedHandlers = new Set<(commandId: string, context: any) => void | Promise<void>>();
 const permissionDeniedHandlers = new Set<(detail: PermissionDeniedDetail) => void>();
 const permissionChangedHandlers = new Set<(detail: PermissionChangedDetail) => void>();
@@ -1464,6 +1470,32 @@ const spindleApi: RuntimeSpindleAPI = {
   get host(): SpindleHostDescriptorV1 {
     if (!hostDescriptor) throw new Error("Spindle host descriptor is not initialized");
     return hostDescriptor;
+  },
+
+  frontendCapabilities: {
+    declare(capability) {
+      assertMutationAllowed("spindle.frontendCapabilities.declare()");
+      if (capability !== "message_tag_interceptor") {
+        throw new Error(`Unsupported frontend runtime capability: ${String(capability)}`);
+      }
+      const count = frontendRuntimeCapabilityRefCounts.get(capability) ?? 0;
+      frontendRuntimeCapabilityRefCounts.set(capability, count + 1);
+      if (count === 0) {
+        post({ type: "register_frontend_runtime_capability", capability });
+      }
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        const current = frontendRuntimeCapabilityRefCounts.get(capability) ?? 0;
+        if (current <= 1) {
+          frontendRuntimeCapabilityRefCounts.delete(capability);
+          post({ type: "unregister_frontend_runtime_capability", capability });
+        } else {
+          frontendRuntimeCapabilityRefCounts.set(capability, current - 1);
+        }
+      };
+    },
   },
 
   on(event: string, handler: (payload: any) => void): () => void {

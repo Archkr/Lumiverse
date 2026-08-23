@@ -92,6 +92,12 @@ import {
   type SharedRpcEndpointPolicy,
 } from "./shared-rpc-pool.service";
 import { getTextContent, type LlmMessage } from "../llm/types";
+import {
+  clearFrontendRuntimeCapabilities,
+  isFrontendRuntimeCapability,
+  registerFrontendRuntimeCapability,
+  unregisterFrontendRuntimeCapability,
+} from "./frontend-runtime-capabilities";
 import type { CreatePresetInput, PromptBlock, UpdatePresetInput } from "../types/preset";
 import { getDb } from "../db/connection";
 import {
@@ -285,6 +291,8 @@ type BackendProcessRuntimeToHost =
 
 type RuntimeWorkerToHost =
   | WorkerToHost
+  | { type: "register_frontend_runtime_capability"; capability: string }
+  | { type: "unregister_frontend_runtime_capability"; capability: string }
   | { type: "dlc_get_catalog"; requestId: string; userId?: string }
   | {
       type: "assemble_prompt";
@@ -1183,7 +1191,10 @@ export class WorkerHost {
       host: {
         descriptorVersion: 1,
         lumiverseVersion: await getBackendVersion(),
-        capabilities: SPINDLE_HOST_CAPABILITIES,
+        capabilities: Object.freeze({
+          ...SPINDLE_HOST_CAPABILITIES,
+          "frontend-runtime-capabilities-v1": 1,
+        }),
         extensionInstallationId: this.extensionId,
       },
     });
@@ -1307,6 +1318,8 @@ export class WorkerHost {
 
     this.worldInfoInterceptorUnregister?.();
     this.worldInfoInterceptorUnregister = null;
+
+    clearFrontendRuntimeCapabilities(this.extensionId);
 
     // Unregister all tools for this extension
     toolRegistry.unregisterByExtension(this.extensionId);
@@ -1633,6 +1646,16 @@ export class WorkerHost {
         break;
       case "unsubscribe_event":
         this.handleUnsubscribeEvent(msg.event);
+        break;
+      case "register_frontend_runtime_capability":
+        if (isFrontendRuntimeCapability(msg.capability)) {
+          registerFrontendRuntimeCapability(this.extensionId, msg.capability);
+        }
+        break;
+      case "unregister_frontend_runtime_capability":
+        if (isFrontendRuntimeCapability(msg.capability)) {
+          unregisterFrontendRuntimeCapability(this.extensionId, msg.capability);
+        }
         break;
       case "register_macro":
         this.handleRegisterMacro(msg.definition);

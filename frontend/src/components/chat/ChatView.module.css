@@ -205,6 +205,17 @@
   transform: translateY(6px);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .chatColumnInner[data-chat-chrome-entering] .chatToolbar,
+  .chatColumnInner[data-chat-chrome-entering] :global([data-component='ChatFindBar']),
+  .chatColumnInner[data-chat-chrome-entering] :global([data-component='MessageList']),
+  .chatColumnInner[data-chat-chrome-entering] :global([data-component='InputArea']),
+  .chatColumnInner[data-chat-chrome-entering] :global([data-component='MessageSelectBar']) {
+    transform: none;
+    transition: none;
+  }
+}
+
 .chatColumnInner[data-chat-chrome-leaving] :global([data-component='MessageList']),
 .chatColumnInner[data-chat-chrome-leaving] :global([data-component='ChatFindBar']),
 .chatColumnInner[data-chat-chrome-leaving] :global([data-component='InputArea']),

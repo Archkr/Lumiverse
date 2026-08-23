@@ -8,6 +8,7 @@ import { scheduleLowPriorityTask } from '@/lib/low-priority-task'
 import { yieldToBrowser } from '@/lib/spindle/browser-scheduler'
 import { compareFrontendHydrationPriority } from '@/lib/spindle/frontend-startup-priority'
 import { shareExtensionLoad } from '@/lib/spindle/extension-load-flight'
+import { reconcileMessageTagRuntimeCapabilities } from '@/lib/spindle/message-tag-runtime-readiness'
 
 const MUTED_THEMES_KEY = 'lumiverse:mutedExtensionThemes'
 const FRONTEND_HYDRATION_CONCURRENCY = 4
@@ -84,6 +85,7 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
       // not leave the store empty (and the extension unloaded until the user
       // happens to open the Extensions panel, which only re-runs when empty).
       const { extensions, isPrivileged } = await retrySpindleList()
+      reconcileMessageTagRuntimeCapabilities(extensions)
       set({ extensions, spindlePrivileged: isPrivileged })
 
       await new Promise<void>((resolveHydration) => {

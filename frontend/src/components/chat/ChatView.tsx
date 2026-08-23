@@ -26,6 +26,7 @@ import useIsMobile from '@/hooks/useIsMobile'
 import { chatLoreDockMode, chatTopDockMode, effectiveQuickToolbarDockRequest } from '@/lib/chatSurfaceLayout'
 import { measureLayoutHeight } from '@/lib/uiScale'
 import { resolveCouncilForChat } from '@/hooks/useCouncilProfiles'
+import { CHAT_REVEAL_SETTLE_CAP_MS } from '@/lib/chatDisplaySettle'
 import MessageList from './MessageList'
 import MessageSelectBar from './MessageSelectBar'
 import InputArea from './InputArea'
@@ -72,7 +73,6 @@ const SPINDLE_NOTICE_HIDE_DELAY_MS = 280
 const SPINDLE_NOTICE_MIN_VISIBLE_MS = 700
 const WALLPAPER_TRANSITION_HALF_MS = 260
 const WALLPAPER_READY_FALLBACK_MS = 5000
-const CHAT_CHROME_ENTER_MS = 90
 const CHAT_CHROME_LEAVE_MS = 220
 
 function prefersReducedMotion(): boolean {
@@ -299,7 +299,10 @@ export default function ChatView() {
   const wallpaperTransitionTimeouts = useRef<number[]>([])
   const chromeEnterTimerRef = useRef<number | null>(null)
   const chromeLeaveTimerRef = useRef<number | null>(null)
-  const [chatChromeEntering, setChatChromeEntering] = useState(() => !prefersReducedMotion())
+  // Stabilization is independent of animation preference: reduced-motion
+  // users should still never see raw extension payloads before interceptors
+  // attach. CSS makes the eventual reveal instantaneous for them.
+  const [chatChromeEntering, setChatChromeEntering] = useState(true)
   const [chatChromeLeaving, setChatChromeLeaving] = useState(false)
   const messageSelectMode = useStore((s) => s.messageSelectMode)
   const setMessageSelectMode = useStore((s) => s.setMessageSelectMode)
@@ -399,12 +402,6 @@ export default function ChatView() {
       chromeEnterTimerRef.current = null
     }
 
-    if (prefersReducedMotion()) {
-      setChatChromeEntering(false)
-      document.body.removeAttribute('data-chat-chrome-entering')
-      return
-    }
-
     setChatChromeEntering(true)
     document.body.setAttribute('data-chat-chrome-entering', 'true')
     const handlePopulated = () => {
@@ -417,12 +414,15 @@ export default function ChatView() {
     }
     window.addEventListener('lumiverse:chat-items-populated', handlePopulated, { once: true })
 
-    // Fallback if virtualizer fails or is completely empty
+    // Fallback if virtualizer fails or is completely empty. Must exceed the
+    // MessageList settle gate (CHAT_REVEAL_SETTLE_CAP_MS) so a chat whose
+    // content is still resolving does not get revealed mid-pipeline by this
+    // timer racing the populated dispatch.
     chromeEnterTimerRef.current = window.setTimeout(() => {
       chromeEnterTimerRef.current = null
       setChatChromeEntering(false)
       document.body.removeAttribute('data-chat-chrome-entering')
-    }, Math.max(CHAT_CHROME_ENTER_MS, 400))
+    }, CHAT_REVEAL_SETTLE_CAP_MS + 1500)
 
     return () => {
       window.removeEventListener('lumiverse:chat-items-populated', handlePopulated)

@@ -23,6 +23,7 @@ import {
 } from './provider-registry-projection'
 import { hasUnsavedSettings, settingsUpdateKeys, shouldReloadSettingsAfterUpdate } from '@/store/slices/settings'
 import { routeBackendMessage, routeFrontendProcessEvent, loadFrontendExtension } from '@/lib/spindle/loader'
+import { applyMessageTagRuntimeCapabilityChange } from '@/lib/spindle/message-tag-runtime-readiness'
 import { applyHostAction, type HostActionRuntime } from '@/lib/spindle/host-actions'
 import { spindleApi } from '@/api/spindle'
 import { messagesApi } from '@/api/chats'
@@ -1631,6 +1632,27 @@ export function useWebSocket() {
 
       wsClient.on(EventType.SPINDLE_PROVIDER_CHANGED, (payload: ProviderRegistryChangedPayload) => {
         bindProviderProjection(store.getState().user?.id)?.applyEvent(payload)
+      }),
+
+      wsClient.on(EventType.SPINDLE_FRONTEND_RUNTIME_CAPABILITY_CHANGED, (payload: {
+        action?: unknown
+        extensionId?: unknown
+        capability?: unknown
+      }) => {
+        if (
+          (payload.action !== 'registered' && payload.action !== 'unregistered')
+          || typeof payload.extensionId !== 'string'
+          || typeof payload.capability !== 'string'
+        ) return
+        applyMessageTagRuntimeCapabilityChange({
+          action: payload.action,
+          extensionId: payload.extensionId,
+          capability: payload.capability,
+        }, {
+          visible: store.getState().extensions.some((extension) => (
+            extension.id === payload.extensionId && extension.enabled && extension.has_frontend
+          )),
+        })
       }),
 
       wsClient.on(EventType.SPINDLE_FRONTEND_MSG, (payload: { extensionId: string; data: unknown }) => {

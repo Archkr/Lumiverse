@@ -18,6 +18,7 @@ import {
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { ifNoneMatchSatisfies } from "../utils/http-cache";
+import { getFrontendRuntimeCapabilities } from "../spindle/frontend-runtime-capabilities";
 
 const app = new Hono();
 
@@ -45,6 +46,7 @@ app.get("/", async (c) => {
   const viewer = getViewer(c);
   const extensions = (await managerSvc.listForUser(viewer.userId, viewer.role)).map((ext) => ({
     ...ext,
+    frontend_runtime_capabilities: getFrontendRuntimeCapabilities(ext.id),
     status: lifecycle.isRunning(ext.id)
       ? "running"
       : ext.enabled

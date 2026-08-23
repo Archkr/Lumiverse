@@ -1,6 +1,7 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, startTransition, memo, type PointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer, defaultRangeExtractor, type Range, type VirtualItem, type Virtualizer } from '@tanstack/react-virtual'
+import { CHAT_REVEAL_SETTLE_CAP_MS, isChatDisplaySettled } from '@/lib/chatDisplaySettle'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import { useChunkedMessages } from '@/hooks/useChunkedMessages'
 import {
@@ -1265,20 +1266,40 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
 
   const virtualItems = rowVirtualizer.getVirtualItems()
 
-  // Trigger the chat-load fade-in as soon as the virtualizer has real rows.
-  // We dispatch an event so the parent ChatView can perform a container-wide
-  // enter animation including the input area and toolbars.
+  // Trigger the chat-load fade-in once the virtualizer has real rows AND the
+  // display pipeline has settled: tag-interceptor registrations and first
+  // display-regex resolves land asynchronously after mount, and revealing
+  // before they drain paints raw tags/JSON that visibly flash away. Poll the
+  // settle tracker (bounded by CHAT_REVEAL_SETTLE_CAP_MS) before dispatching,
+  // so the parent ChatView animates in final content instead of intermediates.
   const hasPopulated = virtualItems.some((item) => virtualListItems[item.index]?.type === 'message')
   useEffect(() => {
-    if (!hasFadedInRef.current && hasPopulated) {
-      hasFadedInRef.current = true
+    if (hasFadedInRef.current || !hasPopulated) return
+    let cancelled = false
+    let pollTimer: number | null = null
+    const startedAt = Date.now()
+    const dispatchPopulated = () => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated'))
+          if (!cancelled) window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated'))
         })
       })
     }
-  }, [hasPopulated, virtualItems])
+    const poll = () => {
+      if (cancelled) return
+      if (isChatDisplaySettled() || Date.now() - startedAt >= CHAT_REVEAL_SETTLE_CAP_MS) {
+        hasFadedInRef.current = true
+        dispatchPopulated()
+        return
+      }
+      pollTimer = window.setTimeout(poll, 100)
+    }
+    poll()
+    return () => {
+      cancelled = true
+      if (pollTimer !== null) window.clearTimeout(pollTimer)
+    }
+  }, [chatId, hasPopulated])
 
   // Gate that keeps the keyboard/safe-zone repin from fighting the unified
   // scroll guard while streaming is active.

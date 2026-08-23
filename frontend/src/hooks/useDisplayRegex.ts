@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '@/store'
+import { trackInitialDisplayResolve } from '@/lib/chatDisplaySettle'
 import { applyDisplayRegexTiered } from '@/lib/regex/pipeline'
 import { resolveMacrosBatch } from '@/api/macros'
 import { isDisplayChatOwned, getDisplayResolverForChat } from '@/lib/spindle/display-resolver-registry'
@@ -478,8 +479,8 @@ function useDisplayPreprocessedState(
             }
             return { content, ok: false }
           })
-        assignedPromise = promise
-        displayPreprocessCache.set(key, { promise, messageId: messageIdForEntry })
+        assignedPromise = trackInitialDisplayResolve(promise)
+        displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
       }
       displayPreprocessCache.get(key)?.promise?.then(apply)
     }
@@ -927,9 +928,8 @@ export function useDisplayRegex(
           }
           return createEmptyResolvedTemplates()
         })
-      assignedPromise = promise
-
-      displayRegexResolutionCache.set(templateCacheKey, { promise })
+      assignedPromise = trackInitialDisplayResolve(promise)
+      displayRegexResolutionCache.set(templateCacheKey, { promise: assignedPromise })
     }
 
     displayRegexResolutionCache.get(templateCacheKey)?.promise?.then(applyResolvedTemplates)
@@ -1104,10 +1104,9 @@ export function useDisplayRegex(
             }
             return fallbackContent
           })
-        assignedPromise = promise
-
+        assignedPromise = trackInitialDisplayResolve(promise)
         displayRegexContentCache.set(contentCacheKey, {
-          promise,
+          promise: assignedPromise,
           ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
         })
       }
