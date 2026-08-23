@@ -42,6 +42,41 @@ function createStore(): ChatSlice {
 }
 
 describe('chat navigation during streaming', () => {
+  test('hydrates a preloaded branch without exposing an empty message list', () => {
+    const state = createStore()
+    const branchMessage = {
+      id: 'branch-message-1',
+      chat_id: 'chat-2',
+      index_in_chat: 0,
+      is_user: true,
+      name: 'User',
+      content: 'branched',
+      send_date: 1,
+      swipe_id: 0,
+      swipes: ['branched'],
+      swipe_dates: [1],
+      extra: {},
+      parent_message_id: null,
+      branch_id: 'branch-1',
+      created_at: 1,
+    }
+
+    state.setActiveChat('chat-2', 'character-1', {
+      messages: [branchMessage],
+      total: 8,
+      displayOwner: null,
+      name: 'Branch',
+      metadata: { wallpaper: { type: 'image', image_id: 'wallpaper-1' } },
+      wallpaper: { type: 'image', image_id: 'wallpaper-1' },
+    })
+
+    expect(state.activeChatId).toBe('chat-2')
+    expect(state.messages).toEqual([branchMessage])
+    expect(state.totalChatLength).toBe(8)
+    expect(state.activeChatName).toBe('Branch')
+    expect(state.activeChatWallpaper?.image_id).toBe('wallpaper-1')
+  })
+
   test('cancels a pending token flush when the active chat is cleared', () => {
     jest.useFakeTimers()
     const state = createStore()

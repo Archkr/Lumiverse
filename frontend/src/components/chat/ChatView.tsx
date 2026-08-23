@@ -52,6 +52,7 @@ import styles from './ChatView.module.css'
 import clsx from 'clsx'
 import { markLandingPageChatReturn, peekLandingPageSnapshot } from '@/lib/landingPageSnapshot'
 import { holdImagesForTransition } from '@/lib/imageDecodeCache'
+import { takeChatNavigationSnapshot } from '@/lib/chatNavigationSnapshot'
 
 interface CortexNotice {
   variant: 'processing' | 'error'
@@ -629,8 +630,10 @@ export default function ChatView() {
   }, [chatWidthMode, chatContentMaxWidth])
 
   // React Router reuses this component when only the chatId parameter changes.
-  // Clear the previous chat in a layout effect so its messages and streaming
-  // timer state cannot paint under the new route while the next chat loads.
+  // Reset the previous chat in a layout effect so its messages and streaming
+  // timer state cannot paint under the new route. Branch actions stage their
+  // freshly loaded tail so that reset can hydrate the target in the same store
+  // write instead of exposing an intermediate empty message list.
   useLayoutEffect(() => {
     if (!chatId || activeChatId === chatId) return
 
@@ -640,7 +643,33 @@ export default function ChatView() {
       && state.mpChatId === chatId
     if (isHydratedMultiplayerPeer) return
 
-    setActiveChat(chatId)
+    const staged = takeChatNavigationSnapshot(chatId)
+    const metadata = staged?.chat.metadata ?? null
+    const wallpaper = metadata?.wallpaper as WallpaperRef | undefined
+    setActiveChat(chatId, staged?.chat.character_id ?? null, staged ? {
+      messages: staged.messagePage.data,
+      total: staged.messagePage.total,
+      displayOwner: staged.chat.character_display_owner ?? null,
+      name: staged.chat.name ?? null,
+      metadata,
+      wallpaper: wallpaper?.image_id ? wallpaper : null,
+    } : undefined)
+
+    if (staged) {
+      const next = useStore.getState()
+      const groupCharacterIds: string[] = metadata?.group === true
+        ? (metadata.character_ids || [])
+        : []
+      const mutedCharacterIds: string[] = metadata?.group === true
+        ? (metadata.muted_character_ids || [])
+        : []
+
+      if (metadata?.group === true && groupCharacterIds.length > 0) {
+        next.setGroupChat(true, groupCharacterIds, mutedCharacterIds)
+      } else {
+        next.clearGroupChat()
+      }
+    }
   }, [activeChatId, chatId, setActiveChat])
 
   // Load chat and messages
@@ -958,12 +987,19 @@ export default function ChatView() {
   const pendingWallpaperReadyKeyRef = useRef<string | null>(null)
   const [wallpaperTransitioning, setWallpaperTransitioning] = useState(false)
   const hasAnyBackground = !!(sceneBackground || displayedWallpaper?.image_id || wallpaper.global?.image_id)
-
-  useEffect(() => {
-    if (displayedWallpaperKeyRef.current === effectiveWallpaperKey) return
-
+  const clearWallpaperTransitionTimers = useCallback(() => {
     wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
     wallpaperTransitionTimeouts.current = []
+  }, [])
+
+  useEffect(() => {
+    clearWallpaperTransitionTimers()
+    pendingWallpaperReadyKeyRef.current = null
+    if (displayedWallpaperKeyRef.current === effectiveWallpaperKey) {
+      setWallpaperTransitioning(false)
+      return clearWallpaperTransitionTimers
+    }
+
     setWallpaperTransitioning(true)
 
     const swapTimer = window.setTimeout(() => {
@@ -986,23 +1022,16 @@ export default function ChatView() {
     }, WALLPAPER_TRANSITION_HALF_MS)
 
     wallpaperTransitionTimeouts.current.push(swapTimer)
-  }, [effectiveWallpaper, effectiveWallpaperKey])
-
-  useEffect(() => {
-    return () => {
-      wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
-      wallpaperTransitionTimeouts.current = []
-    }
-  }, [])
+    return clearWallpaperTransitionTimers
+  }, [clearWallpaperTransitionTimers, effectiveWallpaper, effectiveWallpaperKey])
 
   const handleWallpaperVisualReady = useCallback((wallpaperKey: string) => {
     if (pendingWallpaperReadyKeyRef.current !== wallpaperKey) return
     pendingWallpaperReadyKeyRef.current = null
-    wallpaperTransitionTimeouts.current.forEach(window.clearTimeout)
-    wallpaperTransitionTimeouts.current = []
+    clearWallpaperTransitionTimers()
     const revealTimer = window.setTimeout(() => setWallpaperTransitioning(false), 40)
     wallpaperTransitionTimeouts.current.push(revealTimer)
-  }, [])
+  }, [clearWallpaperTransitionTimers])
 
   // Sync data-chat-bg on the root so message card CSS can skip backdrop-filter
   // when the background is a solid color (blur on solid = pure GPU waste).

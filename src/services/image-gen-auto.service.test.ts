@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "path";
 import { closeDatabase, getDb, initDatabase } from "../db/connection";
 import { registerImageProvider } from "../image-gen/registry";
@@ -9,6 +9,7 @@ import * as charactersSvc from "./characters.service";
 import * as chatsSvc from "./chats.service";
 import * as imageGenConnSvc from "./image-gen-connections.service";
 import { maybeAutoGenerateOnReply } from "./image-gen-auto.service";
+import { waitForDeferredImageProcessing } from "./images.service";
 import * as settingsSvc from "./settings.service";
 
 const PROVIDER_NAME = "autogen_fallback_test";
@@ -144,6 +145,10 @@ describe("image-gen auto fallback", () => {
       eventBus.removeSessionVisibility(userId, sessionId);
     }
   });
+});
+
+afterEach(async () => {
+  await waitForDeferredImageProcessing();
 });
 
 afterAll(() => {

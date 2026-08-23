@@ -71,6 +71,7 @@ import {
   writeLandingPageSnapshot,
   type LandingPageSortField,
 } from '@/lib/landingPageSnapshot'
+import { preloadChatNavigationSnapshot } from '@/lib/chatNavigationSnapshot'
 
 function getRecentChatDisplayName(item: GroupedRecentChat, t: TFunction<'landing'>): string {
   return item.is_group
@@ -1827,6 +1828,10 @@ function LandingPageNative() {
             return
           }
           const newChat = await chatsApi.branch(item.latest_chat_id, latestMessage.id, name)
+          const messageLimit = useStore.getState().messagesPerPage || 50
+          await preloadChatNavigationSnapshot(newChat, messageLimit).catch((err) => {
+            console.warn('[LandingPage] Failed to preload forked chat:', err)
+          })
           navigateToChat(newChat.id)
         } catch (err) {
           console.error('[Lumiverse] Error branching recent chat:', err)

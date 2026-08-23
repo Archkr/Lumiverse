@@ -20,6 +20,10 @@ import { imagesApi } from '@/api/images'
 import type { Message } from '@/types/api'
 import type { GenerationMetrics } from '@/types/ws-events'
 import { resolveMultiplayerMessageAuthor } from '@/lib/multiplayerMessageAuthor'
+import {
+  preloadChatNavigationSnapshot,
+  preloadChatNavigationSnapshotById,
+} from '@/lib/chatNavigationSnapshot'
 
 const CONTEXT_HISTORY_ANCHOR_KEY = 'context_history_anchor_message_id'
 
@@ -430,6 +434,10 @@ export function useMessageCard(message: Message, chatId: string) {
         expectedVersion,
         requestId,
       })
+      const messageLimit = useStore.getState().messagesPerPage || 50
+      await preloadChatNavigationSnapshotById(result.branchChatId, messageLimit).catch((err) => {
+        console.warn('[MessageCard] Failed to preload edit-and-send branch:', err)
+      })
       editAndSendRequestRef.current = null
       clearMessageEdit()
       navigate(`/chat/${result.branchChatId}`)
@@ -523,6 +531,10 @@ export function useMessageCard(message: Message, chatId: string) {
       onConfirm: async (name: string) => {
         try {
           const newChat = await chatsApi.branch(chatId, message.id, name)
+          const messageLimit = useStore.getState().messagesPerPage || 50
+          await preloadChatNavigationSnapshot(newChat, messageLimit).catch((err) => {
+            console.warn('[MessageCard] Failed to preload forked chat:', err)
+          })
           navigate(`/chat/${newChat.id}`)
         } catch (err) {
           console.error('[MessageCard] Failed to fork chat:', err)

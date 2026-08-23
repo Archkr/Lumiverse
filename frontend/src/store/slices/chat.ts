@@ -120,7 +120,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
 
     setLandingRecentChats: (result) => set({ landingRecentChats: result }),
 
-    setActiveChat: (chatId, characterId = null) => {
+    setActiveChat: (chatId, characterId = null, hydration) => {
       // A throttled token flush can still be queued when ChatView unmounts.
       // Cancel it and clear the closure-owned buffers before resetting the
       // public state; otherwise that timer can fire on the landing page and
@@ -130,15 +130,26 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
       rawStreamReasoning = ''
       reasoningStartedAt = 0
       endedGenerationIds.clear()
+      const metadata = hydration?.metadata ?? null
+      const groupAvatar = metadata?.group === true && characterId
+        ? metadata.group_active_avatar_ids?.[characterId]
+        : undefined
+      const avatarId = typeof groupAvatar === 'string'
+        ? groupAvatar
+        : metadata?.group === true
+          ? null
+          : typeof metadata?.active_avatar_id === 'string'
+            ? metadata.active_avatar_id
+            : null
       set({
         activeChatId: chatId,
         activeCharacterId: characterId,
-        activeChatDisplayOwner: null,
-        activeChatName: null,
-        activeChatWallpaper: null,
-        activeChatAvatarId: null,
-        activeChatMetadata: null,
-        messages: [],
+        activeChatDisplayOwner: hydration?.displayOwner ?? null,
+        activeChatName: hydration?.name ?? null,
+        activeChatWallpaper: hydration?.wallpaper ?? null,
+        activeChatAvatarId: avatarId,
+        activeChatMetadata: metadata,
+        messages: hydration?.messages ?? [],
         isStreaming: false,
         streamingContent: '',
         streamingReasoning: '',
@@ -150,6 +161,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
         streamingSwipeId: null,
         streamingGenerationType: null,
         unseenSwipes: {},
+        totalChatLength: hydration?.total ?? 0,
         messageSelectMode: false,
         selectedMessageIds: [],
       })

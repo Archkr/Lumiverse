@@ -48,7 +48,18 @@ export interface ChatSlice {
    */
   landingRecentChats: PaginatedResult<GroupedRecentChat> | null
   setLandingRecentChats: (result: PaginatedResult<GroupedRecentChat> | null) => void
-  setActiveChat: (chatId: string | null, characterId?: string | null) => void
+  setActiveChat: (
+    chatId: string | null,
+    characterId?: string | null,
+    hydration?: {
+      messages: Message[]
+      total: number
+      displayOwner: string | null
+      name: string | null
+      metadata: Record<string, any> | null
+      wallpaper: WallpaperRef | null
+    },
+  ) => void
   setActiveChatWallpaper: (wallpaper: WallpaperRef | null) => void
   setActiveChatAvatarId: (imageId: string | null) => void
   setActiveChatMetadata: (metadata: Record<string, any> | null) => void

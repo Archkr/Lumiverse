@@ -22,6 +22,8 @@ const beginStreaming = mock(() => {})
 const startStreaming = mock(() => {})
 const setStreamingError = mock(() => {})
 const addToast = mock(() => {})
+const preloadChatNavigationSnapshotById = mock(() => Promise.resolve())
+const preloadChatNavigationSnapshot = mock(() => Promise.resolve())
 const updateMessage = mock((id: string, next: Message) => {
   storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, ...next } : m))
   notifyStore()
@@ -189,6 +191,10 @@ mock.module('@/api/images', () => ({
 mock.module('@/lib/multiplayerMessageAuthor', () => ({
   resolveMultiplayerMessageAuthor: () => null,
 }))
+mock.module('@/lib/chatNavigationSnapshot', () => ({
+  preloadChatNavigationSnapshot,
+  preloadChatNavigationSnapshotById,
+}))
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true })
 const globalObject = globalThis as unknown as Record<string, unknown>
@@ -260,6 +266,8 @@ describe('useMessageCard edit-and-send', () => {
     beginStreaming.mockClear()
     startStreaming.mockClear()
     addToast.mockClear()
+    preloadChatNavigationSnapshot.mockClear()
+    preloadChatNavigationSnapshotById.mockClear()
     updateMessage.mockClear()
     setEditingMessageId.mockClear()
     clearMessageEdit.mockClear()
@@ -315,6 +323,7 @@ describe('useMessageCard edit-and-send', () => {
     expect(startStreaming).not.toHaveBeenCalled()
     expect(updateMessage).not.toHaveBeenCalled()
     expect(clearMessageEdit).toHaveBeenCalled()
+    expect(preloadChatNavigationSnapshotById).toHaveBeenCalledWith('branch-1', 50)
     expect(storeState.editingMessageId).toBeNull()
     expect(storeState.messageEditDraft).toBeNull()
     expect(navigate).toHaveBeenCalledWith('/chat/branch-1')
@@ -346,6 +355,7 @@ describe('useMessageCard edit-and-send', () => {
     expect(messagesUpdate).not.toHaveBeenCalled()
     expect(generateStart).not.toHaveBeenCalled()
     expect(beginStreaming).not.toHaveBeenCalled()
+    expect(preloadChatNavigationSnapshotById).toHaveBeenCalledWith('branch-2', 50)
     expect(navigate).toHaveBeenCalledWith('/chat/branch-2')
   })
 
