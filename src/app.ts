@@ -75,6 +75,8 @@ import {
 import { authLockoutService } from "./services/auth-lockout.service";
 import { getClientIp } from "./utils/client-ip";
 import { listSsoLoginOptions } from "./services/sso-providers.service";
+import { userMediaServingHeaders } from "./utils/user-media-headers";
+import { getImageFilePathPublic } from "./services/images.service";
 
 const app = new Hono();
 const SIGN_IN_AUTH_PATTERN = /^\/api\/auth\/sign-in(?:\/|$)/;
@@ -430,14 +432,19 @@ if (error) {
 
 // Image gen results — unauthenticated, public access for push notifications and embeds
 app.get("/api/v1/image-gen/results/:id", async (c) => {
-  const { getImageFilePathPublic } = await import("./services/images.service");
   const id = c.req.param("id");
   const size = c.req.query("size") as "sm" | "lg" | undefined;
   const tier = size === "sm" || size === "lg" ? size : undefined;
   const filepath = await getImageFilePathPublic(id, tier);
   if (!filepath) return c.json({ error: "Not found" }, 404);
-  const response = new Response(Bun.file(filepath));
+  const file = Bun.file(filepath);
+  const response = new Response(file);
   response.headers.set("Cache-Control", "public, max-age=86400");
+  // This route is unauthenticated: apply the stored-XSS boundary (sandbox CSP,
+  // nosniff, active-content demotion) before the bytes reach any browser.
+  for (const [key, value] of Object.entries(userMediaServingHeaders(file.type))) {
+    response.headers.set(key, value);
+  }
   return response;
 });
 

@@ -4,6 +4,7 @@ import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { env } from "../env";
 import { currentWorkerBudget } from "../utils/cpu-budget";
+import { classifyUserMediaContentType } from "../utils/user-media-headers";
 import type { Image } from "../types/image";
 import { mkdirSync, existsSync, lstatSync, readdirSync, statSync, unlinkSync } from "fs";
 import { unlink } from "fs/promises";
@@ -732,7 +733,13 @@ export async function uploadImages(
           throw new Error("Image data must be a non-empty Uint8Array");
         }
         const id = crypto.randomUUID();
-        const ext = extname(item.filename || "") || ".bin";
+        // Active content (HTML/XHTML) is stored inert: strip the executable
+        // extension and demote the mime so no serving path can render it
+        // inline. This is the single choke point for every image upload path
+        // (direct upload, deferred, data-URL, bulk, gallery extraction).
+        const uploadMime = (item.mime_type || "").split(";")[0].trim().toLowerCase();
+        const isActiveContent = classifyUserMediaContentType(uploadMime) === "active";
+        const ext = isActiveContent ? ".bin" : (extname(item.filename || "") || ".bin");
         const filename = `${id}${ext}`;
         const filepath = join(dir, filename);
         await writeImageFile(filepath, item.data);
@@ -740,8 +747,8 @@ export async function uploadImages(
           id,
           filename,
           filepath,
-          item,
-          isImage: (item.mime_type || "").startsWith("image/"),
+          item: isActiveContent ? { ...item, mime_type: "application/octet-stream" } : item,
+          isImage: !isActiveContent && (item.mime_type || "").startsWith("image/"),
         };
       } catch (err: any) {
         errors[i] = err?.message ?? String(err);
@@ -1128,6 +1135,10 @@ export async function getImageFilePathPublic(id: string, tier?: ThumbTier): Prom
 
   // Only allow public access to image gen results, not arbitrary user uploads
   if (!row.original_filename || !row.original_filename.startsWith(IMAGE_GEN_FILENAME_PREFIX)) return null;
+  // Defense in depth for the unauthenticated route: never serve anything
+  // classified as active content (HTML/XHTML) even if a row was crafted to
+  // carry the image-gen filename prefix.
+  if (classifyUserMediaContentType(row.mime_type) === "active") return null;
 
   const dir = getImagesDir();
   if (tier) {

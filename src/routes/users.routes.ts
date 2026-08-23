@@ -116,6 +116,12 @@ admin.post("/", async (c) => {
     return c.json({ error: `Invalid role. Allowed: ${[...VALID_ROLES].join(", ")}` }, 400);
   }
 
+  // Only the owner may mint privileged accounts. requireOwner admits admins
+  // too, and an admin creating an "owner"-role account would otherwise be a
+  // one-step self-escalation past every canManageTarget gate.
+  if (body.role && body.role !== "user" && !isOwnerSession(c)) {
+    return c.json({ error: "Only the owner can create admin or owner accounts" }, 403);
+  }
   const creationNonce = allowCreation();
 
   try {
@@ -208,9 +214,19 @@ admin.post("/:id/ban", async (c) => {
   return c.json({ success: true });
 });
 
-// POST /:id/unban — re-enable user login
 admin.post("/:id/unban", async (c) => {
   const { id } = c.req.param();
+
+  const targetUser = getTargetUser(id);
+  if (!targetUser) {
+    return c.json({ error: "User not found" }, 404);
+  }
+
+  // Mirror the ban gate: admins may only unban user-role accounts, so an
+  // admin cannot resurrect another admin the owner has banned.
+  if (!canManageTarget(c, targetUser.role)) {
+    return c.json({ error: "Admins can only unban user-role accounts" }, 403);
+  }
 
   const result = getDb().run(
     'UPDATE "user" SET banned = 0, banReason = NULL, banExpires = NULL WHERE id = ?',

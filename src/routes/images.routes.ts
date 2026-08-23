@@ -12,6 +12,7 @@ import {
   validateImageMagicBytes,
 } from "../utils/image-signature";
 import { extractRemoteImageUrlFromHtml } from "../utils/remote-image-page";
+import { userMediaServingHeaders } from "../utils/user-media-headers";
 
 const app = new Hono();
 
@@ -301,6 +302,9 @@ app.get("/:id", async (c) => {
     "X-Accel-Buffering": "no",
   };
   if (contentType) baseHeaders["Content-Type"] = contentType;
+  // Stored-XSS boundary for user-uploaded bytes: sandbox CSP on direct
+  // navigation, nosniff, and demotion of active content to an inert download.
+  Object.assign(baseHeaders, userMediaServingHeaders(contentType ?? file.type));
 
   const parsed = parseRangeHeader(c.req.header("range"), totalSize);
 
