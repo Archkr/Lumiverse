@@ -59,6 +59,7 @@ function initImagesTestDb(): void {
     width INTEGER,
     height INTEGER,
     has_thumbnail INTEGER NOT NULL DEFAULT 0,
+    skip_thumbnail_processing INTEGER NOT NULL DEFAULT 0,
     owner_extension_identifier TEXT,
     owner_character_id TEXT,
     owner_chat_id TEXT,
@@ -535,6 +536,39 @@ describe("deferred image processing", () => {
     expect(getImage("u1", image.id)).toMatchObject({ width: 1, height: 1, has_thumbnail: true });
   });
 
+  test("thumbnail processing opt-outs survive lazy reads and rebuilds", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const image = await uploadImageDeferred(
+      "u1",
+      new File([ONE_BY_ONE_PNG], "baked.avif", { type: "image/avif" }),
+      { skip_thumbnail_processing: true },
+    );
+    const originalPath = join(testDataDir, "images", image.filename);
+    const smPath = join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`);
+    const lgPath = join(testDataDir, "images", `${image.id}_thumb_lg_v2.webp`);
+
+    await waitForDeferredImageProcessing();
+    expect(getDeferredImageProcessingStatus().total).toBe(0);
+    expect(getImage("u1", image.id)).toMatchObject({
+      width: null,
+      height: null,
+      has_thumbnail: false,
+      skip_thumbnail_processing: true,
+    });
+    expect(await getImageFilePath("u1", image.id, "sm")).toBe(originalPath);
+    expect(existsSync(smPath)).toBe(false);
+
+    expect(await rebuildAllThumbnails("u1")).toEqual({
+      total: 1,
+      current: 1,
+      generated: 0,
+      skipped: 1,
+      failed: 0,
+    });
+    expect(existsSync(smPath)).toBe(false);
+    expect(existsSync(lgPath)).toBe(false);
+  });
+
   test("ordinary uploadImage calls use deferred processing", async () => {
     mkdirSync(join(testDataDir, "images"), { recursive: true });
     const image = await uploadImage(
@@ -720,5 +754,21 @@ describe("deferred image processing", () => {
     expect(getImageProcessingRecovery().pending).toBe(1);
     expect(discardImageProcessingQueue()).toEqual({ pending: 0, process: 0, rebuild: 0 });
     expect(getImageProcessingRecovery().pending).toBe(0);
+  });
+
+  test("recovery discards stale processing jobs for opted-out assets", async () => {
+    mkdirSync(join(testDataDir, "images"), { recursive: true });
+    const image = await uploadImageDeferred(
+      "u1",
+      new File([ONE_BY_ONE_PNG], "baked.avif", { type: "image/avif" }),
+      { skip_thumbnail_processing: true },
+    );
+    recordImageProcessingJob("u1", image.id, "process");
+
+    expect(getImageProcessingRecovery().pending).toBe(1);
+    expect(recoverImageProcessingQueue()).toEqual({ pending: 0, process: 0, rebuild: 0 });
+    await waitForDeferredImageProcessing();
+    expect(existsSync(join(testDataDir, "images", `${image.id}_thumb_sm_v2.webp`))).toBe(false);
+    expect(existsSync(join(testDataDir, "images", `${image.id}_thumb_lg_v2.webp`))).toBe(false);
   });
 });

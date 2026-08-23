@@ -440,7 +440,16 @@ type RuntimeWorkerToHost =
   | { type: "images_list"; requestId: string; limit?: number; offset?: number; userId?: string }
   | { type: "images_get"; requestId: string; imageId: string; userId?: string }
   | { type: "images_upload"; requestId: string; input: ImageUploadDTO; userId?: string }
-  | { type: "images_upload_from_data_url"; requestId: string; dataUrl: string; originalFilename?: string; userId?: string }
+  | {
+      type: "images_upload_from_data_url";
+      requestId: string;
+      dataUrl: string;
+      originalFilename?: string;
+      owner_character_id?: string;
+      owner_chat_id?: string;
+      skip_thumbnail_processing?: boolean;
+      userId?: string;
+    }
   | { type: "images_delete"; requestId: string; imageId: string; userId?: string }
   | { type: "images_delete_many"; requestId: string; imageIds: string[]; userId?: string }
   | { type: "media_audio_convert"; requestId: string; input: MediaConvertAudioRequestDTO }
@@ -2480,12 +2489,14 @@ const spindleApi: RuntimeSpindleAPI = {
       userId?: string,
     ): Promise<ImageDTO> {
       assertMutationAllowed("spindle.images.uploadFromDataUrl()");
-      const options = typeof originalFilenameOrOptions === "string" || typeof originalFilenameOrOptions === "undefined"
+      const options = (typeof originalFilenameOrOptions === "string" || typeof originalFilenameOrOptions === "undefined"
         ? {
             originalFilename: originalFilenameOrOptions,
             userId,
           }
-        : originalFilenameOrOptions;
+        : originalFilenameOrOptions) as ImageUploadFromDataUrlOptionsDTO & {
+          skip_thumbnail_processing?: boolean;
+        };
       const requestId = crypto.randomUUID();
       const result = await request({
         type: "images_upload_from_data_url",
@@ -2494,6 +2505,7 @@ const spindleApi: RuntimeSpindleAPI = {
         originalFilename: options?.originalFilename,
         owner_character_id: options?.owner_character_id,
         owner_chat_id: options?.owner_chat_id,
+        skip_thumbnail_processing: options?.skip_thumbnail_processing,
         userId: options?.userId,
       });
       return result as ImageDTO;

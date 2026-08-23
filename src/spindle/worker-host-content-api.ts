@@ -526,6 +526,7 @@ export class WorkerHostContentApi {
           owner_chat_id: typeof input?.owner_chat_id === "string" && input.owner_chat_id.trim()
             ? input.owner_chat_id.trim()
             : undefined,
+          skip_thumbnail_processing: input?.skip_thumbnail_processing === true,
         });
 
         this.postToWorker({ type: "response", requestId, result: this.toImageDTO(img) });
@@ -580,6 +581,7 @@ export class WorkerHostContentApi {
             ...(typeof input.owner_chat_id === "string" && input.owner_chat_id.trim()
               ? { owner_chat_id: input.owner_chat_id.trim() }
               : {}),
+            skip_thumbnail_processing: input.skip_thumbnail_processing === true,
           };
         }
 
@@ -620,6 +622,7 @@ export class WorkerHostContentApi {
     originalFilename?: string,
     ownerCharacterId?: string,
     ownerChatId?: string,
+    skipThumbnailProcessing?: boolean,
     userId?: string,
   ): void {
     (async () => {
@@ -643,6 +646,7 @@ export class WorkerHostContentApi {
           owner_chat_id: typeof ownerChatId === "string" && ownerChatId.trim()
             ? ownerChatId.trim()
             : undefined,
+          skip_thumbnail_processing: skipThumbnailProcessing === true,
         });
         this.postToWorker({ type: "response", requestId, result: this.toImageDTO(img) });
       } catch (err: any) {

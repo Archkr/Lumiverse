@@ -455,6 +455,7 @@ type RuntimeWorkerToHost =
       originalFilename?: string;
       owner_character_id?: string;
       owner_chat_id?: string;
+      skip_thumbnail_processing?: boolean;
       userId?: string;
     }
   | { type: "images_delete"; requestId: string; imageId: string; userId?: string }
@@ -2187,6 +2188,7 @@ export class WorkerHost {
           msg.originalFilename,
           msg.owner_character_id,
           msg.owner_chat_id,
+          "skip_thumbnail_processing" in msg ? msg.skip_thumbnail_processing : undefined,
           msg.userId,
         );
         break;

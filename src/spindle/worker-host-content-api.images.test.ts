@@ -3,7 +3,7 @@ import * as imagesSvc from "../services/images.service";
 import { WorkerHostContentApi } from "./worker-host-content-api";
 
 describe("worker image upload processing", () => {
-  test("routes single, bulk, and data-URL uploads through deferred processing", async () => {
+  test("propagates thumbnail-processing opt-outs for single, bulk, and data-URL uploads", async () => {
     const image = {
       id: "image-1",
       filename: "image-1.png",
@@ -13,6 +13,7 @@ describe("worker image upload processing", () => {
       width: null,
       height: null,
       has_thumbnail: false,
+      skip_thumbnail_processing: false,
       url: "/api/v1/images/image-1",
       specificity: "full" as const,
       owner_extension_identifier: "image-pipeline-test",
@@ -42,6 +43,7 @@ describe("worker image upload processing", () => {
         data: new Uint8Array([1, 2, 3, 4]),
         filename: "single.png",
         mime_type: "image/png",
+        skip_thumbnail_processing: true,
       }));
       expect(singleResponse.error).toBeUndefined();
       expect(uploadDeferred).toHaveBeenCalledTimes(1);
@@ -50,15 +52,23 @@ describe("worker image upload processing", () => {
         owner_extension_identifier: "image-pipeline-test",
         owner_character_id: undefined,
         owner_chat_id: undefined,
+        skip_thumbnail_processing: true,
       });
 
       const bulkResponse = await invoke((api) => api.handleImagesUploadMany("bulk", [{
         data: new Uint8Array([1, 2, 3, 4]),
         filename: "bulk.png",
         mime_type: "image/png",
+        skip_thumbnail_processing: true,
       }], undefined, 3));
       expect(bulkResponse.error).toBeUndefined();
       expect(uploadMany).toHaveBeenCalledTimes(1);
+      expect(uploadMany.mock.calls[0]?.[1]).toEqual([{
+        data: new Uint8Array([1, 2, 3, 4]),
+        filename: "bulk.png",
+        mime_type: "image/png",
+        skip_thumbnail_processing: true,
+      }]);
       expect(uploadMany.mock.calls[0]?.[2]).toEqual({
         owner_extension_identifier: "image-pipeline-test",
         concurrency: 3,
@@ -69,6 +79,9 @@ describe("worker image upload processing", () => {
         "data-url",
         "data:image/png;base64,AQIDBA==",
         "data-url.png",
+        undefined,
+        undefined,
+        true,
       ));
       expect(dataUrlResponse.error).toBeUndefined();
       expect(uploadDataUrl).toHaveBeenCalledTimes(1);
@@ -77,6 +90,7 @@ describe("worker image upload processing", () => {
         owner_extension_identifier: "image-pipeline-test",
         owner_character_id: undefined,
         owner_chat_id: undefined,
+        skip_thumbnail_processing: true,
       });
     } finally {
       uploadDeferred.mockRestore();

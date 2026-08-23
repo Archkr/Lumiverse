@@ -393,7 +393,7 @@ CREATE TABLE images (
   height INTEGER,
   has_thumbnail INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
-, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, owner_extension_identifier TEXT, owner_character_id TEXT REFERENCES characters(id) ON DELETE SET NULL, owner_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, byte_size INTEGER NOT NULL DEFAULT 0);
+, user_id TEXT REFERENCES "user"(id) ON DELETE CASCADE, owner_extension_identifier TEXT, owner_character_id TEXT REFERENCES characters(id) ON DELETE SET NULL, owner_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, byte_size INTEGER NOT NULL DEFAULT 0, skip_thumbnail_processing INTEGER NOT NULL DEFAULT 0);
 
 CREATE TABLE import_consumed_tickets (
   archive_id  TEXT PRIMARY KEY,

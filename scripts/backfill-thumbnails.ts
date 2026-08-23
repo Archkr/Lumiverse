@@ -65,7 +65,9 @@ const tiers = [
 ] as const;
 
 // Find images missing any tier file on disk
-const allImages = db.query("SELECT id, filename, has_thumbnail FROM images").all() as ImageRow[];
+const allImages = db
+  .query("SELECT id, filename, has_thumbnail FROM images WHERE skip_thumbnail_processing = 0")
+  .all() as ImageRow[];
 const needsWork = allImages.filter((img) => {
   return tiers.some((t) => !existsSync(join(IMAGES_DIR, `${img.id}${t.suffix}`)));
 });
