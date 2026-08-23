@@ -693,6 +693,7 @@
     "requestFailed": "请求失败",
     "slowDisplayTitle": "慢正则脚本",
     "slowDisplayTimedOut": "显示正则「{{name}}」执行超时，已在正则脚本中标记。",
+        "quarantinedDisplay": "显示正则「{{name}}」超出执行时限，已被隔离；在重新启用或编辑前将被跳过。",
     "slowDisplaySlow": "显示正则「{{name}}」运行了 {{duration}}，已在正则脚本中标记。",
     "timedOut": "正则执行超时",
     "slowDetected": "检测到慢正则（{{seconds}} 秒）",

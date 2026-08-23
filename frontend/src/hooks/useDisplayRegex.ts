@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '@/store'
-import { applyDisplayRegex, applyDisplayRegexAsync } from '@/lib/regex/compiler'
+import { applyDisplayRegex } from '@/lib/regex/compiler'
+import { applyDisplayRegexTiered } from '@/lib/regex/pipeline'
+import { getRegexExecTier } from '@/lib/regex/evidence'
 import { resolveMacrosBatch } from '@/api/macros'
 import { isDisplayChatOwned, getDisplayResolverForChat } from '@/lib/spindle/display-resolver-registry'
 import { regexApi } from '@/api/regex'
@@ -937,11 +939,23 @@ export function useDisplayRegex(
     return () => { cancelled = true }
   }, [scriptsNeedingResolution, templateCacheKey, activeChatId, macroCharacterId, activePersonaId, cvSnapshot])
 
+  // Async pipeline engagement: an owned chat or ANY script not on the
+  // proven-safe sync fast path (evidence tiers) routes application through the
+  // effect-driven promise chain. Render-phase sync work then applies nothing;
+  // pending renders carry the previous resolved value forward (no blank flash)
+  // and raw text shows only on a first render with no cache.
+  const hasAsyncMacroScripts = useMemo(
+    () =>
+      displayOwned ||
+      displayScripts.some((s) => getRegexExecTier(s).tier !== 'sync'),
+    [displayOwned, displayScripts],
+  )
+
   const fallbackContent = useMemo(
     () => {
       const slowReports: SlowRegexReport[] = []
       const recoveredReports: SlowRegexReport[] = []
-      if (displayScripts.length === 0 || regexGated) {
+      if (displayScripts.length === 0 || regexGated || hasAsyncMacroScripts) {
         pendingSlowReportsRef.current = slowReports
         pendingRecoveredReportsRef.current = recoveredReports
         return content
@@ -964,7 +978,7 @@ export function useDisplayRegex(
       pendingRecoveredReportsRef.current = recoveredReports
       return next
     },
-    [content, displayScripts, isUser, depth, macroCtx, resolvedTemplates, dynamicMacros, messageIndex, previousContent, regexGated],
+    [content, displayScripts, isUser, depth, macroCtx, resolvedTemplates, dynamicMacros, messageIndex, previousContent, regexGated, hasAsyncMacroScripts],
   )
 
   useEffect(() => {
@@ -974,7 +988,7 @@ export function useDisplayRegex(
     for (const report of reports) {
       reportSlowDisplayRegex(report.script, report.elapsedMs, report.timedOut, report.thresholdMs)
     }
-  }, [fallbackContent])
+  }, [fallbackContent, resolvedContentState])
 
   useEffect(() => {
     const reports = pendingRecoveredReportsRef.current
@@ -983,14 +997,7 @@ export function useDisplayRegex(
     for (const report of reports) {
       reportRecoveredDisplayRegex(report.script, report.elapsedMs, report.thresholdMs)
     }
-  }, [fallbackContent])
-
-  const hasAsyncMacroScripts = useMemo(
-    () => displayOwned || displayScripts.some(
-      (s) => s.substitute_macros === 'raw' || s.substitute_macros === 'after',
-    ),
-    [displayOwned, displayScripts],
-  )
+  }, [fallbackContent, resolvedContentState])
 
   const resolvedTemplateKey = useMemo(
     () => JSON.stringify({
@@ -1073,7 +1080,11 @@ export function useDisplayRegex(
         // Without this guard, an invalidation between the initial set and the
         // resolve would let the stale fetch result clobber the live key.
         let assignedPromise: Promise<string>
-        const promise = applyDisplayRegexAsync(
+        const slowReports: SlowRegexReport[] = []
+        const recoveredReports: SlowRegexReport[] = []
+        pendingSlowReportsRef.current = slowReports
+        pendingRecoveredReportsRef.current = recoveredReports
+        const promise = applyDisplayRegexTiered(
           content,
           displayScripts,
           {
@@ -1096,6 +1107,14 @@ export function useDisplayRegex(
             character_id: macroCharacterId ?? undefined,
             persona_id: activePersonaId ?? undefined,
           }),
+          {
+            onSlowRegex: ({ script, elapsedMs, timedOut, thresholdMs }) => {
+              slowReports.push({ script, elapsedMs, timedOut, thresholdMs })
+            },
+            onRecoveredRegex: ({ script, elapsedMs, timedOut, thresholdMs }) => {
+              recoveredReports.push({ script, elapsedMs, timedOut, thresholdMs })
+            },
+          },
         )
           .then(({ result: next, touchedVars, cacheable }) => {
             if (displayRegexContentCache.get(contentCacheKey)?.promise === assignedPromise) {

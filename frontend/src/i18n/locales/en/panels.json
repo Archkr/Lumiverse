@@ -844,6 +844,7 @@
     "requestFailed": "Request failed",
     "slowDisplayTitle": "Slow Regex Script",
     "slowDisplayTimedOut": "Display regex \"{{name}}\" timed out and was flagged in Regex Scripts.",
+    "quarantinedDisplay": "Display regex \"{{name}}\" was quarantined after exceeding its execution deadline; it is skipped until re-enabled or edited.",
     "slowDisplaySlow": "Display regex \"{{name}}\" ran for {{duration}} and was flagged in Regex Scripts.",
     "timedOut": "Timed out during regex execution",
     "slowDetected": "Slow regex detected ({{seconds}}s)",

@@ -641,6 +641,50 @@
   padding: 6px;
 }
 
+/* ── Risk banner ─────────────────────────────── */
+
+.riskBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(234, 179, 8, 0.45);
+  background: rgba(234, 179, 8, 0.08);
+  border-radius: 8px;
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  color: var(--lumiverse-text);
+}
+
+.riskBannerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.riskBannerList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.riskBannerHint {
+  opacity: 0.7;
+}
+
+.riskBannerDismiss {
+  background: none;
+  border: none;
+  color: var(--lumiverse-text-dim);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.riskBannerDismiss:hover {
+  color: var(--lumiverse-text);
+}
+
 /* ── Footer ──────────────────────────────────── */
 
 .footer {
