@@ -44,6 +44,7 @@ import { ModalShell } from '@/components/shared/ModalShell'
 import { Toggle } from '@/components/shared/Toggle'
 import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import { filterActionIds, filterActions } from '@/lib/toolbarActionSearch'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import styles from './InputArea.module.css'
 
 /** localStorage key — no store slice exists on the InputArea allowlist. */
@@ -147,6 +148,32 @@ export function composerExtraItem(action: ToolbarAction): ComposerActionItem {
     icon: action.icon,
     keywords: action.keywords,
   }
+}
+
+/**
+ * The Suite is the owner of Quick Toolbar actions in the composer customizer.
+ * Core composer actions remain available without it, except for its dedicated
+ * Connections Picker launcher.
+ */
+export function buildComposerActionMap(
+  actionCatalog: readonly ToolbarAction[],
+  hasLumiverseSuite: boolean,
+): Map<string, ComposerActionItem> {
+  const nativeActions = hasLumiverseSuite
+    ? COMPOSER_ACTION_CATALOG
+    : COMPOSER_ACTION_CATALOG.filter((action) => action.id !== 'connectionsPicker')
+  const map = new Map<string, ComposerActionItem>(
+    nativeActions.map((action) => [action.id, action]),
+  )
+  if (!hasLumiverseSuite) return map
+
+  for (const action of actionCatalog) {
+    if (action.id === 'lumiverse_suite.connections_picker.open') continue
+    const item = composerExtraItem(action)
+    if (map.has(item.id)) continue
+    map.set(item.id, item)
+  }
+  return map
 }
 
 export function normalizeComposerActionBarState(raw: unknown): ComposerActionBarState {
@@ -316,31 +343,25 @@ export default function InputAreaCustomizeModal({
 }: InputAreaCustomizeModalProps) {
   const [query, setQuery] = useState('')
   const { actionCatalog } = useQuickToolbarActions()
+  const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
+  const availableQuickToolbarActions = hasLumiverseSuite ? actionCatalog : []
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const actionById = useMemo(() => {
-    const map = new Map<string, ComposerActionItem>(
-      COMPOSER_ACTION_CATALOG.map((action) => [action.id, action]),
-    )
-    for (const action of actionCatalog) {
-      if (action.id === 'lumiverse_suite.connections_picker.open') continue
-      const item = composerExtraItem(action)
-      if (map.has(item.id)) continue
-      map.set(item.id, item)
-    }
-    return map
-  }, [actionCatalog])
+  const actionById = useMemo(
+    () => buildComposerActionMap(actionCatalog, hasLumiverseSuite),
+    [actionCatalog, hasLumiverseSuite],
+  )
   const listedOrder = useMemo(() => {
     const seen = new Set(order)
-    const extras = actionCatalog
+    const extras = availableQuickToolbarActions
       .map((action) => toComposerExtraId(action.id))
       .filter((id) => !seen.has(id) && actionById.has(id))
     return [...order, ...extras]
-  }, [actionById, actionCatalog, order])
+  }, [actionById, availableQuickToolbarActions, order])
   const rows = useMemo(
     () => listedOrder
       .map((id) => actionById.get(id))
@@ -348,8 +369,8 @@ export default function InputAreaCustomizeModal({
     [actionById, listedOrder],
   )
   const visibleIds = useMemo(
-    () => order.filter((id) => !hidden.includes(id)),
-    [hidden, order],
+    () => order.filter((id) => !hidden.includes(id) && actionById.has(id)),
+    [actionById, hidden, order],
   )
   const filteredRows = useMemo(() => filterActions(rows, query), [query, rows])
   const sortableIds = useMemo(
@@ -378,7 +399,9 @@ export default function InputAreaCustomizeModal({
       <div className={styles.customizeHeader}>
         <h3 className={styles.customizeTitle}>Customize composer</h3>
         <p className={styles.customizeSubtitle}>
-          Drag to reorder composer icons. Toggle to add or hide Quick Toolbar actions and native icons. Changes apply immediately.
+          {hasLumiverseSuite
+            ? 'Drag to reorder composer icons. Toggle to add or hide Quick Toolbar actions and native icons. Changes apply immediately.'
+            : 'Drag to reorder composer icons. Toggle to add or hide native icons. Changes apply immediately.'}
         </p>
       </div>
 
