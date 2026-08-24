@@ -234,6 +234,18 @@ export const SETTINGS_TABS: SettingsTabEntry[] = [
     component: INLINE_SENTINEL,
   },
   {
+    id: 'illarin',
+    shortName: 'Illarin',
+    tabName: 'Illarin',
+    tabDescription: 'Illarin asset delivery and account linking',
+    tabIcon: Globe,
+    keywords: ['illarin', 'cloud', 'sync', 'assets', 'online', 'link'],
+    sections: [
+      { key: 'general', titleKey: 'illarin.title', titleFallback: 'Illarin', keywords: ['illarin', 'link', 'device code', 'assets'] },
+    ],
+    component: INLINE_SENTINEL,
+  },
+  {
     id: 'dataPortability',
     shortName: 'Data',
     tabName: 'Data Portability',

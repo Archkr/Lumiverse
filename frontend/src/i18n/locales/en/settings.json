@@ -83,6 +83,11 @@
       "tabName": "LumiHub",
       "tabDescription": "LumiHub cloud sync and sharing settings"
     },
+    "illarin": {
+      "shortName": "Illarin",
+      "tabName": "Illarin",
+      "tabDescription": "Illarin asset delivery and account linking"
+    },
     "dataPortability": {
       "shortName": "Data",
       "tabName": "Data Portability",
@@ -650,6 +655,35 @@
     "statsSharingHint": "Off by default. When enabled, daily totals per installed card (times used, chats started, message counts) are sent to your linked LumiHub so creators can see how their work performs. Numbers only. Never chat content, names, or anything that identifies you; the hub also hides an asset's stats entirely until at least 5 different Lumiverses report it.",
     "errStatsSharing": "Failed to update stats sharing.",
     "statsSharingUnlinkedHint": "Off by default. You can turn this on after linking — nothing is ever shared until you do."
+  },
+  "illarin": {
+    "title": "Illarin",
+    "loading": "Loading...",
+    "helper": "Link this Lumiverse instance to Illarin so its assets can be delivered straight into your library.",
+    "url": "Illarin URL",
+    "urlPlaceholder": "https://illarin.xyz",
+    "instanceName": "Instance Name",
+    "defaultInstance": "My Lumiverse",
+    "linkedAs": "Linked — {{name}}",
+    "instanceIdLabel": "Instance ID",
+    "scopesLabel": "Granted scopes",
+    "versionLabel": "Declared version",
+    "link": "Link",
+    "linking": "Linking...",
+    "waitingBrowser": "Waiting for authorization in your browser...",
+    "waitingDevice": "Waiting for the code to be entered on Illarin...",
+    "deviceFallback": "Use a device code instead",
+    "deviceTitle": "Device code linking",
+    "deviceStep1": "1. Open {{url}} in any browser and sign in.",
+    "deviceStep2": "2. Enter this code:",
+    "deviceNote": "Never enter a code you did not request yourself. The approval page must show this exact code.",
+    "unlink": "Unlink from Illarin",
+    "unlinking": "Unlinking...",
+    "unlinkHint": "Unlinking removes the credentials from this instance only. Also revoke this instance in your Illarin account settings.",
+    "errUrl": "Enter your Illarin URL",
+    "errLinkFailed": "Failed to start linking",
+    "errConnectFailed": "Failed to connect to Illarin",
+    "errUnlinkFailed": "Failed to unlink"
   },
   "dataPortability": {
     "exportTitle": "Export your data",

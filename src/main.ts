@@ -309,6 +309,14 @@ setTimeout(() => {
   });
 }, 0);
 
+// Warm Illarin credentials and push a declaration update when the backend
+// version changed since Illarin last accepted one. Deferred like LumiHub.
+setTimeout(() => {
+  import("./illarin/warmup").then(({ warmUpInstances }) => {
+    warmUpInstances().catch((err) => console.error("[Illarin] Warmup failed:", err));
+  });
+}, 0);
+
 // Auto-connect MCP servers (fire-and-forget, same deferred pattern as LumiHub)
 setTimeout(() => {
   import("./services/mcp-client-manager").then(({ getMcpClientManager }) => {

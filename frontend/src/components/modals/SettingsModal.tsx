@@ -291,6 +291,8 @@ function SettingsView({ view }: { view: string }) {
       coreContent = <WebSearchSettings />; break
     case 'lumihub':
       coreContent = <LumiHubSettings />; break
+    case 'illarin':
+      coreContent = <IllarinSettings />; break
     case 'tokenizers':
       coreContent = <TokenizerManager />; break
     case 'users':
@@ -3901,6 +3903,268 @@ function LumiHubSettings() {
       )}
 
       {error && <span className={styles.errorText}>{error}</span>}
+    </div>
+  )
+}
+
+function IllarinSettings() {
+  const { t } = useTranslation('settings')
+  const user = useStore((s) => s.user)
+  const defaultInstanceName = user?.name ? `${user.name}'s Lumiverse` : t('illarin.defaultInstance')
+  const [illarinUrl, setIllarinUrl] = useState('https://illarin.xyz')
+  const [instanceName, setInstanceName] = useState(defaultInstanceName)
+  const [status, setStatus] = useState<{
+    linked: boolean
+    illarin_url?: string
+    instance_name?: string
+    instance_id?: string
+    scopes?: string[]
+    linked_at?: string | null
+    declaration_version?: string | null
+    pending_link?: { status: 'pending' | 'linked' | 'failed'; reason?: string | null } | null
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [linking, setLinking] = useState(false)
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
+  const [unlinking, setUnlinking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [deviceCode, setDeviceCode] = useState<{ user_code: string; verification_url: string } | null>(null)
+
+  // Loopback browser linking only reaches the backend when the BROWSER runs
+  // on the same machine as the server; otherwise fall back to device codes.
+  const isLocalOrigin = ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname)
+  const pollRef = useRef<{ timer?: ReturnType<typeof setInterval>; timeout?: ReturnType<typeof setTimeout> }>({})
+
+  const stopPolling = () => {
+    clearInterval(pollRef.current.timer)
+    clearTimeout(pollRef.current.timeout)
+  }
+  useEffect(() => stopPolling, [])
+
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch('/api/v1/illarin/status', { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        setStatus(data)
+        if (data.illarin_url) setIllarinUrl(data.illarin_url)
+        if (data.instance_name && !instanceName) setInstanceName(data.instance_name)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 10_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const finishLinking = () => {
+    stopPolling()
+    setLinking(false)
+    setDeviceCode(null)
+    fetchStatus()
+  }
+
+  const startDeviceFlow = async () => {
+    const res = await fetch('/api/v1/illarin/link/device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ illarin_url: illarinUrl.trim(), instance_name: instanceName.trim() || defaultInstanceName }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setError((body as any).error || t('illarin.errLinkFailed'))
+      setLinking(false)
+      return false
+    }
+    const data = await res.json() as { user_code: string; verification_url: string; expires_at: string }
+    setDeviceCode({ user_code: data.user_code, verification_url: data.verification_url })
+    // Poll respecting the server-enforced interval; give up at expiry.
+    pollRef.current.timer = setInterval(async () => {
+      const check = await fetch('/api/v1/illarin/link/device/status', { credentials: 'include' })
+      if (!check.ok) return
+      const checkData = await check.json() as { status: string }
+      if (checkData.status === 'linked') finishLinking()
+      else if (checkData.status !== 'pending') {
+        setError(t('illarin.errLinkFailed'))
+        finishLinking()
+      }
+    }, 3000)
+    pollRef.current.timeout = setTimeout(finishLinking, 10 * 60 * 1000)
+    return true
+  }
+
+  const handleLink = async () => {
+    if (!illarinUrl.trim()) {
+      setError(t('illarin.errUrl'))
+      return
+    }
+    setError(null)
+    setLinking(true)
+    if (!isLocalOrigin) {
+      await startDeviceFlow()
+      return
+    }
+    try {
+      const res = await fetch('/api/v1/illarin/link/browser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ illarin_url: illarinUrl.trim(), instance_name: instanceName.trim() || defaultInstanceName }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError((body as any).error || t('illarin.errLinkFailed'))
+        setLinking(false)
+        return
+      }
+      // Backend opened the system browser and listens on loopback.
+      pollRef.current.timer = setInterval(async () => {
+        await fetchStatus()
+        if (statusRef.current?.linked || statusRef.current?.pending_link?.status === 'failed') {
+          if (statusRef.current?.pending_link?.status === 'failed' && !statusRef.current.linked) {
+            setError(t('illarin.errLinkFailed'))
+            stopPolling()
+            setLinking(false)
+          } else {
+            finishLinking()
+          }
+        }
+      }, 2000)
+      pollRef.current.timeout = setTimeout(finishLinking, 5 * 60 * 1000)
+    } catch (err: any) {
+      setError(err.message || t('illarin.errConnectFailed'))
+      setLinking(false)
+    }
+  }
+
+  const handleUnlink = async () => {
+    setUnlinking(true)
+    try {
+      await fetch('/api/v1/illarin/unlink', { method: 'POST', credentials: 'include' })
+      setStatus((prev) => (prev ? { ...prev, linked: false } : { linked: false }))
+    } catch {
+      setError(t('illarin.errUnlinkFailed'))
+    } finally {
+      setUnlinking(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className={styles.settingsSection}>
+        <h3 id={sectionAnchorId('illarin', 'general')} className={styles.sectionTitle}>{t('illarin.title')}</h3>
+        <span className={styles.helperText}>{t('illarin.loading')}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={styles.settingsSection}>
+      <h3 id={sectionAnchorId('illarin', 'general')} className={styles.sectionTitle}>{t('illarin.title')}</h3>
+      <span className={styles.helperText}>{t('illarin.helper')}</span>
+
+      {status?.linked ? (
+        <div className={styles.lumihubCard}>
+          <div className={styles.lumihubStatusRow}>
+            <span className={clsx(styles.lumihubDot, styles.lumihubDotOnline)} />
+            <span className={styles.lumihubStatusText}>
+              {t('illarin.linkedAs', { name: status.instance_name })}
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.url')}</span>
+            <span className={styles.lumihubMeta}>{status.illarin_url}</span>
+          </div>
+
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.instanceIdLabel')}</span>
+            <span className={styles.lumihubMeta}>{status.instance_id}</span>
+          </div>
+
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.scopesLabel')}</span>
+            <span className={styles.lumihubMeta}>{(status.scopes ?? []).join(', ')}</span>
+          </div>
+
+          {status.declaration_version && (
+            <div className={styles.field}>
+              <span className={styles.fieldLabel}>{t('illarin.versionLabel')}</span>
+              <span className={styles.lumihubMeta}>v{status.declaration_version}</span>
+            </div>
+          )}
+
+          <span className={styles.lumihubMeta}>{t('illarin.unlinkHint')}</span>
+
+          <Button variant="danger-ghost" size="sm" onClick={handleUnlink} disabled={unlinking} loading={unlinking}>
+            {unlinking ? t('illarin.unlinking') : t('illarin.unlink')}
+          </Button>
+        </div>
+      ) : (
+        <div className={styles.lumihubCard}>
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.url')}</span>
+            <input
+              className={styles.lumihubInput}
+              type="text"
+              placeholder={t('illarin.urlPlaceholder')}
+              value={illarinUrl}
+              onChange={(e) => setIllarinUrl(e.target.value)}
+            />
+          </div>
+
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.instanceName')}</span>
+            <input
+              className={styles.lumihubInput}
+              type="text"
+              value={instanceName}
+              onChange={(e) => setInstanceName(e.target.value)}
+            />
+          </div>
+
+          {deviceCode && (
+            <div className={styles.lumihubDisclosure}>
+              <span className={styles.lumihubDisclosureTitle}>{t('illarin.deviceTitle')}</span>
+              <span className={styles.lumihubDisclosureText}>
+                {t('illarin.deviceStep1', { url: deviceCode.verification_url })}
+                <br />
+                {t('illarin.deviceStep2')}
+              </span>
+              <span className={styles.lumihubInput} style={{ fontSize: '1.4em', textAlign: 'center', letterSpacing: '0.2em' }}>
+                {deviceCode.user_code}
+              </span>
+              <span className={styles.lumihubDisclosureText}>{t('illarin.deviceNote')}</span>
+            </div>
+          )}
+
+          {linking && (
+            <span className={styles.helperText}>
+              {deviceCode ? t('illarin.waitingDevice') : t('illarin.waitingBrowser')}
+            </span>
+          )}
+
+          {error && <span className={styles.helperText} style={{ color: 'var(--lumiverse-danger)' }}>{error}</span>}
+
+          <Button variant="primary" size="sm" onClick={handleLink} disabled={linking} loading={linking}>
+            {linking ? t('illarin.linking') : t('illarin.link')}
+          </Button>
+
+          {!isLocalOrigin && !deviceCode && (
+            <Button variant="ghost" size="sm" onClick={() => { setLinking(true); void startDeviceFlow() }}>
+              {t('illarin.deviceFallback')}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

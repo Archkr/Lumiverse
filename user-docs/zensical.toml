@@ -117,6 +117,7 @@ nav = [
     { "Web Search" = "settings/web-search.md" },
     { "Notifications" = "settings/push-notifications.md" },
     { "LumiHub" = "settings/lumihub.md" },
+    { "Illarin" = "settings/illarin.md" },
     { "Single Sign-On" = "settings/sso.md" },
     { "User Management" = "settings/users.md" },
   ] },

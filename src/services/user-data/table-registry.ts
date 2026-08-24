@@ -384,6 +384,7 @@ export const EXCLUDED_TABLES = new Set<string>([
   "tokenizer_configs",
   "tokenizer_model_patterns",
   "lumihub_link",
+  "illarin_instance",
   "extension_grants",
   // Runtime caches — regenerated on demand
   "query_vector_cache",
