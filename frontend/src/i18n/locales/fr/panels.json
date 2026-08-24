@@ -693,7 +693,6 @@
     "requestFailed": "Échec de la demande",
     "slowDisplayTitle": "Script Regex lent",
     "slowDisplayTimedOut": "Afficher l'expression régulière \"{{name}}\" ont expiré et ont été signalés dans les scripts Regex.",
-        "quarantinedDisplay": "L'expression régulière \"{{name}}\" a été mise en quarantaine après avoir dépassé son délai d'exécution ; elle est ignorée jusqu'à sa réactivation ou modification.",
     "slowDisplaySlow": "Afficher l'expression régulière \"{{name}}\" a été exécuté pendant {{duration}} et a été signalé dans les scripts Regex.",
     "timedOut": "Délai expiré lors de l'exécution de l'expression régulière",
     "slowDetected": "Regex lente détectée ({{seconds}}s)",

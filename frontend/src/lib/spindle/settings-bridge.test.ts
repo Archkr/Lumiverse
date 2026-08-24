@@ -96,7 +96,9 @@ describe('Spindle settings bridge', () => {
   test('exposes exactly the audited core reads and no core write escape hatch', () => {
     const harness = createHarness()
 
-    expect(harness.bridge.core.list()).toEqual(CORE_SETTING_KEYS.map(({ key }) => key))
+    expect(harness.bridge.core.list()).toEqual(
+      CORE_SETTING_KEYS.map(({ key, permission }) => ({ key, permission })),
+    )
     expect(harness.bridge.core.get<string>('theme')).toBe('dark')
     expect(() => harness.bridge.core.get('missing')).toThrow('CORE_SETTING_UNKNOWN:missing')
     expect('set' in harness.bridge.core).toBe(false)

@@ -230,20 +230,6 @@ function shouldResetRegexPerformance(input: UpdateRegexScriptInput): boolean {
   ].some((key) => Object.prototype.hasOwnProperty.call(input, key));
 }
 
-// A pattern-affecting edit invalidates prior ok-evidence (the measured safety
-// of the old shape says nothing about the new one), demoting the script to the
-// unknown tier -> worker path. An explicit quarantine survives edits so a
-// script that hung the executor stays skipped until deliberately cleared.
-function withoutStaleRegexEvidence(metadata: Record<string, any>): Record<string, any> {
-  const raw = metadata.regex_evidence;
-  if (!raw || typeof raw !== "object") return metadata;
-  const next = { ...raw };
-  delete next.last_ok_ms;
-  delete next.last_ok_at;
-  metadata.regex_evidence = next;
-  return metadata;
-}
-
 function isDisplayPerformanceSource(source: RegexPerformanceSource): boolean {
   return source === "display_client" || source === "display_backend";
 }
@@ -317,47 +303,6 @@ export function reportRegexScriptPerformance(
   );
   emitRegexChanged(userId, id);
   return { script: getRegexScript(userId, id), newlyFlagged: true, cleared: false };
-}
-
-// Client-side evidence persistence for the display-regex execution tiers
-// (last_ok_ms/last_ok_at/quarantined under metadata.regex_evidence). Unlike
-// report-performance this never clears existing fields implicitly; the client
-// sends only the fields it wants to record.
-export function reportRegexScriptEvidence(
-  userId: string,
-  id: string,
-  patch: { lastOkMs?: number; lastOkAt?: number; quarantined?: boolean },
-): RegexScript | null {
-  const script = getRegexScript(userId, id);
-  if (!script) return null;
-
-  const metadata: Record<string, any> =
-    script.metadata && typeof script.metadata === "object" ? { ...script.metadata } : {};
-  const evidence =
-    metadata.regex_evidence && typeof metadata.regex_evidence === "object" ? { ...metadata.regex_evidence } : {};
-
-  if (patch.lastOkMs !== undefined) {
-    evidence.last_ok_ms = Math.max(0, Math.round(patch.lastOkMs));
-  }
-  if (patch.lastOkAt !== undefined) {
-    evidence.last_ok_at = Math.max(0, Math.round(patch.lastOkAt));
-  }
-  if (patch.quarantined !== undefined) {
-    if (patch.quarantined) {
-      evidence.quarantined = true;
-    } else {
-      delete evidence.quarantined;
-    }
-  }
-
-  metadata.regex_evidence = evidence;
-  getDb().query("UPDATE regex_scripts SET metadata = ? WHERE id = ? AND user_id = ?").run(
-    JSON.stringify(metadata),
-    id,
-    userId,
-  );
-  emitRegexChanged(userId, id);
-  return getRegexScript(userId, id);
 }
 
 function resolveCreateDisabledState(input: CreateRegexScriptInput, activePresetId: string | null): boolean {
@@ -1007,7 +952,6 @@ export function updateRegexScript(
   }
   if (shouldResetRegexPerformance(nextInput)) {
     nextInput.metadata = withoutRegexPerformanceMetadata(nextInput.metadata ?? existing.metadata);
-    nextInput.metadata = withoutStaleRegexEvidence(nextInput.metadata);
   }
   const hasPresetIdUpdate = Object.prototype.hasOwnProperty.call(nextInput, "preset_id");
   const nextPresetId = hasPresetIdUpdate ? normalizeOptionalId(nextInput.preset_id) : existing.preset_id;

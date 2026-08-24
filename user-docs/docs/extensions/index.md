@@ -179,8 +179,6 @@ Extensions can mount UI in several surfaces. Each surface has both per-extension
 
 Extensions can also mount native Lumiverse form components (text inputs, selects, combos, sliders, date/time pickers, color pickers) inside their own panels via the Components API, so they don't have to reimplement the design system from scratch.
 
-Extension-provided drawer tabs and input-bar actions can also supply custom icons: either as inline SVG (`iconSvg`) or an image URL (`iconUrl`). Inline SVG is sanitized before rendering, and image URLs are validated, with a safe fallback if neither is usable.
-
 ---
 
 ## For Developers

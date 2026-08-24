@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '@/store'
 import { trackInitialDisplayResolve } from '@/lib/chatDisplaySettle'
-import { applyDisplayRegexTiered } from '@/lib/regex/pipeline'
+import { applyDisplayRegex, applyDisplayRegexAsync } from '@/lib/regex/compiler'
 import { resolveMacrosBatch } from '@/api/macros'
 import { isDisplayChatOwned, getDisplayResolverForChat } from '@/lib/spindle/display-resolver-registry'
 import { regexApi } from '@/api/regex'
@@ -66,8 +66,6 @@ interface DisplayPreprocessBody {
 interface DisplayPreprocessOutcome {
   content: string
   ok: boolean
-  touchedVars?: readonly string[]
-  cacheable?: boolean
 }
 
 interface PendingDisplayPreprocess {
@@ -79,19 +77,6 @@ const displayRegexResolutionCache = new Map<string, DisplayRegexCacheEntry>()
 const displayRegexContentCache = new Map<string, DisplayRegexContentCacheEntry>()
 const displayPreprocessCache = new Map<string, { value?: string; promise?: Promise<DisplayPreprocessOutcome>; touchedVars?: ReadonlySet<string>; messageId?: string }>()
 const DISPLAY_PREPROCESS_CACHE_MAX = 500
-const DISPLAY_REGEX_CONTENT_CACHE_MAX = 300
-
-// FIFO eviction for displayRegexContentCache; streaming inserts one key per
-// chunk with full content embedded, so the map needs a hard size bound.
-function evictDisplayRegexContentCacheOverflow(): void {
-  if (displayRegexContentCache.size <= DISPLAY_REGEX_CONTENT_CACHE_MAX) return
-  const drop = displayRegexContentCache.size - DISPLAY_REGEX_CONTENT_CACHE_MAX
-  let i = 0
-  for (const k of displayRegexContentCache.keys()) {
-    if (i++ >= drop) break
-    displayRegexContentCache.delete(k)
-  }
-}
 const displayRegexCacheListeners = new Set<() => void>()
 let displayRegexGlobalCv = 0
 const displayRegexPerMessageCv = new Map<string, number>()
@@ -101,98 +86,6 @@ const displayPreprocessQueues = new Map<string, PendingDisplayPreprocess[]>()
 const DISPLAY_PREPROCESS_BATCH_MAX = 64
 const DISPLAY_PREPROCESS_BATCH_DELAY_MS = 8
 let displayPreprocessFlushTimer: number | null = null
-
-// Trailing-edge coalescing for per-token streaming re-resolution. Rapid
-// content updates for the SAME message collapse into at most one resolver
-// round-trip per window; the leading call still runs immediately so
-// single-shot resolves (initial mount, generation end, invalidations while
-// idle) never gain latency. The final update of a burst always flushes on the
-// trailing timer, so settled content is guaranteed to resolve.
-const DISPLAY_RESOLVE_COALESCE_MS = 180
-interface DisplayCoalesceState {
-  lastRun: number
-  // Cancel handle for the armed trailing timer, or null when no timer is live.
-  cancelTimer: (() => void) | null
-  pending: (() => void) | null
-}
-const displayCoalesceStates = new Map<string, DisplayCoalesceState>()
-const DISPLAY_COALESCE_STATE_MAX = 512
-
-// Injectable clock/timer so unit tests can drive the trailing edge without
-// real time. Production default uses the host window timers.
-export interface DisplayCoalesceDeps {
-  now(): number
-  scheduleTimer(fn: () => void, ms: number): () => void
-}
-let displayCoalesceDeps: DisplayCoalesceDeps | null = null
-function getDisplayCoalesceDeps(): DisplayCoalesceDeps {
-  if (!displayCoalesceDeps) {
-    displayCoalesceDeps = {
-      now: () => Date.now(),
-      scheduleTimer: (fn, ms) => {
-        const id = window.setTimeout(fn, ms)
-        return () => window.clearTimeout(id)
-      },
-    }
-  }
-  return displayCoalesceDeps
-}
-
-export function setDisplayCoalesceDepsForTests(deps: DisplayCoalesceDeps): void {
-  displayCoalesceDeps = deps
-}
-
-export function resetDisplayCoalesceForTests(): void {
-  displayCoalesceDeps = null
-  displayCoalesceStates.clear()
-}
-
-function pruneDisplayCoalesceStates(): void {
-  if (displayCoalesceStates.size <= DISPLAY_COALESCE_STATE_MAX) return
-  const now = Date.now()
-  for (const [key, st] of displayCoalesceStates) {
-    if (displayCoalesceStates.size <= DISPLAY_COALESCE_STATE_MAX / 2) break
-    if (st.cancelTimer === null && st.pending === null && now - st.lastRun > 60_000) {
-      displayCoalesceStates.delete(key)
-    }
-  }
-}
-
-export function scheduleCoalescedDisplayResolve(key: string | null, run: () => void): () => void {
-  if (!key) {
-    run()
-    return () => {}
-  }
-  const deps = getDisplayCoalesceDeps()
-  let st = displayCoalesceStates.get(key)
-  if (!st) {
-    st = { lastRun: 0, cancelTimer: null, pending: null }
-    displayCoalesceStates.set(key, st)
-    pruneDisplayCoalesceStates()
-  }
-  const now = deps.now()
-  if (st.cancelTimer === null && now - st.lastRun >= DISPLAY_RESOLVE_COALESCE_MS) {
-    st.lastRun = now
-    run()
-    return () => {}
-  }
-  // Mid-burst: keep only the newest work item; the trailing timer executes it.
-  st.pending = run
-  if (st.cancelTimer === null) {
-    st.cancelTimer = deps.scheduleTimer(() => {
-      st.cancelTimer = null
-      const pendingWork = st.pending
-      st.pending = null
-      st.lastRun = deps.now()
-      pendingWork?.()
-    }, DISPLAY_RESOLVE_COALESCE_MS - (now - st.lastRun))
-  }
-  return () => {
-    // Effect cleanup (re-render with new deps or unmount): drop this closure,
-    // but leave any timer alive for the next effect run to re-arm against.
-    if (st.pending === run) st.pending = null
-  }
-}
 
 function bumpGlobalCv(): void {
   displayRegexGlobalCv += 1
@@ -346,7 +239,7 @@ function enqueueDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): 
   })
 }
 
-export function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<DisplayPreprocessOutcome> {
+function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<DisplayPreprocessOutcome> {
   if (isDisplayChatOwned(chatId)) {
     const resolver = getDisplayResolverForChat(chatId)
     if (resolver) {
@@ -364,16 +257,7 @@ export function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBo
           },
         })
         .then((local) => {
-          if (local) {
-            return {
-              content: local.content,
-              ok: true,
-              ...(Array.isArray(local.touchedVars) && local.touchedVars.length > 0
-                ? { touchedVars: local.touchedVars }
-                : {}),
-              cacheable: local.cacheable !== false,
-            }
-          }
+          if (local) return { content: local.content, ok: true }
           console.error(`[display] resolver.resolveBody returned null for owned chat=${chatId}; showing raw (no backend fallback)`)
           return { content: body.rawContent, ok: false }
         })
@@ -432,61 +316,51 @@ function useDisplayPreprocessedState(
     const apply = (next: DisplayPreprocessOutcome) => {
       if (!cancelled) setState({ key, value: next.content, ok: next.ok })
     }
-    const run = () => {
-      const existing = displayPreprocessCache.get(key)
-      if (existing?.value !== undefined) {
-        apply({ content: existing.value, ok: true })
-        return
-      }
-      if (!existing?.promise) {
-        const messageIdForEntry = opts.messageId
-        let assignedPromise: Promise<DisplayPreprocessOutcome>
-        const promise = fetchDisplayPreprocess(chatId, {
-          messageId: opts.messageId,
-          role: opts.role,
-          rawContent: content,
-          ...(typeof opts.depth === 'number' ? { depth: opts.depth } : {}),
-          ...(typeof opts.messageIndex === 'number' ? { messageIndex: opts.messageIndex } : {}),
-          ...(opts.dynamicMacros ? { dynamicMacros: opts.dynamicMacros } : {}),
-        })
-          .then((next) => {
-            if (displayPreprocessCache.get(key)?.promise === assignedPromise) {
-              if (next.ok && next.cacheable !== false) {
-                displayPreprocessCache.set(key, {
-                  value: next.content,
-                  messageId: messageIdForEntry,
-                  ...(next.touchedVars && next.touchedVars.length > 0
-                    ? { touchedVars: new Set(next.touchedVars) }
-                    : {}),
-                })
-                if (displayPreprocessCache.size > DISPLAY_PREPROCESS_CACHE_MAX) {
-                  const drop = displayPreprocessCache.size - DISPLAY_PREPROCESS_CACHE_MAX
-                  let i = 0
-                  for (const k of displayPreprocessCache.keys()) {
-                    if (i++ >= drop) break
-                    displayPreprocessCache.delete(k)
-                  }
+    const existing = displayPreprocessCache.get(key)
+    if (existing?.value !== undefined) {
+      apply({ content: existing.value, ok: true })
+      return () => { cancelled = true }
+    }
+    if (!existing?.promise) {
+      const messageIdForEntry = opts.messageId
+      let assignedPromise: Promise<DisplayPreprocessOutcome>
+      const promise = fetchDisplayPreprocess(chatId, {
+        messageId: opts.messageId,
+        role: opts.role,
+        rawContent: content,
+        ...(typeof opts.depth === 'number' ? { depth: opts.depth } : {}),
+        ...(typeof opts.messageIndex === 'number' ? { messageIndex: opts.messageIndex } : {}),
+        ...(opts.dynamicMacros ? { dynamicMacros: opts.dynamicMacros } : {}),
+      })
+        .then((next) => {
+          if (displayPreprocessCache.get(key)?.promise === assignedPromise) {
+            if (next.ok) {
+              displayPreprocessCache.set(key, { value: next.content, messageId: messageIdForEntry })
+              if (displayPreprocessCache.size > DISPLAY_PREPROCESS_CACHE_MAX) {
+                const drop = displayPreprocessCache.size - DISPLAY_PREPROCESS_CACHE_MAX
+                let i = 0
+                for (const k of displayPreprocessCache.keys()) {
+                  if (i++ >= drop) break
+                  displayPreprocessCache.delete(k)
                 }
-              } else {
-                displayPreprocessCache.delete(key)
               }
-            }
-            return next
-          })
-          .catch(() => {
-            if (displayPreprocessCache.get(key)?.promise === assignedPromise) {
+            } else {
               displayPreprocessCache.delete(key)
             }
-            return { content, ok: false }
-          })
-        assignedPromise = trackInitialDisplayResolve(promise)
-        displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
-      }
-      displayPreprocessCache.get(key)?.promise?.then(apply)
+          }
+          return next
+        })
+        .catch(() => {
+          if (displayPreprocessCache.get(key)?.promise === assignedPromise) {
+            displayPreprocessCache.delete(key)
+          }
+          return { content, ok: false }
+        })
+      assignedPromise = trackInitialDisplayResolve(promise)
+      displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
     }
-    // Coalesce per-token churn of the same message into one resolve per window.
-    const cancelCoalesce = scheduleCoalescedDisplayResolve(`${chatId}|${opts.messageId}|pre`, run)
-    return () => { cancelled = true; cancelCoalesce() }
+    displayPreprocessCache.get(key)?.promise?.then(apply)
+    return () => { cancelled = true }
   }, [
     key,
     opts?.messageId,
@@ -610,9 +484,11 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   const affectedMessages = new Set<string>()
   for (const [key, entry] of displayRegexContentCache) {
     const fp = entry.touchedVars
-    // Entries without touchedVars are dependency-free (output depends only on
-    // their cache key), so var-scoped invalidation cannot affect them.
-    if (!fp) continue
+    if (!fp) {
+      displayRegexContentCache.delete(key)
+      if (entry.messageId) affectedMessages.add(entry.messageId)
+      continue
+    }
     for (const v of fp) {
       if (changedVars.has(v)) {
         displayRegexContentCache.delete(key)
@@ -623,7 +499,11 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   }
   for (const [key, entry] of displayPreprocessCache) {
     const fp = entry.touchedVars
-    if (!fp) continue
+    if (!fp) {
+      displayPreprocessCache.delete(key)
+      if (entry.messageId) affectedMessages.add(entry.messageId)
+      continue
+    }
     for (const v of fp) {
       if (changedVars.has(v)) {
         displayPreprocessCache.delete(key)
@@ -642,48 +522,6 @@ export function invalidateDisplayRegexCacheForVars(changedVars: ReadonlySet<stri
   }
   for (const messageId of affectedMessages) bumpPerMessageCv(messageId)
   bumpGlobalCv()
-}
-
-export function seedDisplayPreprocessEntryForTests(entry: {
-  key: string
-  value: string
-  messageId?: string
-  touchedVars?: Iterable<string>
-}): void {
-  displayPreprocessCache.set(entry.key, {
-    value: entry.value,
-    ...(entry.messageId ? { messageId: entry.messageId } : {}),
-    ...(entry.touchedVars ? { touchedVars: new Set(entry.touchedVars) } : {}),
-  })
-}
-
-export function getDisplayPreprocessCacheStatsForTests(): { size: number } {
-  return { size: displayPreprocessCache.size }
-}
-
-export function seedDisplayContentEntryForTests(entry: {
-  key: string
-  value: string
-  messageId?: string
-  touchedVars?: Iterable<string>
-}): void {
-  displayRegexContentCache.set(entry.key, {
-    value: entry.value,
-    ...(entry.messageId ? { messageId: entry.messageId } : {}),
-    ...(entry.touchedVars ? { touchedVars: new Set(entry.touchedVars) } : {}),
-  })
-  evictDisplayRegexContentCacheOverflow()
-}
-
-export function getDisplayContentCacheStatsForTests(): { size: number; hasKey(key: string): boolean } {
-  return { size: displayRegexContentCache.size, hasKey: (k) => displayRegexContentCache.has(k) }
-}
-
-export function resetDisplayRegexCachesForTests(): void {
-  displayPreprocessCache.clear()
-  displayRegexContentCache.clear()
-  displayRegexResolutionCache.clear()
-  displayRegexPerMessageCv.clear()
 }
 
 async function resolveMacrosBatchChunked(
@@ -937,16 +775,35 @@ export function useDisplayRegex(
     return () => { cancelled = true }
   }, [scriptsNeedingResolution, templateCacheKey, activeChatId, macroCharacterId, activePersonaId, cvSnapshot])
 
-  // Async pipeline engagement: all user-authored scripts route through the
-  // isolated effect-driven promise chain. Render-phase sync work applies none;
-  // pending renders carry the previous resolved value forward (no blank flash)
-  // and raw text shows only on a first render with no cache.
-  const hasAsyncMacroScripts = useMemo(
-    () => displayOwned || displayScripts.length > 0,
-    [displayOwned, displayScripts],
+  const fallbackContent = useMemo(
+    () => {
+      const slowReports: SlowRegexReport[] = []
+      const recoveredReports: SlowRegexReport[] = []
+      if (displayScripts.length === 0 || regexGated) {
+        pendingSlowReportsRef.current = slowReports
+        pendingRecoveredReportsRef.current = recoveredReports
+        return content
+      }
+      const next = applyDisplayRegex(content, displayScripts, {
+        isUser,
+        depth,
+        macroCtx,
+        resolvedFindPatterns: resolvedTemplates.resolvedFindPatterns,
+        resolvedReplacements: resolvedTemplates.resolvedReplacements,
+        dynamicMacros,
+        ...(messageIndex >= 0 ? { messageIndex } : {}),
+        ...(previousContent !== undefined ? { previousContent } : {}),
+      }, ({ script, elapsedMs, timedOut, thresholdMs }) => {
+        slowReports.push({ script, elapsedMs, timedOut, thresholdMs })
+      }, ({ script, elapsedMs, timedOut, thresholdMs }) => {
+        recoveredReports.push({ script, elapsedMs, timedOut, thresholdMs })
+      })
+      pendingSlowReportsRef.current = slowReports
+      pendingRecoveredReportsRef.current = recoveredReports
+      return next
+    },
+    [content, displayScripts, isUser, depth, macroCtx, resolvedTemplates, dynamicMacros, messageIndex, previousContent, regexGated],
   )
-
-  const fallbackContent = content
 
   useEffect(() => {
     const reports = pendingSlowReportsRef.current
@@ -955,7 +812,7 @@ export function useDisplayRegex(
     for (const report of reports) {
       reportSlowDisplayRegex(report.script, report.elapsedMs, report.timedOut, report.thresholdMs)
     }
-  }, [fallbackContent, resolvedContentState])
+  }, [fallbackContent])
 
   useEffect(() => {
     const reports = pendingRecoveredReportsRef.current
@@ -964,7 +821,14 @@ export function useDisplayRegex(
     for (const report of reports) {
       reportRecoveredDisplayRegex(report.script, report.elapsedMs, report.thresholdMs)
     }
-  }, [fallbackContent, resolvedContentState])
+  }, [fallbackContent])
+
+  const hasAsyncMacroScripts = useMemo(
+    () => displayOwned || displayScripts.some(
+      (s) => s.substitute_macros === 'raw' || s.substitute_macros === 'after',
+    ),
+    [displayOwned, displayScripts],
+  )
 
   const resolvedTemplateKey = useMemo(
     () => JSON.stringify({
@@ -1034,91 +898,73 @@ export function useDisplayRegex(
       if (!cancelled) setResolvedContentState({ key: contentCacheKey, value: next })
     }
 
-    const run = () => {
-      const cached = displayRegexContentCache.get(contentCacheKey)
-      if (cached?.value !== undefined) {
-        applyResolvedContent(cached.value)
-        return
-      }
+    const cached = displayRegexContentCache.get(contentCacheKey)
+    if (cached?.value !== undefined) {
+      applyResolvedContent(cached.value)
+      return () => { cancelled = true }
+    }
 
-      if (!cached?.promise) {
-        // Captured once so the .then/.catch handlers can verify the cache
-        // entry hasn't been replaced or invalidated by a CHAT_CHANGED in flight.
-        // Without this guard, an invalidation between the initial set and the
-        // resolve would let the stale fetch result clobber the live key.
-        let assignedPromise: Promise<string>
-        const slowReports: SlowRegexReport[] = []
-        const recoveredReports: SlowRegexReport[] = []
-        pendingSlowReportsRef.current = slowReports
-        pendingRecoveredReportsRef.current = recoveredReports
-        const promise = applyDisplayRegexTiered(
-          content,
-          displayScripts,
-          {
-            isUser,
-            depth,
-            chatId: activeChatId ?? undefined,
-            characterId: macroCharacterId ?? undefined,
-            personaId: activePersonaId ?? undefined,
-            macroCtx,
-            resolvedFindPatterns: resolvedTemplates.resolvedFindPatterns,
-            resolvedReplacements: resolvedTemplates.resolvedReplacements,
-            dynamicMacros,
-            ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
-            ...(messageIndex >= 0 ? { messageIndex } : {}),
-            ...(previousContent !== undefined ? { previousContent } : {}),
-            ...(preprocessOpts?.role ? { role: preprocessOpts.role } : {}),
-          },
-          (templates) => resolveMacrosBatchChunked(templates, {
-            chat_id: activeChatId ?? undefined,
-            character_id: macroCharacterId ?? undefined,
-            persona_id: activePersonaId ?? undefined,
-          }),
-          {
-            onSlowRegex: ({ script, elapsedMs, timedOut, thresholdMs }) => {
-              slowReports.push({ script, elapsedMs, timedOut, thresholdMs })
-            },
-            onRecoveredRegex: ({ script, elapsedMs, timedOut, thresholdMs }) => {
-              recoveredReports.push({ script, elapsedMs, timedOut, thresholdMs })
-            },
-          },
-        )
-          .then(({ result: next, touchedVars, cacheable }) => {
-            if (displayRegexContentCache.get(contentCacheKey)?.promise === assignedPromise) {
-              if (cacheable !== false) {
-                displayRegexContentCache.set(contentCacheKey, {
-                  value: next,
-                  ...(touchedVars ? { touchedVars } : {}),
-                  ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
-                })
-                evictDisplayRegexContentCacheOverflow()
-              } else {
-                displayRegexContentCache.delete(contentCacheKey)
-              }
-            }
-            return next
-          })
-          .catch(() => {
-            if (displayRegexContentCache.get(contentCacheKey)?.promise === assignedPromise) {
+    if (!cached?.promise) {
+      // Captured once so the .then/.catch handlers can verify the cache
+      // entry hasn't been replaced or invalidated by a CHAT_CHANGED in flight.
+      // Without this guard, an invalidation between the initial set and the
+      // resolve would let the stale fetch result clobber the live key.
+      let assignedPromise: Promise<string>
+      const promise = applyDisplayRegexAsync(
+        content,
+        displayScripts,
+        {
+          isUser,
+          depth,
+          chatId: activeChatId ?? undefined,
+          characterId: macroCharacterId ?? undefined,
+          personaId: activePersonaId ?? undefined,
+          macroCtx,
+          resolvedFindPatterns: resolvedTemplates.resolvedFindPatterns,
+          resolvedReplacements: resolvedTemplates.resolvedReplacements,
+          dynamicMacros,
+          ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
+          ...(messageIndex >= 0 ? { messageIndex } : {}),
+          ...(previousContent !== undefined ? { previousContent } : {}),
+          ...(preprocessOpts?.role ? { role: preprocessOpts.role } : {}),
+        },
+        (templates) => resolveMacrosBatchChunked(templates, {
+          chat_id: activeChatId ?? undefined,
+          character_id: macroCharacterId ?? undefined,
+          persona_id: activePersonaId ?? undefined,
+        }),
+      )
+        .then(({ result: next, touchedVars, cacheable }) => {
+          if (displayRegexContentCache.get(contentCacheKey)?.promise === assignedPromise) {
+            if (cacheable !== false) {
+              displayRegexContentCache.set(contentCacheKey, {
+                value: next,
+                ...(touchedVars ? { touchedVars } : {}),
+                ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
+              })
+            } else {
               displayRegexContentCache.delete(contentCacheKey)
             }
-            return fallbackContent
-          })
-        assignedPromise = trackInitialDisplayResolve(promise)
-        displayRegexContentCache.set(contentCacheKey, {
-          promise: assignedPromise,
-          ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
+          }
+          return next
         })
-      }
+        .catch(() => {
+          if (displayRegexContentCache.get(contentCacheKey)?.promise === assignedPromise) {
+            displayRegexContentCache.delete(contentCacheKey)
+          }
+          return fallbackContent
+        })
+      assignedPromise = trackInitialDisplayResolve(promise)
 
-      displayRegexContentCache.get(contentCacheKey)?.promise?.then(applyResolvedContent)
+      displayRegexContentCache.set(contentCacheKey, {
+        promise: assignedPromise,
+        ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
+      })
     }
-    // Coalesce per-token churn of the same message into one apply pass per window.
-    const cancelCoalesce = scheduleCoalescedDisplayResolve(
-      preprocessOpts?.messageId && activeChatId ? `${activeChatId}|${preprocessOpts.messageId}|apply` : null,
-      run,
-    )
-    return () => { cancelled = true; cancelCoalesce() }
+
+    displayRegexContentCache.get(contentCacheKey)?.promise?.then(applyResolvedContent)
+
+    return () => { cancelled = true }
   }, [
     content,
     isUser,

@@ -98,24 +98,6 @@ describe('H4 host surface catalog and invocation', () => {
     expect(calls).toEqual(['action-regenerate'])
   })
 
-  test('supports the published string-based host surface contract alongside legacy references', async () => {
-    const calls: string[] = []
-    const api = createHostSurfaceAPI({
-      extensionId: 'ext-a',
-      getGrantedPermissions: () => ['generation'],
-      getInputs: () => ({ userRole: 'user', inputBarActions: [], extensionCommands: [] }),
-      runtime: { runCommand: (id) => { calls.push(id) } },
-    })
-
-    const surface = api.list(['command']).find((entry) => entry.id === 'action-regenerate')
-    expect(surface?.title).toBe(surface?.label)
-    expect(surface?.capabilities).toContain('command')
-
-    await api.invoke('command:action-regenerate', 'invoke')
-    await api.invoke('action-regenerate', 'command')
-    expect(calls).toEqual(['action-regenerate', 'action-regenerate'])
-  })
-
   test('world-book editor invocation requires permission and forwards the entry target', () => {
     const calls: Array<[string, string | undefined]> = []
     const denied = createHostSurfaceAPI({

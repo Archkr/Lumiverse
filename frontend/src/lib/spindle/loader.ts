@@ -30,7 +30,7 @@ import type { SpindlePresetEditorUI } from './preset-editor-types'
 import { isKnownMountPoint, type WidenedMountPoint } from './mount-points'
 import { createDOMHelper } from './dom-helper'
 import { registerTagInterceptor, unregisterTagInterceptorsByExtension } from './message-interceptors'
-import { registerDisplayResolver, unregisterDisplayResolver, hasDisplayResolverRegisteredBefore } from './display-resolver-registry'
+import { registerDisplayResolver, unregisterDisplayResolver } from './display-resolver-registry'
 import { invalidateDisplayRegexCacheForVars, invalidateDisplayRegexCache } from '@/hooks/useDisplayRegex'
 import { removeMessageWidgetsByExtension, upsertMessageWidget, removeMessageWidget } from './message-widgets'
 import {
@@ -2076,14 +2076,7 @@ async function doLoadFrontendExtension(
       display: {
         registerResolver(resolver) {
           assertFrontendActive()
-          // Re-registration with this host page still alive means the extension
-          // restarted (hot reload). Content caches hold rendered text produced
-          // by the dead bundle generation and have no TTL — wipe them so
-          // nothing stale survives until cap eviction.
-          const reRegistration = hasDisplayResolverRegisteredBefore()
-          const unregister = registerDisplayResolver(manifest.identifier, resolver)
-          if (reRegistration) invalidateDisplayRegexCache()
-          return unregister
+          return registerDisplayResolver(manifest.identifier, resolver)
         },
         invalidate(touchedVars: string[]) {
           assertFrontendActive()

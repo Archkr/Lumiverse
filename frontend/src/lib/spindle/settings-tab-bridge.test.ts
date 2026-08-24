@@ -159,21 +159,21 @@ describe('Spindle settings tab bridge', () => {
 
   test('enforces four registrations per extension and thirty-two globally', () => {
     for (let index = 0; index < 4; index += 1) {
-      register(`same-extension-${index}`, 'extension.capped', { id: `same-extension-tab-${index}`, title: `Tab ${index}` })
+      register(`same-extension-${index}`, 'extension.capped', { id: `same-extension-tab-${index}` })
     }
     expect(() => registerExtensionSettingsTab({
       registrationId: 'same-extension-4',
       extensionId: 'extension.capped',
-      options: { id: 'same-extension-tab-4', title: 'Tab 4' },
+      options: { id: 'same-extension-tab-4' },
     })).toThrow('SETTINGS_TAB_LIMIT_PER_EXTENSION:4')
 
     for (let index = 0; index < 28; index += 1) {
-      register(`global-${index}`, `extension.global-${index}`, { id: `global-tab-${index}`, title: `Global ${index}` })
+      register(`global-${index}`, `extension.global-${index}`, { id: `global-tab-${index}` })
     }
     expect(() => registerExtensionSettingsTab({
       registrationId: 'global-overflow',
       extensionId: 'extension.global-overflow',
-      options: { id: 'global-overflow-tab', title: 'Overflow' },
+      options: { id: 'global-overflow-tab' },
     })).toThrow('SETTINGS_TAB_LIMIT_GLOBAL:32')
   })
 
@@ -196,28 +196,6 @@ describe('Spindle settings tab bridge', () => {
 
     expect(notifications).toBe(1)
     expect(getExtensionSettingsTabRegistrations('disposable-tab')).toEqual([])
-  })
-
-  test('updates published settings tab metadata without changing its id', () => {
-    const handle = register('updatable', 'extension.updatable', {
-      id: 'updatable-tab',
-      title: 'Initial title',
-    })
-
-    handle.update({
-      title: 'Updated title',
-      shortName: 'Updated',
-      keywords: ['updated'],
-      order: 7,
-    })
-
-    expect(getExtensionSettingsTabRegistrations('updatable-tab')[0]).toMatchObject({
-      title: 'Updated title',
-      shortName: 'Updated',
-      keywords: ['updated'],
-      order: 7,
-    })
-    expect(() => handle.update({ id: 'different-tab' })).toThrow('SETTINGS_TAB_ID_IMMUTABLE')
   })
 
   test('positions productivity tab behind display by default and respects custom position', () => {

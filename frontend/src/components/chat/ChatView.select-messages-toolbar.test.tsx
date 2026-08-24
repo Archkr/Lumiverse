@@ -13,7 +13,7 @@ describe('ChatView native select-messages toolbar', () => {
   test('ChatView gates only ListChecks with the helper and keeps MessageSelectBar', async () => {
     const source = await Bun.file(resolve(import.meta.dir, 'ChatView.tsx')).text()
 
-    expect(source).toMatch(/import\s*\{[\s\S]*?isShowNativeSelectMessages,[\s\S]*?readQuickToolbarPlacement,[\s\S]*?\}\s*from '\.\.\/quick-toolbar\/quickToolbarDock'/)
+    expect(source).toContain("import { isShowNativeSelectMessages, readQuickToolbarPlacement } from '../quick-toolbar/quickToolbarDock'")
     expect(source).toContain('ListChecks')
     expect(source).toMatch(/isShowNativeSelectMessages\(quickToolbarSettings\)\s*&&\s*\(/)
     expect(source).toMatch(/aria-pressed=\{messageSelectMode\}/)

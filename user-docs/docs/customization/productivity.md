@@ -65,25 +65,6 @@ Under **Visible icons and order**:
 
 The catalog includes native Lumiverse actions and compatible actions supplied by enabled extensions. If an extension is disabled or removed, its unavailable actions disappear without affecting the remaining order.
 
-The twelve dockable V2 card-slot actions are:
-
-| Action | What It Does |
-|--------|--------------|
-| **New Chat** | Starts a new chat with the current character. |
-| **Manage Chats** | Opens the chat manager for the current character. |
-| **Prompt Variables** | Edits prompt variables for the active preset. |
-| **Chat Settings** | Opens settings for the current chat. |
-| **Convert to Group** | Converts the current chat into a group chat. Hidden while already in a group chat. |
-| **New Group** | Opens the group chat creator. |
-| **Author's Note** | Opens the author's note for the current chat. |
-| **Recompile Memories** | Forces a Memory Cortex warm for the current chat. |
-| **Select messages** | Toggles message selection mode in the current chat. |
-| **Go to oldest message** | Navigates to the oldest message in the chat. |
-| **Browse messages** | Opens the message navigator to browse and search messages. |
-| **Customize composer** | Opens the composer action bar customizer. |
-
-Some actions only apply in context: chat-dependent actions disable without an active chat, **Prompt Variables** requires an active preset, and **Convert to Group** requires both an active chat and character.
-
 ---
 
 ## Customizing the Composer
@@ -97,28 +78,6 @@ The action bar around the message composer can use the same action catalog as th
 5. Click **Done**. Changes apply immediately.
 
 Use **Reset icons** to restore the default composer layout. Composer layout is stored in the current browser, so another browser or device can have a different arrangement.
-
-The native composer icon catalog contains fifteen entries:
-
-| Icon | What It Does |
-|------|--------------|
-| **Home** | Returns to the home screen. |
-| **Regenerate** | Regenerates the last assistant reply. |
-| **Continue** | Continues the last assistant reply. |
-| **One-liner** | Generates a one-liner as the user. |
-| **Persona** | Sends as or switches the active persona. |
-| **Connections** | Switches the active connection profile. |
-| **Connections Picker** | Opens the Waypoints connections picker. |
-| **Alternate fields** | Binds alternate character fields. |
-| **Addons** | Persona addons for this chat. |
-| **Guides** | Guided generations. |
-| **Quick replies** | Inserts a saved quick reply. |
-| **Prompt variables** | Configures prompt variables for the active preset. |
-| **Tools** | Chat tools and settings. |
-| **Extras** | Extra composer actions. |
-| **Select messages** | Toggles message selection mode in the current chat. Hidden by default. |
-
-The customizer also lists compatible Quick Toolbar actions contributed by enabled extensions, so they can share the composer bar alongside the native icons.
 
 ---
 

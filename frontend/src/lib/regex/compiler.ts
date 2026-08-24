@@ -93,18 +93,13 @@ function decorateMatchReplacement(replacement: string, script: RegexScript, matc
     : replacement
 }
 
-// Compiled-regex cache: applyDisplayRegex recompiled every script's pattern
-// on every message render (per streaming chunk). Instances are shared, which
-// is safe here because all consumers match via String.replace or
-// collectRegexMatches — neither leaves lastIndex drifted.
-// Implementation lives in the import-free leaf module ./compile-regex so the
-// worker bundle can share it without pulling in this file's graph.
-import { compileRegex } from './compile-regex'
-export { compileRegex }
-
-// trim_strings removal can rejoin new occurrences each pass (e.g. 'bbcc' with
-// trim 'bc'), so the loop is bounded instead of a single replaceAll pass.
-const MAX_DISPLAY_TRIM_ITERATIONS = 32
+export function compileRegex(pattern: string, flags: string): RegExp | null {
+  try {
+    return new RegExp(pattern, flags)
+  } catch {
+    return null
+  }
+}
 
 function hasMacroSyntax(value: string): boolean {
   return value.includes('{{') || value.includes('<USER>') || value.includes('<BOT>') || value.includes('<CHAR>')
@@ -123,7 +118,7 @@ function resolvesReplacementMacros(mode: RegexMacroMode): boolean {
  * Mirrors the backend's macro resolution order, but only for the frontend's
  * lightweight display-macro set.
  */
-export function resolveRegexStringMacros(
+function resolveRegexStringMacros(
   value: string,
   macroCtx: DisplayMacroContext,
 ): string {
@@ -157,7 +152,7 @@ export function resolveRegexStringMacros(
   return resolved
 }
 
-export function resolveReplacementMacros(
+function resolveReplacementMacros(
   replaceString: string,
   mode: RegexMacroMode,
   macroCtx: DisplayMacroContext,
@@ -174,7 +169,7 @@ export function resolveReplacementMacros(
   return resolved
 }
 
-export function substituteRegexCaptures(
+function substituteRegexCaptures(
   template: string,
   fullMatch: string,
   groups: Array<string | undefined>,
@@ -203,7 +198,7 @@ export function substituteRegexCaptures(
   })
 }
 
-export function collectRegexMatches(
+function collectRegexMatches(
   input: string,
   regex: RegExp,
   pattern: string,
@@ -214,25 +209,20 @@ export function collectRegexMatches(
   const searchEnd = getRegexSearchEnd(input, pattern, flags, replacementTemplate)
   const searchable = searchEnd === input.length ? input : input.slice(0, searchEnd)
 
-  regex.lastIndex = 0
-  try {
-    searchable.replace(regex, (fullMatch, ...args) => {
-      const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
-      const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
-      args.pop() as string
-      const offset = args.pop() as number
-      const groups = args as Array<string | undefined>
-      matches.push({ fullMatch, groups, offset, namedGroups })
-      return fullMatch
-    })
-  } finally {
-    regex.lastIndex = 0
-  }
+  searchable.replace(regex, (fullMatch, ...args) => {
+    const hasNamedGroups = typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null
+    const namedGroups = hasNamedGroups ? args.pop() as Record<string, string | undefined> : undefined
+    args.pop() as string
+    const offset = args.pop() as number
+    const groups = args as Array<string | undefined>
+    matches.push({ fullMatch, groups, offset, namedGroups })
+    return fullMatch
+  })
 
   return matches
 }
 
-export function rebuildFromMatches(input: string, matches: DisplayRegexMatch[], replacements: string[]): string {
+function rebuildFromMatches(input: string, matches: DisplayRegexMatch[], replacements: string[]): string {
   let output = ''
   let lastIndex = 0
 
@@ -392,7 +382,7 @@ function applyDisplayActions(
   return { handled: false, content }
 }
 
-export interface ApplyDisplayRegexContext {
+interface ApplyDisplayRegexContext {
   isUser: boolean
   depth: number
   chatId?: string
@@ -415,7 +405,7 @@ interface SlowRegexReport {
   thresholdMs: number
 }
 
-export const DISPLAY_SLOW_REGEX_WARNING_MS = 5_000
+const DISPLAY_SLOW_REGEX_WARNING_MS = 5_000
 const REGEX_PERFORMANCE_ENGINE_VERSION = 2
 
 function getRegexPerformanceMetadata(script: RegexScript): RegexPerformanceMetadata | null {
@@ -450,7 +440,7 @@ export interface DisplayRegexBackendResult {
   cacheable?: boolean
 }
 
-export async function applyDisplayRegexOnBackend(
+async function applyDisplayRegexOnBackend(
   content: string,
   scripts: RegexScript[],
   context: ApplyDisplayRegexContext,
@@ -596,15 +586,8 @@ export function applyDisplayRegex(
 
       // Apply trim_strings
       for (const trim of script.trim_strings) {
-        if (trim === '') continue
-        let iterations = 0
         while (result.includes(trim)) {
           result = result.replaceAll(trim, '')
-          iterations += 1
-          if (iterations >= MAX_DISPLAY_TRIM_ITERATIONS) {
-            console.warn(`[display] trim loop hit ${MAX_DISPLAY_TRIM_ITERATIONS}-iteration cap, stopping early (script=${script.id} "${script.name}", trim=${JSON.stringify(trim)})`)
-            break
-          }
         }
       }
 
@@ -626,8 +609,8 @@ export function applyDisplayRegex(
           thresholdMs: recoveryThresholdMs,
         })
       }
-    } catch (err) {
-      console.warn(`[display] display regex script threw, skipping (script=${script.id} "${script.name}")`, err)
+    } catch {
+      // Skip invalid regex silently
     }
   }
 
@@ -648,51 +631,41 @@ function toSpindleDisplayContext(context: ApplyDisplayRegexContext): SpindleDisp
   }
 }
 
-// Spindle-owned chats bypass the regex pipeline entirely: when an extension
-// owns the chat surface its resolver applies the scripts on the main thread
-// and the worker/backend tiers must NEVER see that traffic (Task 3d).
-// Returns null when the chat is not owned so callers can continue with their
-// own pipeline.
-export async function applyDisplayRegexViaOwnedResolver(
-  content: string,
-  scripts: RegexScript[],
-  context: ApplyDisplayRegexContext,
-): Promise<DisplayRegexBackendResult | null> {
-  if (!context.chatId || !isDisplayChatOwned(context.chatId)) return null
-  const resolver = getDisplayResolverForChat(context.chatId)
-  if (resolver) {
-    try {
-      const local = await resolver.applyScripts({
-        content,
-        scripts,
-        context: toSpindleDisplayContext(context),
-        ...(context.resolvedFindPatterns ? { resolvedFindPatterns: mapToRecord(context.resolvedFindPatterns) } : {}),
-        ...(context.resolvedReplacements ? { resolvedReplacements: mapToRecord(context.resolvedReplacements) } : {}),
-      })
-      if (local) {
-        return {
-          result: local.content,
-          ...(local.touchedVars ? { touchedVars: new Set(local.touchedVars) } : {}),
-          ...(typeof local.cacheable === 'boolean' ? { cacheable: local.cacheable } : {}),
-        }
-      }
-      console.error(`[display] resolver.applyScripts returned null for owned chat=${context.chatId}; showing raw (no backend fallback)`)
-    } catch (err) {
-      console.error(`[display] resolver.applyScripts threw for owned chat=${context.chatId}; showing raw (no backend fallback)`, err)
-    }
-  }
-  return { result: content, cacheable: false }
-}
-
-// Main-thread reference loop handling every script feature (raw/after capture
-// substitution, match_actions, action decoration). Kept for deterministic
-// reference tests; production display traffic must use the isolated pipeline.
-export async function applyDisplayRegexLocalLoop(
+export async function applyDisplayRegexAsync(
   content: string,
   scripts: RegexScript[],
   context: ApplyDisplayRegexContext,
   resolveRawTemplates: (templates: Record<string, string>) => Promise<Record<string, string>>,
 ): Promise<DisplayRegexBackendResult> {
+  if (context.chatId && isDisplayChatOwned(context.chatId)) {
+    const resolver = getDisplayResolverForChat(context.chatId)
+    if (resolver) {
+      try {
+        const local = await resolver.applyScripts({
+          content,
+          scripts,
+          context: toSpindleDisplayContext(context),
+          ...(context.resolvedFindPatterns ? { resolvedFindPatterns: mapToRecord(context.resolvedFindPatterns) } : {}),
+          ...(context.resolvedReplacements ? { resolvedReplacements: mapToRecord(context.resolvedReplacements) } : {}),
+        })
+        if (local) {
+          return {
+            result: local.content,
+            ...(local.touchedVars ? { touchedVars: new Set(local.touchedVars) } : {}),
+            ...(typeof local.cacheable === 'boolean' ? { cacheable: local.cacheable } : {}),
+          }
+        }
+        console.error(`[display] resolver.applyScripts returned null for owned chat=${context.chatId}; showing raw (no backend fallback)`)
+      } catch (err) {
+        console.error(`[display] resolver.applyScripts threw for owned chat=${context.chatId}; showing raw (no backend fallback)`, err)
+      }
+    }
+    return { result: content, cacheable: false }
+  }
+
+  const backendResult = await applyDisplayRegexOnBackend(content, scripts, context)
+  if (backendResult !== null) return backendResult
+
   let result = content
 
   for (const script of scripts) {
@@ -808,38 +781,14 @@ export async function applyDisplayRegexLocalLoop(
       }
 
       for (const trim of script.trim_strings) {
-        if (trim === '') continue
-        let iterations = 0
         while (result.includes(trim)) {
           result = result.replaceAll(trim, '')
-          iterations += 1
-          if (iterations >= MAX_DISPLAY_TRIM_ITERATIONS) {
-            console.warn(`[display] trim loop hit ${MAX_DISPLAY_TRIM_ITERATIONS}-iteration cap, stopping early (script=${script.id} "${script.name}", trim=${JSON.stringify(trim)})`)
-            break
-          }
         }
       }
-    } catch (err) {
-      console.warn(`[display] display regex script threw, skipping (script=${script.id} "${script.name}")`, err)
+    } catch {
+      // Skip invalid regex silently
     }
   }
 
   return { result, cacheable: false }
-}
-
-// Legacy direct-call path retained for compatibility. It no longer falls back
-// to user-authored RegExp execution on the main thread when the backend fails.
-export async function applyDisplayRegexAsync(
-  content: string,
-  scripts: RegexScript[],
-  context: ApplyDisplayRegexContext,
-  _resolveRawTemplates: (templates: Record<string, string>) => Promise<Record<string, string>>,
-): Promise<DisplayRegexBackendResult> {
-  const owned = await applyDisplayRegexViaOwnedResolver(content, scripts, context)
-  if (owned) return owned
-
-  const backendResult = await applyDisplayRegexOnBackend(content, scripts, context)
-  if (backendResult !== null) return backendResult
-
-  return { result: content, cacheable: false }
 }

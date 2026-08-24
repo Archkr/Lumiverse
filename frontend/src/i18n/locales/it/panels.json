@@ -693,7 +693,6 @@
     "requestFailed": "Richiesta fallita",
     "slowDisplayTitle": "Script Regex lento",
     "slowDisplayTimedOut": "Il regex \"{{name}}\" è andato in timeout ed è stato segnalato in Script Regex.",
-        "quarantinedDisplay": "Il regex \"{{name}}\" è stato messo in quarantena dopo aver superato il tempo limite di esecuzione; viene ignorato finché non riattivato o modificato.",
     "slowDisplaySlow": "Il regex \"{{name}}\" è stato eseguito per {{duration}} ed è stato segnalato in Script Regex.",
     "timedOut": "Timeout durante l'esecuzione del regex",
     "slowDetected": "Regex lento rilevato ({{seconds}}s)",

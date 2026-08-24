@@ -13,9 +13,6 @@ describe('productivity host connections picker contract', () => {
     expect(source).toContain("content = <ConnectionsPicker open={state?.open !== false} onClose={() => emitCommand('close')} anchorElement={connectionsAnchor} />")
     expect(source.indexOf("case 'connections_picker.panel':")).toBeLessThan(source.indexOf('<ConnectionsPicker'))
     expect(source.indexOf("case 'connections_picker.launcher':")).toBeLessThan(source.indexOf("case 'connections_picker.panel':"))
-    const cases = [...source.matchAll(/case '([^']+)':\s*([\s\S]*?)(?=\n\s*case |\n\s*default:)/g)]
-    expect(cases.filter(([, , body]) => body.includes('<ConnectionsPicker')).map(([, id]) => id)).toEqual([
-      'connections_picker.panel',
-    ])
+    expect(source).not.toMatch(/case '(?!connections_picker\.panel)[^']+':[\s\S]{0,200}<ConnectionsPicker/)
   })
 })

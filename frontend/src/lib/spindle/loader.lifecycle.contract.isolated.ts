@@ -272,7 +272,6 @@ mock.module('./message-interceptors', () => ({
 mock.module('./display-resolver-registry', () => ({
   getDisplayOwnerIdentifier: () => null,
   getDisplayResolverForChat: () => null,
-  hasDisplayResolverRegisteredBefore: () => false,
   isDisplayChatOwned: () => false,
   registerDisplayResolver: () => {
     displayRegistrations += 1

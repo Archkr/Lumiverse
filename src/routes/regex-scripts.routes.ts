@@ -324,49 +324,6 @@ app.post("/:id/report-performance", async (c) => {
   return c.json(result.script);
 });
 
-// POST /:id/report-evidence — persist client-side execution evidence
-// (last_ok_ms/last_ok_at/quarantined) used by the display-regex tier rules
-export type RegexEvidenceReportBody = {
-  last_ok_ms?: number;
-  last_ok_at?: number;
-  quarantined?: boolean;
-};
-
-function parseEvidenceBody(body: any): RegexEvidenceReportBody | null {
-  const patch: RegexEvidenceReportBody = {};
-  if (body?.last_ok_ms !== undefined) {
-    const value = Number(body.last_ok_ms);
-    if (!Number.isFinite(value) || value < 0) return null;
-    patch.last_ok_ms = value;
-  }
-  if (body?.last_ok_at !== undefined) {
-    const value = Number(body.last_ok_at);
-    if (!Number.isFinite(value) || value < 0) return null;
-    patch.last_ok_at = value;
-  }
-  if (body?.quarantined !== undefined) {
-    patch.quarantined = !!body.quarantined;
-  }
-  if (patch.last_ok_ms === undefined && patch.last_ok_at === undefined && patch.quarantined === undefined) {
-    return null;
-  }
-  return patch;
-}
-
-app.post("/:id/report-evidence", async (c) => {
-  const userId = c.get("userId");
-  const body = await c.req.json().catch(() => ({}));
-  const patch = parseEvidenceBody(body);
-  if (!patch) return c.json({ error: "evidence patch requires a valid last_ok_ms, last_ok_at, or quarantined field" }, 400);
-  const script = svc.reportRegexScriptEvidence(userId, c.req.param("id"), {
-    lastOkMs: patch.last_ok_ms,
-    lastOkAt: patch.last_ok_at,
-    quarantined: patch.quarantined,
-  });
-  if (!script) return c.json({ error: "Not found" }, 404);
-  return c.json(script);
-});
-
 // PUT /:id/toggle — quick enable/disable
 app.put("/:id/toggle", async (c) => {
   const userId = c.get("userId");

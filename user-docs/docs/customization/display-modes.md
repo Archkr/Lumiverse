@@ -40,21 +40,6 @@ Both modes share the same width control. The chat content area can be constraine
 
 ---
 
-## Long Messages
-
-Very long replies can be collapsed to a comfortable height so they don't push the rest of the conversation off screen. Configure this under **Settings → Display → Long Messages**.
-
-| Setting | Description |
-|---------|-------------|
-| **Collapse long messages** | Turns collapsing on or off. Applies in every chat display mode, including while a reply is generating. |
-| **COLLAPSED HEIGHT** | How tall a collapsed message may get: **Compact** (300 px), **Comfortable** (500 px), **Tall** (800 px), or **Custom**. |
-| **CUSTOM HEIGHT (PX)** | With **Custom** selected, sets the maximum height (100–4000 px). |
-| **COLLAPSE AT DEPTH** | Only messages at this depth or older can collapse. Depth 0 is the newest message; with the default of 0, every assistant message is eligible. |
-
-Collapsing only affects the character's messages — your own messages are never collapsed — and only kicks in when the content actually exceeds the height limit. A collapsed message shows a **Read more / Show less** pill at its bottom edge, and each message's expanded state is remembered individually per chat.
-
----
-
 ## Configuring
 
 Open **Settings → Chat** to choose your display mode, bubble options, and width preference. Changes apply immediately to the active chat.

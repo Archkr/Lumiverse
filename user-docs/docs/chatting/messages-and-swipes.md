@@ -30,8 +30,6 @@ The editor gives user-authored messages two ways to finish:
 
 **Edit and Send** is unavailable while another response is streaming. You can hide this optional action under **Settings → Productivity → Optional surfaces & navigation**.
 
-Queued **Edit and Send** generations are durable: if the server restarts or crashes while a queued generation is pending, it survives the restart and is automatically retried rather than silently lost.
-
 Editing a character's message also updates the current swipe — so the content stays consistent.
 
 ---

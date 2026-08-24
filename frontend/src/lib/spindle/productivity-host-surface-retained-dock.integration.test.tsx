@@ -10,10 +10,6 @@ mock.module('@/i18n', () => ({
   default: { t: (key: string) => key, language: 'en' },
   changeUiLanguage: async () => undefined,
 }))
-mock.module('@/lib/cssModuleRegistry', () => ({
-  CSS_MODULE_REGISTRY: [],
-  generateSelector: () => '',
-}))
 mock.module('@/components/quick-toolbar/QuickToolbar', () => ({
   QuickToolbar: () => createElement('nav', { 'data-component': 'QuickToolbar', 'data-toolbar-action-scroller': 'ready' }, 'toolbar'),
 }))

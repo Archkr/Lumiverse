@@ -256,7 +256,7 @@ export default function ProductivitySettings() {
         update(key, { [parent]: { ...parentValue, [child]: { ...parentValue[child], [leaf]: color } } })
       } else update(key, { [field]: color })
     }
-    return <Field id={id} label={label}><input id={id} type="color" value={value} onInput={(event) => onChange(normalizeColor(event.currentTarget.value, fallback))} aria-label={label} /></Field>
+    return <Field id={id} label={label}><input id={id} type="color" value={value} onChange={(event) => onChange(normalizeColor(event.target.value, fallback))} aria-label={label} /></Field>
   }
 
   const quick = getBlob('quickToolbarSettings')

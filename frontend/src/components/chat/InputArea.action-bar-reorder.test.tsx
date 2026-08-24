@@ -198,7 +198,7 @@ describe('InputArea action bar live reorder', () => {
   test('reload reads the reordered composer blob and modal reorder still persists', async () => {
     saveComposerActionBar({
       order: ['home', 'continue', 'regen'],
-      hidden: ['selectMessages', 'oneliner', 'persona', 'connections', 'altFields', 'addons', 'guides', 'quickReplies', 'promptVariables', 'tools', 'extras'],
+      hidden: ['selectMessages', 'oneliner', 'persona', 'connections', 'altFields', 'addons', 'guides', 'quickReplies', 'tools', 'extras'],
     })
     const host = document.createElement('div')
     document.body.append(host)
@@ -217,7 +217,7 @@ describe('InputArea action bar live reorder', () => {
 
     saveComposerActionBar({
       order: ['regen', 'home', 'continue'],
-      hidden: ['selectMessages', 'oneliner', 'persona', 'connections', 'altFields', 'addons', 'guides', 'quickReplies', 'promptVariables', 'tools', 'extras'],
+      hidden: ['selectMessages', 'oneliner', 'persona', 'connections', 'altFields', 'addons', 'guides', 'quickReplies', 'tools', 'extras'],
     })
     const host2 = document.createElement('div')
     document.body.append(host2)

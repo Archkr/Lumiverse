@@ -187,16 +187,9 @@ Because prompt variables are placed in the local variable scope *before* your bl
 
 ## The Prompt Variables Modal (For Users)
 
-When the active preset contains Prompt Variables, a **Sliders icon** <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><line x1="4" x2="20" y1="21" y2="14"/><line x1="4" x2="20" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="8" x2="8" y1="12" y2="3"/><line x1="16" x2="16" y1="21" y2="16"/><line x1="20" x2="20" y1="16" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="6" x2="10" y1="10" y2="10"/><line x1="14" x2="18" y1="16" y2="16"/></svg> appears in the composer's input action bar. Clicking it opens the **Prompt Variables Modal**. The button can be reordered or hidden like any other composer icon via **Customize composer**, and the same **Prompt Variables** action is available through the Quick Toolbar / command palette.
+When a user selects a preset that contains Prompt Variables, they will see a **Sliders icon** <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><line x1="4" x2="20" y1="21" y2="14"/><line x1="4" x2="20" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="8" x2="8" y1="12" y2="3"/><line x1="16" x2="16" y1="21" y2="16"/><line x1="20" x2="20" y1="16" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="6" x2="10" y1="10" y2="10"/><line x1="14" x2="18" y1="16" y2="16"/></svg> available in the UI. 
 
-The control only appears when it can do something:
-
-- A Loom preset must be active, and that preset must declare at least one prompt variable.
-- If no preset qualifies, the button isn't rendered at all; the command-palette action is disabled instead.
-
-### Which values you're editing
-
-The modal always shows the variables of the currently selected preset. If your preset configuration comes from an active [profile binding](preset-profiles.md) (chat, persona, character, or connection), saving writes the values to that binding; otherwise they're saved on the preset itself. Switching to a different preset (or a chat whose configuration comes from another source) closes the modal automatically, so values are never saved to the wrong place.
+Clicking this opens the **Prompt Variables Modal**.
 
 ### Intelligent Filtering
 

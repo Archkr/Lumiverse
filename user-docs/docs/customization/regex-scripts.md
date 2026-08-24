@@ -182,20 +182,6 @@ The first example expects AI output shaped like this:
 </scene>
 ```
 
-### Queueing a choice to the composer
-
-A **Send** action doesn't have to send immediately. Use any of these gestures on a rendered action button:
-
-| Gesture | Platforms |
-|---------|-----------|
-| **Ctrl+click** (or **Cmd+click** on macOS) | Desktop |
-| **Right-click** | Desktop |
-| **Touch or pen long-press** | Touch devices |
-
-Queuing appends the action's content to the composer as an editable draft instead of sending it — nothing is claimed server-side, so the choice stays available until you actually send the drafted message. A toast confirms it: *"Queued to input — edit and send when ready."*
-
-Multi-select options and **Append** / **Effects only** actions can't be queued this way; the gestures apply to plain **Send** actions.
-
 The multi-select demo expects:
 
 ```xml
@@ -232,7 +218,6 @@ Import either JSON file through **Regex Scripts → Import**.
 | **Trim Strings** | Additional strings to strip from matches |
 | **Run on Edit** | Re-run when you edit a message |
 | **Substitute Macros** | Replace macros in the **find** and **replace** strings. Modes: `none` (no substitution), `raw` (substitute before matching, capture groups see the raw output), `escaped` (substitute and regex-escape the result so special characters in macro output don't break the pattern), `after` (substitute *after* the match runs — useful when you want capture groups to feed into a macro in the replacement string) |
-| **Sort Order** | Numeric position used when scripts in the same scope tier run. Lower values run first; drag-reordering the script list rewrites these values for you. |
 | **Folder** | Organizational grouping |
 
 ---

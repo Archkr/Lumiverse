@@ -26,11 +26,6 @@ Once a connection exists, open **Settings → Voice & Speech**, turn on **Enable
 
 The built-in providers are listed below. Enabled [Spindle extensions](../extensions/index.md#extension-provided-ai-providers) can also register TTS providers; those appear in Lumiverse's voice provider and connection selectors after an operator approves the extension's privileged provider permission.
 
-Extension-registered providers show up live — as soon as the extension registers them over WebSocket, they appear in the provider pickers without reloading the page. If an extension provider can't be reached, it is shown with a status badge: **unavailable** (the endpoint could not be reached or rejected the request) or **timeout** (it did not respond in time).
-
-!!! note "Private connections are per-user"
-    On multi-user instances, TTS connections are scoped to the account that created them. Another user can never invoke your private connection through their chats or extensions. System-provided connections remain usable by everyone.
-
 ### OpenAI TTS
 
 - **API key:** Required.

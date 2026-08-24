@@ -1,9 +1,4 @@
 import { Puzzle } from 'lucide-react'
-import type {
-  SpindleSettingsTabHandle as PublishedSettingsTabHandle,
-  SpindleSettingsTabOptions as PublishedSettingsTabOptions,
-  SpindleSettingsTabSection as PublishedSettingsTabSection,
-} from 'lumiverse-spindle-types'
 import type { SettingsSection, SettingsTabEntry } from '@/lib/settings-tab-registry'
 
 const MAX_SETTINGS_TABS_PER_EXTENSION = 4
@@ -14,8 +9,31 @@ const MAX_KEYWORDS_PER_REGISTRATION = 32
 const MAX_SECTIONS_PER_REGISTRATION = 64
 const MAX_SECTION_KEYWORDS = 16
 
-export type SpindleSettingsTabSection = PublishedSettingsTabSection
-export type SpindleSettingsTabOptions = PublishedSettingsTabOptions
+export interface SpindleSettingsTabSection {
+  readonly key: string
+  readonly titleKey: string
+  readonly titleFallback: string
+  readonly keywords: readonly string[]
+}
+
+export interface SpindleSettingsTabOptions {
+  /** A shared tab id may belong to core or to another extension. */
+  readonly id: string
+  /** Metadata is ignored when a core tab owns this id. */
+  readonly title?: string
+  readonly shortName?: string
+  readonly iconSvg?: string
+  readonly description?: string
+  readonly keywords?: readonly string[]
+  readonly sections?: readonly SpindleSettingsTabSection[]
+  /**
+   * Relative tab position: 'top', 'bottom', 'after-display', 'before-chat',
+   * 'after-<tabId>', 'before-<tabId>', or any specific tab identifier.
+   */
+  readonly position?: string
+  /** Body order among registrants sharing a tab. Defaults to 100. */
+  readonly order?: number
+}
 
 export interface ExtensionSettingsTabRegistrationInput {
   readonly registrationId: string
@@ -42,7 +60,6 @@ export interface ExtensionSettingsTabRegistration {
 export interface SettingsTabRegistrationHandle {
   readonly registrationId: string
   readonly tabId: string
-  update(options?: Partial<SpindleSettingsTabOptions>): void
   setTitle(title: string): void
   activate(): void
   destroy(): void
@@ -50,7 +67,7 @@ export interface SettingsTabRegistrationHandle {
 }
 
 /** Public placement handle returned by ctx.ui.registerSettingsTab. */
-export interface SpindleSettingsTabHandle extends SettingsTabRegistrationHandle, PublishedSettingsTabHandle {
+export interface SpindleSettingsTabHandle extends SettingsTabRegistrationHandle {
   readonly root: HTMLElement
 }
 
@@ -263,23 +280,6 @@ export function registerExtensionSettingsTab(
   return {
     registrationId,
     tabId,
-    update(next: Partial<SpindleSettingsTabOptions> = {}): void {
-      if (destroyed) return
-      const current = registrationsById.get(registrationId)
-      if (!current) return
-      if (next.id !== undefined && requireNonEmpty(next.id, 'ID') !== tabId) {
-        throw new Error('SETTINGS_TAB_ID_IMMUTABLE')
-      }
-      if (next.title !== undefined) current.title = requireNonEmpty(next.title, 'TITLE')
-      if (next.shortName !== undefined) current.shortName = optionalString(next.shortName, 64)
-      if (next.iconSvg !== undefined) current.iconSvg = optionalString(next.iconSvg, 8_192)
-      if (next.description !== undefined) current.description = optionalString(next.description)
-      if (next.keywords !== undefined) current.keywords = stringList(next.keywords, MAX_KEYWORDS_PER_REGISTRATION, 100)
-      if (next.sections !== undefined) current.sections = normalizeSections(next.sections)
-      if (next.position !== undefined) current.position = optionalString(next.position, 100)
-      if (next.order !== undefined) current.order = Number.isFinite(next.order) ? next.order : 100
-      notifyRegistryListeners()
-    },
     setTitle(title: string): void {
       const normalized = requireNonEmpty(title, 'TITLE')
       if (destroyed) return

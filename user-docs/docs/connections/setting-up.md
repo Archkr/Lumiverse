@@ -84,8 +84,6 @@ You can create as many connections as you want. Common setups:
 
 Switch between connections by setting a different one as **default**, or select a specific connection when starting a generation.
 
-Whichever connection you have selected stays selected: Lumiverse remembers your active connection profile across app restarts and page reloads, so you pick up where you left off.
-
 ---
 
 ## Binding Reasoning Settings
