@@ -38,7 +38,6 @@ import {
   EMBEDDING_ERROR_CODES,
   buildEmbeddingConfigUpdate,
   isUsableProfileId,
-  projectConnectionProfiles,
   redactEmbeddingErrorMessage,
   selectFallbackChain,
   selectedEmbeddingProfileIds,
@@ -66,7 +65,7 @@ import McpServerSettings from '@/components/settings/mcp-servers/McpServerSettin
 import DataPortability from '@/components/settings/DataPortability'
 import StreamDeckSettings from '@/components/settings/StreamDeckSettings'
 import CollapsibleSection from '@/components/shared/CollapsibleSection'
-import SidecarConnectionPicker from '@/components/shared/SidecarConnectionPicker'
+import EmbeddingConnectionPicker from '@/components/shared/EmbeddingConnectionPicker'
 import pickerStyles from '@/components/shared/SidecarConnectionPicker.module.css'
 import ModelCombobox from '@/components/panels/connection-manager/ModelCombobox'
 import { getVisibleSettingsTabs, sectionAnchorId, SETTINGS_TABS } from '@/lib/settings-tab-registry'
@@ -2113,7 +2112,6 @@ function embeddingErrorCode(err: { body?: { code?: unknown }; code?: unknown } |
 
 function EmbeddingsSettings() {
   const { t } = useTranslation('settings')
-  const connections = useStore((s) => s.profiles)
   const showEmbeddingFallbackUi = useStore((s) => readProductivityFlag(s, 'showEmbeddingFallbackUi'))
 
   const [loading, setLoading] = useState(true)
@@ -2155,6 +2153,12 @@ function EmbeddingsSettings() {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  useEffect(() => {
+    const reloadConnections = () => { load() }
+    window.addEventListener('lumiverse:embedding-connections-changed', reloadConnections)
+    return () => window.removeEventListener('lumiverse:embedding-connections-changed', reloadConnections)
   }, [load])
 
   useEffect(() => {
@@ -2207,6 +2211,8 @@ function EmbeddingsSettings() {
   const PROVIDER_DEFAULTS: Record<string, { api_url: string; model: string }> = {
     'openai-compatible': { api_url: 'https://api.openai.com/v1/embeddings', model: 'text-embedding-3-small' },
     openai: { api_url: 'https://api.openai.com/v1/embeddings', model: 'text-embedding-3-small' },
+    mistral: { api_url: 'https://api.mistral.ai/v1/embeddings', model: 'mistral-embed' },
+    cohere: { api_url: 'https://api.cohere.com/v2/embed', model: 'embed-v4.0' },
     openrouter: { api_url: 'https://openrouter.ai/api/v1/embeddings', model: 'text-embedding-3-small' },
     electronhub: { api_url: 'https://api.electronhub.top/v1/embeddings', model: 'text-embedding-3-small' },
     bananabread: { api_url: 'http://localhost:8008/v1/embeddings', model: 'mixedbread-ai/mxbai-embed-large-v1' },
@@ -2248,18 +2254,15 @@ function EmbeddingsSettings() {
         primaryProfileId: nextId,
         fallbackProfileIds: (current.fallbackProfileIds ?? []).filter((fallbackId) => fallbackId !== nextId && isUsableProfileId(fallbackId)),
       }
-      const connection = nextId ? connections.find((entry) => entry.id === nextId) : undefined
+      const connection = nextId ? current.connectionProfiles?.find((entry) => entry.id === nextId) : undefined
       if (!connection) return next
       if (EMBEDDING_LEGACY_PROVIDERS.includes(connection.provider as EmbeddingConfig['provider'])) {
         next.provider = connection.provider as EmbeddingConfig['provider']
       }
       if (connection.model) next.model = connection.model
       if (connection.api_url) next.api_url = connection.api_url
-      const metaDims = connection.metadata && typeof connection.metadata === 'object'
-        ? connection.metadata.dimensions
-        : undefined
-      if (typeof metaDims === 'number' && Number.isFinite(metaDims) && metaDims > 0) {
-        next.dimensions = Math.floor(metaDims)
+      if (typeof connection.dimensions === 'number' && Number.isFinite(connection.dimensions) && connection.dimensions > 0) {
+        next.dimensions = Math.floor(connection.dimensions)
       }
       return next
     })
@@ -2304,12 +2307,8 @@ function EmbeddingsSettings() {
     if (!isUsableProfileId(id)) return
     setCfg((current) => {
       if (!current) return current
-      const selectedIds = selectedEmbeddingProfileIds(current)
-      const connectionProfiles = projectConnectionProfiles(
-        connections,
-        selectedIds,
-        current.connectionProfiles,
-      ).map((profile) => (profile.id === id ? { ...profile, model } : profile))
+      const connectionProfiles = (current.connectionProfiles ?? [])
+        .map((profile) => (profile.id === id ? { ...profile, model } : profile))
       return { ...current, connectionProfiles }
     })
   }
@@ -2318,12 +2317,8 @@ function EmbeddingsSettings() {
     if (!isUsableProfileId(id)) return
     setCfg((current) => {
       if (!current) return current
-      const selectedIds = selectedEmbeddingProfileIds(current)
-      const connectionProfiles = projectConnectionProfiles(
-        connections,
-        selectedIds,
-        current.connectionProfiles,
-      ).map((profile) => (profile.id === id ? { ...profile, dimensions: value } : profile))
+      const connectionProfiles = (current.connectionProfiles ?? [])
+        .map((profile) => (profile.id === id ? { ...profile, dimensions: value } : profile))
       return { ...current, connectionProfiles }
     })
   }
@@ -2361,11 +2356,10 @@ function EmbeddingsSettings() {
       let payload: Parameters<typeof embeddingsApi.updateConfig>[0]
       if (showEmbeddingFallbackUi) {
         const selectedIds = selectedEmbeddingProfileIds(cfg)
-        const connectionProfiles = projectConnectionProfiles(
-          connections,
-          selectedIds,
-          cfg.connectionProfiles,
-        ).map((profile) => {
+        // Connections owns the complete dedicated embedding-profile list.
+        // Settings only chooses the active chain and may override its models;
+        // saving here must never discard unselected embedding connections.
+        const connectionProfiles = (cfg.connectionProfiles ?? []).map((profile) => {
           if (profile.id === cfg.primaryProfileId) {
             return {
               ...profile,
@@ -2373,13 +2367,7 @@ function EmbeddingsSettings() {
               ...(cfg.model ? { model: cfg.model } : {}),
             }
           }
-          const previous = cfg.connectionProfiles?.find((entry) => entry.id === profile.id)
-          if (!previous) return profile
-          return {
-            ...profile,
-            ...(previous.model ? { model: previous.model } : {}),
-            dimensions: previous.dimensions ?? null,
-          }
+          return profile
         })
         const primary = connectionProfiles.find((profile) => profile.id === cfg.primaryProfileId) ?? connectionProfiles[0]
         payload = buildEmbeddingConfigUpdate({
@@ -2490,7 +2478,7 @@ function EmbeddingsSettings() {
       label: t('embeddings.checkApiKey'),
       description: t('embeddings.checkApiKeyDesc'),
       complete: showEmbeddingFallbackUi
-        ? (cfg.has_api_key || !!connections.find((entry) => entry.id === cfg.primaryProfileId)?.has_api_key)
+        ? (cfg.has_api_key || !!cfg.connectionProfiles?.find((entry) => entry.id === cfg.primaryProfileId)?.hasSecret)
         : cfg.has_api_key,
     },
     {
@@ -2513,14 +2501,9 @@ function EmbeddingsSettings() {
   const defaultApiUrl = PROVIDER_DEFAULTS[cfg.provider]?.api_url || cfg.api_url
   const primaryId = isUsableProfileId(cfg.primaryProfileId) ? cfg.primaryProfileId : null
   const fallbackIds = (cfg.fallbackProfileIds ?? []).filter((id) => isUsableProfileId(id) && id !== primaryId)
-  const projectedForChain = projectConnectionProfiles(
-    connections,
-    selectedEmbeddingProfileIds(cfg),
-    cfg.connectionProfiles,
-  ).map((profile) => {
+  const projectedForChain = (cfg.connectionProfiles ?? []).map((profile) => {
     if (profile.id === primaryId && cfg.model) return { ...profile, model: cfg.model }
-    const previous = cfg.connectionProfiles?.find((entry) => entry.id === profile.id)
-    return previous?.model ? { ...profile, model: previous.model } : profile
+    return profile
   })
   const chain = selectFallbackChain({
     ...cfg,
@@ -2639,6 +2622,8 @@ function EmbeddingsSettings() {
                   >
                     <option value="openai-compatible">OpenAI Compatible</option>
                     <option value="openai">OpenAI</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="cohere">Cohere</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="electronhub">ElectronHub</option>
                     <option value="bananabread">BananaBread</option>
@@ -2724,83 +2709,17 @@ function EmbeddingsSettings() {
           ) : (
             /* ── Connection Profiles & Fallbacks Mode (when showEmbeddingFallbackUi is true) ── */
             <>
-              <SidecarConnectionPicker
+              <EmbeddingConnectionPicker
                 label={t('embeddings.connection')}
                 ariaLabel={t('embeddings.connection')}
+                profiles={cfg.connectionProfiles ?? []}
                 connectionProfileId={primaryId ?? null}
                 model={cfg.model || null}
                 onConnectionChange={(id) => applyPrimaryConnection(id || '')}
                 onModelChange={(model) => update({ model: model || '' })}
-                hint={t('embeddings.modelBrowseHint', { defaultValue: 'Select a connection profile or leave blank for direct custom configuration.' })}
-                placeholder={t('embeddings.connectionNone', { defaultValue: 'None (direct custom config)' })}
                 disabled={inherited}
                 testId="embeddings-primary-connection"
               />
-
-              {!primaryId && (
-                <>
-                  <div className={styles.settingsGridTwo}>
-                    <div className={styles.field}>
-                      <label className={styles.fieldLabel}>{t('embeddings.provider')}</label>
-                      <select
-                        className={styles.select}
-                        value={cfg.provider}
-                        onChange={(e) => update({ provider: e.target.value as EmbeddingConfig['provider'] })}
-                        disabled={inherited}
-                      >
-                        <option value="openai-compatible">OpenAI Compatible</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="electronhub">ElectronHub</option>
-                        <option value="bananabread">BananaBread</option>
-                        <option value="nanogpt">Nano-GPT</option>
-                      </select>
-                    </div>
-
-                    <div className={styles.field}>
-                      <label className={styles.fieldLabel}>{t('embeddings.model')}</label>
-                      <ModelCombobox
-                        value={cfg.model}
-                        onChange={(value) => update({ model: value })}
-                        models={models}
-                        modelLabels={modelLabels}
-                        loading={modelsLoading}
-                        onRefresh={fetchModels}
-                        autoRefreshOnFocus
-                        refreshKey={`${cfg.provider}:${cfg.api_url}`}
-                        placeholder={t('embeddings.modelPlaceholder')}
-                        emptyMessage={t('embeddings.noModels')}
-                        browseHint={t('embeddings.browseHint')}
-                        disabled={inherited}
-                      />
-                    </div>
-                  </div>
-
-                  <div className={styles.settingsGridTwo}>
-                    {canEditApiUrl ? (
-                      <div className={styles.field}>
-                        <label className={styles.fieldLabel}>{t('embeddings.apiUrl')}</label>
-                        <input className={styles.select} value={cfg.api_url} onChange={(e) => update({ api_url: e.target.value })} disabled={inherited} />
-                        <span className={styles.helperText}>{t('embeddings.apiUrlPathHint')}</span>
-                        {cfg.provider === 'bananabread' && (
-                          <span className={styles.helperText}>{t('embeddings.bananabreadHint')}</span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className={styles.field}>
-                        <label className={styles.fieldLabel}>{t('embeddings.apiEndpoint')}</label>
-                        <span className={styles.helperText}>{t('embeddings.apiEndpointDefault', { url: defaultApiUrl })}</span>
-                      </div>
-                    )}
-                    {!inherited && (
-                      <div className={styles.field}>
-                        <label className={styles.fieldLabel}>{cfg.has_api_key ? t('embeddings.apiKeyConfigured') : t('embeddings.apiKeyNotConfigured')}</label>
-                        <input className={styles.select} type="password" value={apiKey} placeholder={t('embeddings.apiKeyPlaceholder')} onChange={(e) => setApiKey(e.target.value)} />
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
 
               <div className={styles.field}>
                 <label className={styles.fieldLabel}>{t('embeddings.dimensionsOptional')}</label>
@@ -2840,27 +2759,24 @@ function EmbeddingsSettings() {
             Fallback chain: {chain.length > 0 ? chain.map((profile) => profile.model || profile.provider || profile.id).join(' → ') : 'none'}
           </p>
           {fallbackIds.map((id, fallbackIndex) => {
-            const connection = connections.find((entry) => entry.id === id)
             const snapshot = projectedForChain.find((profile) => profile.id === id)
-            const modelValue = snapshot?.model || connection?.model || ''
+            const modelValue = snapshot?.model || ''
             return (
               <div
                 key={id}
                 data-embedding-profile={id}
-                data-has-secret={connection?.has_api_key || snapshot?.hasSecret ? 'true' : 'false'}
+                data-has-secret={snapshot?.hasSecret ? 'true' : 'false'}
               >
-                <SidecarConnectionPicker
+                <EmbeddingConnectionPicker
                   label={t('embeddings.connection')}
                   ariaLabel={t('embeddings.fallbackConnection', { defaultValue: 'Fallback {{n}}', n: fallbackIndex + 1 })}
+                  profiles={cfg.connectionProfiles ?? []}
                   connectionProfileId={id}
                   model={modelValue || null}
                   onConnectionChange={(nextId) => assignFallback(id, nextId || '')}
                   onModelChange={(model) => updateFallbackModel(id, model || '')}
-                  hint={t('embeddings.modelBrowseHint', { defaultValue: 'Select a connection profile or leave blank for direct custom configuration.' })}
-                  placeholder={t('embeddings.connectionNone', { defaultValue: 'None (direct custom config)' })}
                   disabled={inherited}
                   onRemove={inherited ? undefined : () => removeFallback(id)}
-                  removeLabel="Remove fallback"
                   testId={`embeddings-fallback-${id}`}
                 />
                 <div className={styles.field}>
@@ -2885,18 +2801,16 @@ function EmbeddingsSettings() {
           })}
           {draftFallbacks.map((draft) => (
             <div key={draft.key} data-embedding-fallback-draft={draft.key}>
-              <SidecarConnectionPicker
+              <EmbeddingConnectionPicker
                 label={t('embeddings.connection')}
                 ariaLabel="Add fallback"
+                profiles={(cfg.connectionProfiles ?? []).filter((profile) => profile.id !== primaryId && !fallbackIds.includes(profile.id))}
                 connectionProfileId={null}
                 model={null}
                 onConnectionChange={(nextId) => assignFallback(null, nextId || '', draft.key)}
                 onModelChange={() => undefined}
-                hint={t('embeddings.modelBrowseHint', { defaultValue: 'Select a connection profile or leave blank for direct custom configuration.' })}
-                placeholder={t('embeddings.connectionNone', { defaultValue: 'None (direct custom config)' })}
                 disabled={inherited}
                 onRemove={inherited ? undefined : () => setDraftFallbacks((current) => current.filter((row) => row.key !== draft.key))}
-                removeLabel="Remove fallback"
               />
             </div>
           ))}

@@ -54,7 +54,7 @@ The drawer hosts every workspace panel as a tab. You can reorder them with drag-
 | **Reasoning** | Configure chain-of-thought, reasoning effort, prompt prefix/suffix, and start-reply-with |
 | **Loom** | Configure narrative structure, story beats, pacing, Sovereign Hand, and director cues |
 | **Composition** | Pick which Lumia/Loom content is active, set context filters, and tune prompt assembly |
-| **Connections** | Manage LLM, Image, Speech-to-Text, and Text-to-Speech API connections |
+| **Connections** | Manage LLM, Embedding Model, Image, Speech-to-Text, and Text-to-Speech API connections |
 | **Council** | Configure the Lumia Council, tool functions, and sidecar agents |
 | **Summary** | Configure context summarization and truncation |
 

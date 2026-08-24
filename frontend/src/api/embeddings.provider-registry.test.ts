@@ -25,6 +25,12 @@ afterEach(() => {
 })
 
 describe('frontend embeddings provider registry', () => {
+  test('includes native Mistral and Cohere embedding drivers', () => {
+    const ids = listEmbeddingDrivers().map((driver) => driver.id)
+    expect(ids).toContain('mistral')
+    expect(ids).toContain('cohere')
+  })
+
   test('emits scoped provider_changed add remove and change after registry commit', () => {
     expect(applyEmbeddingProviderRegistryEvent(event({
       action: 'add',

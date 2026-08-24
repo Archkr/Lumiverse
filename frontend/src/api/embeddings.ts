@@ -19,6 +19,7 @@ export const EMBEDDING_ERROR_CODES = {
 
 export interface EmbeddingConnectionProfile {
   id: string
+  name?: string
   provider: string
   model: string
   api_url: string
@@ -226,10 +227,13 @@ export interface EmbeddingDriverOption {
 const BUILTIN_EMBEDDING_DRIVERS: EmbeddingDriverOption[] = [
   'openai-compatible',
   'openai',
+  'mistral',
+  'cohere',
   'openrouter',
   'electronhub',
   'bananabread',
   'nanogpt',
+  'nvidia-nim',
   'google_vertex',
 ].map((id) => ({ id, kind: 'embedding', name: id, source: 'builtin', status: 'ok' }))
 
@@ -327,6 +331,14 @@ export const embeddingsApi = {
       applied_dimensions: number
       config: EmbeddingConfigWithProfiles
     }>('/embeddings/test', { text }, LONG)
+  },
+
+  testConnection(id: string, text?: string) {
+    return post<{ success: boolean; message: string; dimension?: number; provider?: string }>(
+      `/embeddings/connections/${encodeURIComponent(id)}/test`,
+      { text },
+      LONG,
+    )
   },
 
   reindexWorldBook(bookId: string) {

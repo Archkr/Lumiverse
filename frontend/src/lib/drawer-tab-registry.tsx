@@ -19,6 +19,7 @@ import CharacterProfile from '@/components/panels/CharacterProfile'
 import CharacterBrowser from '@/components/panels/CharacterBrowser'
 import PersonaManager from '@/components/panels/PersonaManager'
 import ConnectionManager from '@/components/panels/ConnectionManager'
+import EmbeddingConnectionManager from '@/components/panels/embedding-connections/EmbeddingConnectionManager'
 import ImageGenConnectionManager from '@/components/panels/image-gen-connections/ImageGenConnectionManager'
 import STTConnectionManager from '@/components/panels/stt-connections/STTConnectionManager'
 import TTSConnectionManager from '@/components/panels/tts-connections/TTSConnectionManager'
@@ -188,8 +189,12 @@ export const DRAWER_TABS: DrawerTabEntry[] = [
     tabHeaderTitle: 'Connections',
     keywords: ['api', 'provider', 'key', 'openai', 'anthropic', 'model', 'endpoint', 'google', 'vertex', 'claude', 'gemini', 'openrouter', 'deepseek', 'url', 'secret'],
     mount: (root) => mountReactComponent(root, (
-      <div className="connections-stack">
+      <div className="connections-stack" style={{ paddingBottom: 16 }}>
         <ConnectionManager />
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--lumiverse-border)' }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--lumiverse-text-secondary)' }}>{i18n.t('connections.embeddings', { ns: 'panels' })}</h3>
+          <EmbeddingConnectionManager />
+        </div>
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--lumiverse-border)' }}>
           <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--lumiverse-text-secondary)' }}>{i18n.t('connections.imageGeneration', { ns: 'panels' })}</h3>
           <ImageGenConnectionManager />

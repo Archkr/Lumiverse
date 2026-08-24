@@ -351,6 +351,7 @@ export interface ConnectionModelsResult {
 }
 
 export interface EmbeddingModelsPreviewInput {
+  profile_id?: string
   provider?: EmbeddingConfig['provider']
   api_url?: string
   api_key?: string
@@ -1265,7 +1266,7 @@ export interface WorldBookEntryBulkActionResult {
   target_book_id?: string;
 }
 
-export type EmbeddingProvider = 'openai-compatible' | 'openai' | 'openrouter' | 'electronhub' | 'bananabread' | 'nanogpt' | 'nvidia-nim' | 'google_vertex';
+export type EmbeddingProvider = 'openai-compatible' | 'openai' | 'mistral' | 'cohere' | 'openrouter' | 'electronhub' | 'bananabread' | 'nanogpt' | 'nvidia-nim' | 'google_vertex';
 
 export interface EmbeddingProviderProfile {
   api_url: string;

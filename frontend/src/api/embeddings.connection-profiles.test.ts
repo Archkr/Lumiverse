@@ -115,6 +115,21 @@ describe('embeddings API connection profiles', () => {
     expect(payload.dimensions).toBe(1536)
   })
 
+  test('tests and browses models through dedicated embedding connection ids', async () => {
+    post.mockResolvedValueOnce({ success: true, message: 'Connection successful', dimension: 1536 })
+    await embeddingsApi.testConnection(PRIMARY_ID)
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      `/embeddings/connections/${PRIMARY_ID}/test`,
+      { text: undefined },
+      { timeout: 60_000 },
+    )
+
+    post.mockResolvedValueOnce({ models: ['text-embedding-3-small'], provider: 'openai-compatible' })
+    await embeddingsApi.previewModels({ profile_id: PRIMARY_ID })
+    expect(post).toHaveBeenNthCalledWith(2, '/embeddings/models/preview', { profile_id: PRIMARY_ID })
+  })
+
   test('selectFallbackChain preserves unknown providers and skips incompatible dimensions', () => {
     const chain = selectFallbackChain(cfg)
     expect(chain.map((profile) => profile.id)).toEqual([PRIMARY_ID, FALLBACK_ID])

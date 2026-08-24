@@ -45,6 +45,17 @@ describe("embedding provider profiles", () => {
     ]));
   });
 
+  test("adds native Mistral and Cohere defaults", () => {
+    expect(getProviderDefaults("mistral")).toEqual({
+      api_url: "https://api.mistral.ai/v1/embeddings",
+      model: "mistral-embed",
+    });
+    expect(getProviderDefaults("cohere")).toEqual({
+      api_url: "https://api.cohere.com/v2/embed",
+      model: "embed-v4.0",
+    });
+  });
+
   test("uses query/passage routing only for NVIDIA's asymmetric models", () => {
     expect(__test__.nvidiaNimNeedsInputType({
       provider: "nvidia-nim",

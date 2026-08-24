@@ -151,4 +151,27 @@ describe("embeddings routes connection profiles", () => {
       code: "embedding_provider_unavailable",
     });
   });
+
+  test("POST /connections/:id/test targets a dedicated embedding connection", async () => {
+    const testConnection = spyOn(embeddingsSvc, "testEmbeddingConnection").mockResolvedValue({
+      dimension: 1536,
+      provider: "openai-compatible",
+    });
+    spies.push(testConnection);
+
+    const response = await app().request(`/connections/${PRIMARY_ID}/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "ping" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(testConnection).toHaveBeenCalledWith("owner-id", PRIMARY_ID, "ping");
+    expect(await response.json()).toEqual({
+      success: true,
+      message: "Connection successful",
+      dimension: 1536,
+      provider: "openai-compatible",
+    });
+  });
 });

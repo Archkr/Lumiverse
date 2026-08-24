@@ -20,7 +20,7 @@ An embedding is a numerical representation of text — a list of numbers that ca
 
 ## Setting Up
 
-Open **Settings > Embeddings** and follow the setup checklist:
+First open the **Connections** drawer. Under **Embedding Models**, create a connection for each embedding endpoint you want to use. Then open **Settings > Embeddings** and follow the setup checklist:
 
 ### 1. Enable Embeddings
 
@@ -28,9 +28,9 @@ Toggle the master switch on.
 
 ### 2. Select a Connection
 
-Choose one of your saved connection profiles as the **primary connection**. Lumiverse uses the connection's provider, API URL, API key, and default model, while still letting you select a different embedding model for this feature.
+Choose one of your saved **embedding connections** as the primary connection. Chat/LLM connections are intentionally not offered here, even when they use an OpenAI-compatible endpoint.
 
-Choose **None (direct custom config)** if you want to enter an embedding provider, endpoint, and API key directly instead of reusing a connection.
+Existing embedding setups are migrated automatically. If you selected an OpenAI-compatible chat connection during the previous shared-profile workflow, Lumiverse preserves its embedding endpoint and copies its key into the dedicated embedding connection without removing the key from the chat connection.
 
 The available providers include Lumiverse's built-ins and any embedding providers contributed by enabled [Spindle extensions](../extensions/index.md#extension-provided-ai-providers).
 
@@ -40,6 +40,8 @@ The available providers include Lumiverse's built-ins and any embedding provider
 |----------|-------|
 | **OpenAI** | Official OpenAI API (`text-embedding-3-small` recommended) |
 | **OpenAI Compatible** | Any service implementing the OpenAI embeddings API (local models, self-hosted) |
+| **Mistral** | Native Mistral embeddings API. Defaults to `mistral-embed`; model browsing uses Mistral's model catalogue. |
+| **Cohere** | Native Cohere v2 Embed API. Defaults to `embed-v4.0`; Lumiverse automatically sends document/query input types. |
 | **OpenRouter** | Aggregation service |
 | **ElectronHub** | Model aggregator |
 | **BananaBread** | Lumiverse's local embedding server. Defaults to `http://localhost:8008/v1/embeddings` and pulls its model list from `/v1/models`. |
@@ -50,16 +52,18 @@ The available providers include Lumiverse's built-ins and any embedding provider
 
 | Field | Description |
 |-------|-------------|
-| **Connection** | Saved connection profile used for this embedding endpoint, or **None** for direct custom configuration. |
+| **Connection** | Dedicated embedding connection selected from **Connections > Embedding Models**. |
 | **API URL** | Base URL for the provider. Auto-appends `/v1/embeddings` if no path is specified. |
 | **Embedding Model** | Model name (e.g., `text-embedding-3-small`) |
 | **API Key** | Your provider's authentication key |
 | **Dimensions** | Vector size — auto-detected when you run a test |
 | **Send Dimensions** | Whether to include the dimension value in API requests (some providers require it, others reject it) |
 
+For Mistral and Cohere, Lumiverse translates **Send Dimensions** to each native API's `output_dimension` field. Cohere requests are also split automatically when a batch exceeds its 96-text API limit.
+
 ### 5. Add Fallback Connections (Optional)
 
-Under **Primary and fallback connections**, add backup connection profiles in the order Lumiverse should try them. If the primary request fails or times out, Lumiverse advances through this chain without sharing one profile's API key with another profile.
+Under **Primary and fallback connections**, add backup embedding connections in the order Lumiverse should try them. If the primary request fails or times out, Lumiverse advances through this chain without sharing one profile's API key with another profile.
 
 Every endpoint in a fallback chain must produce vectors with the same dimensions as the primary endpoint. Set a fallback's **Dimensions** when Lumiverse cannot determine it automatically. A known dimension mismatch is skipped instead of mixing incompatible vectors in the same index.
 

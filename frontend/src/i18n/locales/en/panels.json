@@ -205,6 +205,7 @@
     }
   },
   "connections": {
+    "embeddings": "Embedding Models",
     "imageGeneration": "Image Generation",
     "speechToText": "Speech-to-Text",
     "textToSpeech": "Text-to-Speech"

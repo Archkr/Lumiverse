@@ -202,6 +202,11 @@ async function hasProfileSecret(userId: string, profile: Pick<EmbeddingConnectio
   if (isUsableProfileId(profile.id)) {
     const scoped = await secretsSvc.getSecretForStatus(userId, embeddingProfileSecretKey(profile.id));
     if (scoped && scoped.length > 0) return true;
+    // PR 309 briefly sourced embedding profiles from the general LLM
+    // Connections list. Keep those users working while the snapshot is moved
+    // into the dedicated embedding-connection workflow.
+    const legacyConnectionSecret = await secretsSvc.getSecretForStatus(userId, `connection_${profile.id}_api_key`);
+    if (legacyConnectionSecret && legacyConnectionSecret.length > 0) return true;
   }
   return hasEmbeddingSecret(userId, profile.provider);
 }
@@ -213,6 +218,13 @@ async function resolveProfileSecret(
   if (isUsableProfileId(profile.id)) {
     const scoped = await secretsSvc.getSecret(userId, embeddingProfileSecretKey(profile.id));
     if (scoped && scoped.length > 0) return scoped;
+    const legacyConnectionSecret = await secretsSvc.getSecret(userId, `connection_${profile.id}_api_key`);
+    if (legacyConnectionSecret && legacyConnectionSecret.length > 0) {
+      // Copy instead of moving: the original LLM connection may still be in
+      // active use for chat generation.
+      await putProfileSecret(userId, profile.id, legacyConnectionSecret);
+      return legacyConnectionSecret;
+    }
   }
   return getEmbeddingSecret(userId, profile.provider);
 }
@@ -256,6 +268,8 @@ function resolveAbortError(signal: AbortSignal | undefined, fallbackMessage = "A
 export type EmbeddingProvider =
   | "openai-compatible"
   | "openai"
+  | "mistral"
+  | "cohere"
   | "openrouter"
   | "electronhub"
   | "bananabread"
@@ -293,6 +307,8 @@ export interface EmbeddingProviderProfileWithStatus extends EmbeddingProviderPro
 
 export interface EmbeddingConnectionProfile {
   id: string;
+  /** User-facing label for this dedicated embedding connection. */
+  name?: string;
   provider: string;
   model: string;
   api_url: string;
@@ -353,6 +369,7 @@ export interface EmbeddingConfigWithStatus extends EmbeddingConfig {
 }
 
 export interface EmbeddingModelsPreviewInput {
+  profile_id?: string;
   provider?: EmbeddingProvider;
   api_url?: string;
   api_key?: string;
@@ -643,6 +660,8 @@ export function saveChatMemorySettings(userId: string, input: any): ChatMemorySe
 const PROVIDER_DEFAULT_URL: Record<EmbeddingProvider, string> = {
   "openai-compatible": "https://api.openai.com/v1/embeddings",
   openai: "https://api.openai.com/v1/embeddings",
+  mistral: "https://api.mistral.ai/v1/embeddings",
+  cohere: "https://api.cohere.com/v2/embed",
   openrouter: "https://openrouter.ai/api/v1/embeddings",
   electronhub: "https://api.electronhub.top/v1/embeddings",
   bananabread: "http://localhost:8008/v1/embeddings",
@@ -657,6 +676,8 @@ function isKnownEmbeddingProvider(provider: string): provider is EmbeddingProvid
 }
 
 function providerDefaultModel(provider: string): string {
+  if (provider === "mistral") return "mistral-embed";
+  if (provider === "cohere") return "embed-v4.0";
   if (provider === "bananabread") return "mixedbread-ai/mxbai-embed-large-v1";
   if (provider === "nanogpt") return "text-embedding-3-small";
   if (provider === "openrouter") return "text-embedding-3-small";
@@ -705,7 +726,7 @@ function defaultConfig(provider: EmbeddingProvider = "openai-compatible"): Embed
 }
 
 const VALID_EMBEDDING_PROVIDERS: EmbeddingProvider[] = [
-  "openai-compatible", "openai", "openrouter", "electronhub", "bananabread", "nanogpt", "nvidia-nim", "google_vertex",
+  "openai-compatible", "openai", "mistral", "cohere", "openrouter", "electronhub", "bananabread", "nanogpt", "nvidia-nim", "google_vertex",
 ];
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -728,11 +749,20 @@ export function areProfileDimensionsCompatible(
 }
 
 function stripProfileSecrets<T extends Record<string, any>>(profile: T): EmbeddingConnectionProfile {
+  const rawProvider = typeof profile.provider === "string" && profile.provider.trim()
+    ? profile.provider.trim()
+    : "openai-compatible";
+  // General Connections calls its arbitrary OpenAI-compatible provider
+  // "custom". Embedding drivers call the same protocol
+  // "openai-compatible"; canonicalize snapshots created by the brief shared
+  // workflow so they remain runnable after becoming dedicated connections.
+  const provider = rawProvider === "custom" ? "openai-compatible" : rawProvider;
   return {
     id: ensureProfileId(profile.id),
-    provider: typeof profile.provider === "string" && profile.provider.trim()
-      ? profile.provider.trim()
-      : "openai-compatible",
+    name: typeof profile.name === "string" && profile.name.trim()
+      ? profile.name.trim()
+      : embeddingProviderDisplayName(provider),
+    provider,
     model: typeof profile.model === "string" && profile.model.trim()
       ? profile.model.trim()
       : providerDefaultModel(typeof profile.provider === "string" ? profile.provider : "openai-compatible"),
@@ -744,6 +774,22 @@ function stripProfileSecrets<T extends Record<string, any>>(profile: T): Embeddi
     vertex_region: normalizeOptionalString(profile.vertex_region),
     vertex_project: normalizeOptionalString(profile.vertex_project),
   };
+}
+
+function embeddingProviderDisplayName(provider: string): string {
+  const names: Record<string, string> = {
+    "openai-compatible": "OpenAI Compatible",
+    openai: "OpenAI",
+    mistral: "Mistral",
+    cohere: "Cohere",
+    openrouter: "OpenRouter",
+    electronhub: "ElectronHub",
+    bananabread: "BananaBread",
+    nanogpt: "Nano-GPT",
+    "nvidia-nim": "NVIDIA NIM",
+    google_vertex: "Google Vertex AI",
+  };
+  return names[provider] ?? provider;
 }
 
 function profileFromLegacyFields(input: {
@@ -1647,6 +1693,11 @@ const NVIDIA_NIM_EMBEDDING_MODELS = [
   "nvidia/nv-embedqa-e5-v5",
 ];
 
+const MISTRAL_EMBEDDING_MODELS = [
+  "codestral-embed-2505",
+  "mistral-embed",
+];
+
 type EmbeddingInputType = "query" | "passage";
 
 function nvidiaNimNeedsInputType(cfg: { provider: string; model: string }): boolean {
@@ -1658,6 +1709,57 @@ function nvidiaNimNeedsInputType(cfg: { provider: string; model: string }): bool
 
 function isLikelyEmbeddingModel(model: string): boolean {
   return /(?:embed|retriev)/i.test(model);
+}
+
+function bearerHeaders(apiKey: string): Record<string, string> {
+  const token = apiKey.trim().replace(/^Bearer\s+/i, "");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function fetchMistralEmbeddingModels(apiKey: string, apiUrl: string): Promise<string[]> {
+  const base = normalizeEmbeddingApiUrlForModelListing(apiUrl);
+  const url = `${base || "https://api.mistral.ai/v1"}/models`;
+  const res = await fetch(url, { headers: bearerHeaders(apiKey) });
+  if (!res.ok) throw new Error(`Mistral model listing failed with ${res.status}`);
+
+  const payload = await res.json() as {
+    data?: Array<{ id?: unknown }>;
+  } | Array<{ id?: unknown }>;
+  const entries = Array.isArray(payload) ? payload : payload.data;
+  const discovered = Array.isArray(entries)
+    ? entries
+      .map((entry) => typeof entry?.id === "string" ? entry.id.trim() : "")
+      .filter((id) => id && isLikelyEmbeddingModel(id))
+    : [];
+  return Array.from(new Set([...MISTRAL_EMBEDDING_MODELS, ...discovered])).sort();
+}
+
+function resolveCohereModelsUrl(apiUrl: string): string {
+  try {
+    const parsed = new URL(apiUrl);
+    const url = new URL("/v1/models", parsed.origin);
+    url.searchParams.set("endpoint", "embed");
+    url.searchParams.set("page_size", "1000");
+    return url.toString();
+  } catch {
+    return "https://api.cohere.com/v1/models?endpoint=embed&page_size=1000";
+  }
+}
+
+async function fetchCohereEmbeddingModels(apiKey: string, apiUrl: string): Promise<string[]> {
+  const res = await fetch(resolveCohereModelsUrl(apiUrl), { headers: bearerHeaders(apiKey) });
+  if (!res.ok) throw new Error(`Cohere model listing failed with ${res.status}`);
+
+  const payload = await res.json() as {
+    models?: Array<{ name?: unknown; is_deprecated?: unknown }>;
+  };
+  return Array.isArray(payload.models)
+    ? payload.models
+      .filter((entry) => entry?.is_deprecated !== true)
+      .map((entry) => typeof entry?.name === "string" ? entry.name.trim() : "")
+      .filter(Boolean)
+      .sort()
+    : [];
 }
 
 async function fetchNvidiaNimEmbeddingModels(apiKey: string, apiUrl: string): Promise<string[]> {
@@ -1937,15 +2039,42 @@ export async function previewEmbeddingModels(
 ): Promise<{ models: string[]; model_labels?: Record<string, string>; provider: EmbeddingProvider; error?: string }> {
   const ctx = resolveEmbeddingUserContext(userId);
   const base = readRawEmbeddingConfig(ctx.userId);
-  const provider = input.provider ?? base.provider;
-  const cfg = normalizeConfig({ ...base, ...input, provider });
+  const selectedProfile = isUsableProfileId(input.profile_id)
+    ? base.connectionProfiles?.find((profile) => profile.id === input.profile_id)
+    : undefined;
+  const provider = input.provider ?? selectedProfile?.provider ?? base.provider;
+  const cfg = normalizeConfig({
+    ...base,
+    connectionProfiles: undefined,
+    primaryProfileId: undefined,
+    fallbackProfileIds: [],
+    ...selectedProfile,
+    ...input,
+    provider,
+  });
 
   let apiKey = input.api_key?.trim() || "";
   if (!apiKey) {
-    apiKey = (await getEmbeddingSecret(ctx.userId, cfg.provider)) || "";
+    apiKey = selectedProfile
+      ? (await resolveProfileSecret(ctx.userId, selectedProfile)) || ""
+      : (await getEmbeddingSecret(ctx.userId, cfg.provider)) || "";
   }
 
   try {
+    if (cfg.provider === "mistral") {
+      return {
+        models: await fetchMistralEmbeddingModels(apiKey, cfg.api_url),
+        provider: cfg.provider,
+      };
+    }
+
+    if (cfg.provider === "cohere") {
+      return {
+        models: await fetchCohereEmbeddingModels(apiKey, cfg.api_url),
+        provider: cfg.provider,
+      };
+    }
+
     if (cfg.provider === "nvidia-nim") {
       return {
         models: await fetchNvidiaNimEmbeddingModels(apiKey, cfg.api_url),
@@ -2001,10 +2130,43 @@ export async function previewEmbeddingModels(
 function readRawEmbeddingConfig(userId: string): EmbeddingConfig {
   const setting = settingsSvc.getSetting(userId, EMBEDDING_SETTINGS_KEY);
   const cfg = normalizeConfig(setting?.value);
-  if (setting?.value && !storedBlobHasProfiles(setting.value)) {
+  const rawProfiles = Array.isArray((setting?.value as any)?.connectionProfiles)
+    ? (setting?.value as any).connectionProfiles as Array<Record<string, unknown>>
+    : [];
+  const profilesMissingNames = rawProfiles.length > 0 && rawProfiles.some((profile) => (
+    typeof profile?.name !== "string" || !profile.name.trim()
+  ));
+  const profilesNeedingProviderMigration = rawProfiles.some((profile) => profile?.provider === "custom");
+
+  if (profilesMissingNames) {
+    // Preserve names for users who selected a general OpenAI-compatible
+    // connection during the short-lived shared-profile workflow.
+    for (const profile of cfg.connectionProfiles ?? []) {
+      try {
+        const row = getDb().query(
+          "SELECT name FROM connection_profiles WHERE id = ? AND user_id = ?",
+        ).get(profile.id, userId) as { name?: string } | null;
+        if (row?.name?.trim()) profile.name = row.name.trim();
+      } catch {
+        // A missing/older connection table must not block embedding startup.
+      }
+    }
+  }
+
+  if (!setting?.value || !storedBlobHasProfiles(setting.value) || profilesMissingNames || profilesNeedingProviderMigration) {
     settingsSvc.putSetting(userId, EMBEDDING_SETTINGS_KEY, persistableConfig(cfg), { suppressBroadcast: true });
   }
   return cfg;
+}
+
+async function migrateLegacyConnectionSecrets(userId: string, cfg: EmbeddingConfig): Promise<void> {
+  for (const profile of cfg.connectionProfiles ?? []) {
+    if (!isUsableProfileId(profile.id)) continue;
+    const scoped = await secretsSvc.getSecretForStatus(userId, embeddingProfileSecretKey(profile.id));
+    if (scoped) continue;
+    const legacyConnectionSecret = await secretsSvc.getSecret(userId, `connection_${profile.id}_api_key`);
+    if (legacyConnectionSecret) await putProfileSecret(userId, profile.id, legacyConnectionSecret);
+  }
 }
 
 /** Config whose connection-profile status fields are resolved;
@@ -2111,6 +2273,7 @@ async function toConfigWithStatus(
 export async function getEmbeddingConfig(userId: string): Promise<EmbeddingConfigWithStatus> {
   const ctx = resolveEmbeddingUserContext(userId);
   const cfg = readRawEmbeddingConfig(ctx.userId);
+  await migrateLegacyConnectionSecrets(ctx.userId, cfg);
   return withEmbeddingSecretStatus(ctx.userId, await toConfigWithStatus(ctx.userId, cfg, ctx.inherited || undefined), ctx.inherited);
 }
 
@@ -2240,6 +2403,15 @@ function parseEmbeddingResponse(payload: any, expectedCount: number): number[][]
   // OpenAI format: { data: [{ embedding: number[] }, ...] }
   if (Array.isArray(payload.data) && payload.data.length > 0 && payload.data[0].embedding) {
     const vectors = payload.data.map((d: any) => d.embedding || []);
+    if (vectors.length !== expectedCount) {
+      throw new Error(`Embedding provider returned ${vectors.length} vectors, expected ${expectedCount}`);
+    }
+    return vectors;
+  }
+
+  // Cohere v2 format: { embeddings: { float: number[][] } }
+  if (Array.isArray(payload?.embeddings?.float)) {
+    const vectors = payload.embeddings.float;
     if (vectors.length !== expectedCount) {
       throw new Error(`Embedding provider returned ${vectors.length} vectors, expected ${expectedCount}`);
     }
@@ -2451,6 +2623,21 @@ async function requestEmbeddingsWithDriver(
     );
   }
 
+  // Cohere accepts at most 96 texts per v2 embed request. Lumiverse allows a
+  // larger global batch size, so preserve that setting by chunking here.
+  if (driver.provider === "cohere" && texts.length > 96) {
+    const vectors: number[][] = [];
+    for (let offset = 0; offset < texts.length; offset += 96) {
+      vectors.push(...await requestEmbeddingsWithDriver(
+        driver,
+        apiKey,
+        texts.slice(offset, offset + 96),
+        options,
+      ));
+    }
+    return vectors;
+  }
+
   const url = resolveEmbeddingUrl(driver.api_url);
 
   // Detect Ollama endpoints from the resolved URL (not the raw user input)
@@ -2472,17 +2659,30 @@ async function requestEmbeddingsWithDriver(
     return results;
   }
 
-  const body: Record<string, any> = {
-    model: driver.model,
-    input: isOllamaLegacySingleOnly ? texts[0] : texts,
-  };
-  if (!isOllamaNative) {
+  const body: Record<string, any> = driver.provider === "cohere"
+    ? {
+        model: driver.model,
+        texts,
+        input_type: options?.inputType === "query" ? "search_query" : "search_document",
+        embedding_types: ["float"],
+      }
+    : {
+        model: driver.model,
+        input: isOllamaLegacySingleOnly ? texts[0] : texts,
+      };
+  if (!isOllamaNative && driver.provider !== "cohere") {
     body.encoding_format = "float";
   }
   if (nvidiaNimNeedsInputType(driver)) {
     body.input_type = options?.inputType ?? "passage";
   }
-  if (!options?.omitDimensions && driver.send_dimensions && driver.dimensions) body.dimensions = driver.dimensions;
+  if (!options?.omitDimensions && driver.send_dimensions && driver.dimensions) {
+    if (driver.provider === "mistral" || driver.provider === "cohere") {
+      body.output_dimension = driver.dimensions;
+    } else {
+      body.dimensions = driver.dimensions;
+    }
+  }
   const timeoutMs = driver.request_timeout > 0
     ? driver.request_timeout * 1000
     : DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS;
@@ -3038,6 +3238,29 @@ export async function testEmbeddingConfig(
     dimension: first.length,
     config: await withEmbeddingSecretStatus(userId, await toConfigWithStatus(userId, updated)),
   };
+}
+
+/** Test one saved embedding connection without changing the active chain. */
+export async function testEmbeddingConnection(
+  userId: string,
+  profileId: string,
+  text: string,
+): Promise<{ dimension: number; provider: string }> {
+  const ctx = resolveEmbeddingUserContext(userId);
+  const cfg = readRawEmbeddingConfig(ctx.userId);
+  const profile = cfg.connectionProfiles?.find((entry) => entry.id === profileId);
+  if (!profile) throw new Error("Embedding connection not found");
+  const apiKey = await resolveProfileSecret(ctx.userId, profile);
+  if (!apiKey) throw new Error("No API key is configured for this embedding connection");
+  const vectors = await requestEmbeddingsWithDriver(
+    profileToDriverConfig(cfg, profile),
+    apiKey,
+    [text],
+    { omitDimensions: true },
+  );
+  const first = vectors[0] || [];
+  if (!first.length) throw new Error("No embedding vector returned");
+  return { dimension: first.length, provider: profile.provider };
 }
 
 export async function deleteWorldBookEntryEmbeddings(userId: string, entryId: string): Promise<void> {

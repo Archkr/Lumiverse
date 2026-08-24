@@ -12,6 +12,7 @@ import {
   embeddingProfileSecretKey,
   getEmbeddingConfig,
   isUsableProfileId,
+  previewEmbeddingModels,
   selectFallbackChain,
   updateEmbeddingConfig,
 } from "./embeddings.service";
@@ -114,6 +115,14 @@ afterEach(() => {
 });
 
 describe("embedding connection profiles", () => {
+  test("persists the generated default profile so its connection id is stable", async () => {
+    const first = await getEmbeddingConfig(USER);
+    const second = await getEmbeddingConfig(USER);
+
+    expect(first.connectionProfiles[0]?.id).toBe(second.connectionProfiles[0]?.id);
+    expect(first.connectionProfiles[0]?.name).toBe("OpenAI Compatible");
+  });
+
   test("migrates old single-provider config into a UUID profile, not a literal default id", async () => {
     putCfg({
       enabled: true,
@@ -136,6 +145,200 @@ describe("embedding connection profiles", () => {
 
     const stored = settings.get(sk(USER, EMBEDDING_SETTINGS_KEY)) as { connectionProfiles?: Array<{ id: string }> };
     expect(stored.connectionProfiles?.[0]?.id).toBe(profile.id);
+  });
+
+  test("copies a selected OpenAI-compatible LLM connection key into its dedicated embedding profile", async () => {
+    const legacyKey = "shared-openai-compatible-key";
+    putCfg(enabledProfiles());
+    secrets.set(sk(USER, `connection_${PRIMARY_ID}_api_key`), legacyKey);
+
+    const cfg = await getEmbeddingConfig(USER);
+
+    expect(cfg.connectionProfiles[0]?.hasSecret).toBe(true);
+    expect(secrets.get(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)))).toBe(legacyKey);
+    expect(secrets.get(sk(USER, `connection_${PRIMARY_ID}_api_key`))).toBe(legacyKey);
+  });
+
+  test("canonicalizes a general custom connection into a runnable OpenAI-compatible embedding connection", async () => {
+    putCfg(enabledProfiles({
+      provider: "custom",
+      connectionProfiles: [{
+        id: PRIMARY_ID,
+        provider: "custom",
+        model: "local-embed-model",
+        api_url: "https://local.example/v1",
+        dimensions: 1024,
+        enabled: true,
+      }],
+      primaryProfileId: PRIMARY_ID,
+      fallbackProfileIds: [],
+    }));
+    secrets.set(sk(USER, `connection_${PRIMARY_ID}_api_key`), "local-key");
+    let requestUrl = "";
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input) => {
+      requestUrl = String(input);
+      return Response.json(openaiBody(2));
+    })));
+
+    const cfg = await getEmbeddingConfig(USER);
+    const vectors = await embedTexts(USER, ["hello"]);
+    const stored = settings.get(sk(USER, EMBEDDING_SETTINGS_KEY)) as { connectionProfiles: Array<{ provider: string }> };
+
+    expect(cfg.provider).toBe("openai-compatible");
+    expect(cfg.connectionProfiles[0]?.provider).toBe("openai-compatible");
+    expect(cfg.connectionProfiles[0]?.api_url).toBe("https://local.example/v1");
+    expect(stored.connectionProfiles[0]?.provider).toBe("openai-compatible");
+    expect(requestUrl).toBe("https://local.example/v1/embeddings");
+    expect(vectors[0]).toHaveLength(2);
+  });
+
+  test("browses models with the selected dedicated profile endpoint and key", async () => {
+    putCfg(enabledProfiles());
+    secrets.set(sk(USER, embeddingProfileSecretKey(FALLBACK_ID)), "fallback-key");
+    let requestUrl = "";
+    let authorization = "";
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input, init) => {
+      requestUrl = String(input);
+      authorization = new Headers(init?.headers).get("authorization") || "";
+      return Response.json({ data: [{ id: "embed-b" }, { id: "embed-a" }] });
+    })));
+
+    const result = await previewEmbeddingModels(USER, { profile_id: FALLBACK_ID });
+
+    expect(requestUrl).toBe("https://fallback.test/v1/models");
+    expect(authorization).toBe("Bearer fallback-key");
+    expect(result.models).toEqual(["embed-a", "embed-b"]);
+  });
+
+  test("uses Mistral's native embedding fields and OpenAI-shaped response", async () => {
+    putCfg(enabledProfiles({
+      provider: "mistral",
+      api_url: "https://api.mistral.ai/v1/embeddings",
+      model: "mistral-embed",
+      dimensions: 512,
+      send_dimensions: true,
+      connectionProfiles: [{
+        id: PRIMARY_ID,
+        provider: "mistral",
+        model: "mistral-embed",
+        api_url: "https://api.mistral.ai/v1/embeddings",
+        dimensions: 512,
+        enabled: true,
+      }],
+      fallbackProfileIds: [],
+    }));
+    secrets.set(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)), "mistral-key");
+    let requestUrl = "";
+    let body: Record<string, unknown> = {};
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input, init) => {
+      requestUrl = String(input);
+      body = JSON.parse(String(init?.body));
+      return Response.json({ data: [{ embedding: [0.1, 0.2] }] });
+    })));
+
+    const vectors = await embedTexts(USER, ["hello"]);
+
+    expect(requestUrl).toBe("https://api.mistral.ai/v1/embeddings");
+    expect(body).toEqual({
+      model: "mistral-embed",
+      input: ["hello"],
+      encoding_format: "float",
+      output_dimension: 512,
+    });
+    expect(body).not.toHaveProperty("dimensions");
+    expect(vectors).toEqual([[0.1, 0.2]]);
+  });
+
+  test("uses Cohere v2 query semantics, response shape, dimensions, and 96-text batches", async () => {
+    putCfg(enabledProfiles({
+      provider: "cohere",
+      api_url: "https://api.cohere.com/v2/embed",
+      model: "embed-v4.0",
+      dimensions: 512,
+      send_dimensions: true,
+      connectionProfiles: [{
+        id: PRIMARY_ID,
+        provider: "cohere",
+        model: "embed-v4.0",
+        api_url: "https://api.cohere.com/v2/embed",
+        dimensions: 512,
+        enabled: true,
+      }],
+      fallbackProfileIds: [],
+    }));
+    secrets.set(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)), "cohere-key");
+    const bodies: Array<Record<string, any>> = [];
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input, init) => {
+      expect(String(input)).toBe("https://api.cohere.com/v2/embed");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer cohere-key");
+      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      bodies.push(body);
+      return Response.json({
+        embeddings: { float: body.texts.map(() => [0.25, 0.75]) },
+      });
+    })));
+    const texts = Array.from({ length: 97 }, (_, index) => `query ${index}`);
+
+    const vectors = await embedTexts(USER, texts, { inputType: "query" });
+
+    expect(bodies.map((body) => body.texts.length)).toEqual([96, 1]);
+    expect(bodies[0]).toEqual(expect.objectContaining({
+      model: "embed-v4.0",
+      input_type: "search_query",
+      embedding_types: ["float"],
+      output_dimension: 512,
+    }));
+    expect(bodies[0]).not.toHaveProperty("input");
+    expect(bodies[0]).not.toHaveProperty("dimensions");
+    expect(vectors).toHaveLength(97);
+  });
+
+  test("browses only embedding models through Mistral and Cohere's native catalogues", async () => {
+    putCfg(enabledProfiles({
+      provider: "mistral",
+      connectionProfiles: [
+        {
+          id: PRIMARY_ID,
+          provider: "mistral",
+          model: "mistral-embed",
+          api_url: "https://api.mistral.ai/v1/embeddings",
+          dimensions: 1024,
+          enabled: true,
+        },
+        {
+          id: FALLBACK_ID,
+          provider: "cohere",
+          model: "embed-v4.0",
+          api_url: "https://api.cohere.com/v2/embed",
+          dimensions: 1024,
+          enabled: true,
+        },
+      ],
+    }));
+    secrets.set(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)), "mistral-key");
+    secrets.set(sk(USER, embeddingProfileSecretKey(FALLBACK_ID)), "cohere-key");
+    const urls: string[] = [];
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("mistral.ai")) {
+        return Response.json({ data: [{ id: "mistral-small-latest" }, { id: "new-embed-model" }] });
+      }
+      return Response.json({
+        models: [
+          { name: "embed-v4.0", is_deprecated: false },
+          { name: "embed-old", is_deprecated: true },
+        ],
+      });
+    })));
+
+    const mistral = await previewEmbeddingModels(USER, { profile_id: PRIMARY_ID });
+    const cohere = await previewEmbeddingModels(USER, { profile_id: FALLBACK_ID });
+
+    expect(urls[0]).toBe("https://api.mistral.ai/v1/models");
+    expect(mistral.models).toEqual(["codestral-embed-2505", "mistral-embed", "new-embed-model"]);
+    expect(urls[1]).toBe("https://api.cohere.com/v1/models?endpoint=embed&page_size=1000");
+    expect(cohere.models).toEqual(["embed-v4.0"]);
   });
 
   test("preserves unknown provider ids and Vertex project/region controls", async () => {

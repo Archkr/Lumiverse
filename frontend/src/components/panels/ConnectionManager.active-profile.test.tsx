@@ -130,7 +130,7 @@ afterEach(async () => {
 })
 
 describe('ConnectionManager active profile', () => {
-  test('persists the active profile through setActiveProfile and keeps re-click toggle', async () => {
+  test('persists a newly selected profile and treats an active-profile click as a no-op', async () => {
     await act(async () => {
       root.render(<ConnectionManager />)
     })
@@ -152,7 +152,7 @@ describe('ConnectionManager active profile', () => {
     await act(async () => {
       betaAgain!.click()
     })
-    expect(setActiveCalls).toEqual(['beta', null])
-    expect(state.activeProfileId).toBeNull()
+    expect(setActiveCalls).toEqual(['beta'])
+    expect(state.activeProfileId).toBe('beta')
   })
 })

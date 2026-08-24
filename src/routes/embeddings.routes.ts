@@ -41,6 +41,21 @@ app.post("/models/preview", async (c) => {
   return c.json(result);
 });
 
+app.post("/connections/:id/test", async (c) => {
+  const userId = c.get("userId");
+  const body: { text?: string } = await c.req.json<{ text?: string }>().catch(() => ({}));
+  try {
+    const result = await embeddingsSvc.testEmbeddingConnection(
+      userId,
+      c.req.param("id"),
+      body.text?.trim() || "Lumiverse embedding connectivity test.",
+    );
+    return c.json({ success: true, message: "Connection successful", ...result });
+  } catch (err: any) {
+    return c.json({ success: false, message: err?.message || "Connection test failed" }, 502);
+  }
+});
+
 app.post("/test", async (c) => {
   const userId = c.get("userId");
   const body = await c.req.json<{ text?: string }>();
