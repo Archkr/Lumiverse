@@ -227,8 +227,6 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
 
   disableExtension: async (id: string) => {
     await spindleApi.disable(id)
-    await unloadFrontendExtension(id)
-    get().clearExtensionChatStyleModes(id)
     set((state) => ({
       extensions: state.extensions.map((e) =>
         e.id === id ? { ...e, enabled: false, status: 'stopped' as const } : e
@@ -238,6 +236,8 @@ export const createSpindleSlice: StateCreator<SpindleSlice> = (set, get) => ({
         Object.entries(state.extensionThemeOverrides).filter(([extensionId]) => extensionId !== id)
       ),
     }))
+    await unloadFrontendExtension(id)
+    get().clearExtensionChatStyleModes(id)
   },
 
   restartExtension: async (id: string) => {

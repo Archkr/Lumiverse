@@ -2430,7 +2430,15 @@ export async function unloadFrontendExtension(
     if (pendingLoad) pendingLoad.invalidated = true
   }
   const loaded = loadedExtensions.get(extensionId)
-  if (!loaded) return
+  if (!loaded) {
+    // Disabled extensions can still have retained placement state after an
+    // interrupted or older frontend load. Purge it even when the loader no
+    // longer has a cleanup closure for that extension.
+    destroyAllUIEventBindingsForExtension(extensionId)
+    destroyAllComponentsForExtension(extensionId)
+    destroyAllPlacementsForExtension(extensionId)
+    return
+  }
 
   loaded.cleanup(true)
 

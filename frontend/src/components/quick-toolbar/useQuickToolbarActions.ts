@@ -19,6 +19,10 @@ import { useStore } from '@/store'
 import type { QuickToolbarSettings } from '@/types/store'
 import type { InputBarActionState } from '@/store/slices/spindle-placement'
 import { nextToolbarIconOrder } from './toolbarPointerHold'
+import {
+  filterEnabledFrontendContributions,
+  hasEnabledFrontendExtensionId,
+} from '@/lib/spindle/frontend-extension-availability'
 
 export type ToolbarActionIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 
@@ -174,6 +178,7 @@ export function useQuickToolbarActions() {
   const extensionDrawerTabs = useStore((s) => s.drawerTabs)
   const extensionCommands = useStore((s) => s.extensionCommands)
   const inputBarActions = useStore((s) => s.inputBarActions)
+  const extensions = useStore((s) => s.extensions)
   const activeCharacterId = useStore((s) => s.activeCharacterId)
   const activeChatId = useStore((s) => s.activeChatId)
   const isGroupChat = useStore((s) => s.isGroupChat)
@@ -224,7 +229,10 @@ export function useQuickToolbarActions() {
   }, [closeDrawer, closeSettings, openDrawer, openSettings, setDrawerTab])
 
   const actionCatalog = useMemo(() => {
-    const drawerActions: ToolbarAction[] = [...DRAWER_TABS, ...adaptExtensionTabs(extensionDrawerTabs)].map((tab) => {
+    const enabledDrawerTabs = filterEnabledFrontendContributions(extensionDrawerTabs, extensions)
+    const enabledExtensionCommands = filterEnabledFrontendContributions(extensionCommands, extensions)
+    const enabledInputBarActions = filterEnabledFrontendContributions(inputBarActions, extensions)
+    const drawerActions: ToolbarAction[] = [...DRAWER_TABS, ...adaptExtensionTabs(enabledDrawerTabs)].map((tab) => {
       const surface: ToolbarSurface = { kind: 'drawer', tabId: tab.id }
       return {
         id: tab.id,
@@ -250,7 +258,7 @@ export function useQuickToolbarActions() {
     })
     const registeredActions: ToolbarAction[] = [
       ...COMMANDS.filter((command) => command.group === 'actions'),
-      ...extensionCommandsToCommands(extensionCommands),
+      ...extensionCommandsToCommands(enabledExtensionCommands),
     ].map((command) => ({
       id: `command:${command.id}`,
       label: command.label,
@@ -266,7 +274,7 @@ export function useQuickToolbarActions() {
       surface: { kind: 'command' },
       run: () => runSurface({ kind: 'command' }, () => void command.run(router.navigate)),
     }))
-    const extensionInputActions: ToolbarAction[] = inputBarActions
+    const extensionInputActions: ToolbarAction[] = enabledInputBarActions
       // These named Lumiverse Suite actions are registered by extension-owned
       // surfaces, but they are also first-class Quick Toolbar actions. Keep this
       // allowlist narrow so unrelated contributions never leak into the global
@@ -287,7 +295,10 @@ export function useQuickToolbarActions() {
           surface: { kind: 'command' } as const,
           run: () => runSurface(
             { kind: 'command' },
-            () => action.clickHandlers.forEach((handler) => handler()),
+            () => {
+              if (!hasEnabledFrontendExtensionId(useStore.getState().extensions, action.extensionId)) return
+              action.clickHandlers.forEach((handler) => handler())
+            },
           ),
         }
       })
@@ -345,6 +356,7 @@ export function useQuickToolbarActions() {
     activeLoomPresetId,
     extensionCommands,
     extensionDrawerTabs,
+    extensions,
     inputBarActions,
     isGroupChat,
     messageSelectMode,

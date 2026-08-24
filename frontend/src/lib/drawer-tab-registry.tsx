@@ -48,6 +48,7 @@ import MultiplayerPanel from '@/components/panels/multiplayer/MultiplayerPanel'
 import type { GuideDefinition } from '@/lib/guides/types'
 import { adaptSpindleGuide } from './guides/adapt-spindle-guide'
 import { createDynamicExtensionIcon } from '@/components/icons/DynamicExtensionIcon'
+import { hasEnabledFrontendExtensionId } from '@/lib/spindle/frontend-extension-availability'
 
 export interface DrawerTabEntry {
   id: string
@@ -563,7 +564,11 @@ export function extensionTabsToCommands(tabs: DrawerTabState[]): Command[] {
     icon: createDynamicExtensionIcon({ iconSvg: tab.iconSvg, iconUrl: tab.iconUrl }),
     keywords: ['extension', 'spindle', tab.extensionId, ...(tab.keywords ?? [])],
     group: 'extensions',
-    run: () => useStore.getState().openDrawer(tab.id),
+    run: () => {
+      const state = useStore.getState()
+      if (!hasEnabledFrontendExtensionId(state.extensions, tab.extensionId)) return
+      state.openDrawer(tab.id)
+    },
   }))
 }
 
@@ -582,6 +587,7 @@ export function extensionCommandsToCommands(entries: ExtensionCommandState[]): C
         scope: cmd.scope as CommandScope | undefined,
         run: () => {
           const state = useStore.getState()
+          if (!hasEnabledFrontendExtensionId(state.extensions, entry.extensionId)) return
           wsClient.send({
             type: 'SPINDLE_COMMAND_INVOKE',
             extensionId: entry.extensionId,

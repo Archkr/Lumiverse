@@ -7,6 +7,7 @@ import {
   joinExtensionSettingsTabs,
   registerExtensionSettingsTab,
   subscribeExtensionSettingsTabs,
+  unregisterExtensionSettingsTabsByExtension,
   type SettingsTabRegistrationHandle,
   type SpindleSettingsTabSection,
 } from './settings-tab-bridge'
@@ -82,6 +83,16 @@ describe('Spindle settings tab bridge', () => {
     expect(joined).toEqual(CORE_TABS)
     expect(joined).not.toBe(CORE_TABS)
     expect(joined[0]).toBe(CORE_TABS[0])
+  })
+
+  test('purges every retained settings registration owned by a disabled extension', () => {
+    register('suite-one', 'suite', { id: 'suite-one', title: 'Suite one' })
+    register('suite-two', 'suite', { id: 'suite-two', title: 'Suite two' })
+    register('other', 'other', { id: 'other', title: 'Other' })
+
+    unregisterExtensionSettingsTabsByExtension('suite')
+
+    expect(getExtensionSettingsTabRegistrations().map((entry) => entry.registrationId)).toEqual(['other'])
   })
 
   test('uses one navigation entry and deterministic body/search order for shared ids', () => {

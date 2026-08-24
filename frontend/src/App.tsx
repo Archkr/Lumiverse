@@ -45,6 +45,7 @@ import {
 } from '@/lib/desktop-floating-widget'
 import styles from './App.module.css'
 import { acknowledgePendingConnectionsDeepLink } from '@/lib/uiProductivityDefaults'
+import { filterEnabledFrontendContributions } from '@/lib/spindle/frontend-extension-availability'
 
 const CustomCSSDock = lazy(() => import('@/components/modals/CustomCSSDock'))
 
@@ -83,6 +84,10 @@ export default function App() {
   const editingCharacterId = useStore((s) => s.editingCharacterId)
   const floatWidgets = useStore((s) => s.floatWidgets)
   const extensions = useStore((s) => s.extensions)
+  const enabledDockPanels = useMemo(
+    () => filterEnabledFrontendContributions(dockPanels, extensions),
+    [dockPanels, extensions],
+  )
   const lastDesktopCatalog = useRef<string | null>(null)
 
   useEffect(() => {
@@ -170,7 +175,7 @@ export default function App() {
 
   const dockInsets = useMemo(() => {
     let left = 0, right = 0, top = 0, bottom = 0
-    for (const p of dockPanels) {
+    for (const p of enabledDockPanels) {
       if (hiddenPlacements.includes(p.id)) continue
       const size = p.collapsed ? 36 : p.size
       const edge = resolveDockPanelEdge(p.edge, dockPanelDesktopSide, isMobile)
@@ -190,7 +195,7 @@ export default function App() {
 
     return { left, right, top, bottom }
   }, [
-    dockPanels,
+    enabledDockPanels,
     hiddenPlacements,
     isMobile,
     dockPanelDesktopSide,

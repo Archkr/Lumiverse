@@ -40,6 +40,7 @@ const state = {
   user: null,
   drawerTabs: [],
   extensionCommands: [],
+  extensions: [{ id: 'lumiverse_suite', enabled: true, has_frontend: true }],
   inputBarActions: [] as InputBarActionState[],
   drawerOpen: false,
   drawerTab: '',
@@ -227,7 +228,15 @@ describe('useQuickToolbarActions detached host root', () => {
     })
     expect(opens).toBe(1)
 
+    state.extensions[0].enabled = false
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="run-connections"]')?.click()
+      await Promise.resolve()
+    })
+    expect(opens).toBe(1)
+
     await act(async () => root.unmount())
+    state.extensions[0].enabled = true
     state.inputBarActions = []
     state.quickToolbarSettings = {
       ...state.quickToolbarSettings,

@@ -321,6 +321,12 @@ export function unregisterExtensionSettingsTab(registrationId: string): void {
   notifyRegistryListeners()
 }
 
+/** Fail-safe cleanup for retained registry metadata when no placement handle survives. */
+export function unregisterExtensionSettingsTabsByExtension(extensionId: string): void {
+  const registrationIds = [...(registrationIdsByExtension.get(extensionId) ?? [])]
+  for (const registrationId of registrationIds) unregisterExtensionSettingsTab(registrationId)
+}
+
 export function activateExtensionSettingsTab(tabId: string): void {
   for (const registration of registrationsForTab(tabId)) {
     const live = registrationsById.get(registration.registrationId)

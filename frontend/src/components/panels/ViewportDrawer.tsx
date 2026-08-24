@@ -15,10 +15,12 @@ import TabPanelContent from './TabPanelContent'
 import styles from './ViewportDrawer.module.css'
 import DOMPurify from 'dompurify'
 import clsx from 'clsx'
+import { filterEnabledFrontendContributions } from '@/lib/spindle/frontend-extension-availability'
 
 function ExtensionTabContent({ tabId }: { tabId: string }) {
   const drawerTabs = useStore((s) => s.drawerTabs)
-  const tab = drawerTabs.find((t) => t.id === tabId)
+  const extensions = useStore((s) => s.extensions)
+  const tab = filterEnabledFrontendContributions(drawerTabs, extensions).find((entry) => entry.id === tabId)
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -45,6 +47,7 @@ export default function ViewportDrawer() {
   const settingsLoaded = useStore((s) => s.settingsLoaded)
   const drawerSettings = useStore((s) => s.drawerSettings)
   const drawerTabs = useStore((s) => s.drawerTabs)
+  const extensions = useStore((s) => s.extensions)
   const hiddenPlacements = useStore((s) => s.hiddenPlacements)
   const isGroupChat = useStore((s) => s.isGroupChat)
 
@@ -93,12 +96,13 @@ export default function ViewportDrawer() {
   )
 
   // Merge built-in tabs with dynamic extension tabs
-  const extensionEntries = adaptExtensionTabs(drawerTabs).map((entry) => ({
+  const enabledDrawerTabs = filterEnabledFrontendContributions(drawerTabs, extensions)
+  const extensionEntries = adaptExtensionTabs(enabledDrawerTabs).map((entry) => ({
     ...entry,
     component: () => <ExtensionTabContent tabId={entry.id} />,
   }))
   const orderedBuiltInTabs = applyDrawerTabOrder(DRAWER_TABS, tabOrder)
-  const orderedDrawerTabs = applyDrawerTabOrder(drawerTabs, tabOrder)
+  const orderedDrawerTabs = applyDrawerTabOrder(enabledDrawerTabs, tabOrder)
   const orderedExtensionEntries = applyDrawerTabOrder(extensionEntries, tabOrder)
   const visibleBuiltInTabs = orderedBuiltInTabs.filter((tab) => !hiddenTabIdsSet.has(tab.id))
   const visibleDrawerTabs = orderedDrawerTabs.filter((tab) => !hiddenTabIdsSet.has(tab.id) && !hiddenPlacementIdsSet.has(tab.id))

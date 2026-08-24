@@ -11,6 +11,7 @@ import { commandGroupLabel, translateCommand } from '@/lib/i18n/resolveLabel'
 import { extensionTabsToCommands, extensionCommandsToCommands, sanitizeHiddenDrawerTabIds } from '@/lib/drawer-tab-registry'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
 import styles from './CommandPalette.module.css'
+import { filterEnabledFrontendContributions } from '@/lib/spindle/frontend-extension-availability'
 
 // ── Match highlight ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ function CommandPaletteNative() {
   const drawerSettings = useStore((s) => s.drawerSettings)
   const hiddenPlacements = useStore((s) => s.hiddenPlacements)
   const extensionCommands = useStore((s) => s.extensionCommands)
+  const extensions = useStore((s) => s.extensions)
   const activeChatId = useStore((s) => s.activeChatId)
   const messageCount = useStore((s) => s.messages.length)
   const streaming = useStore((s) => s.isStreaming)
@@ -86,7 +88,9 @@ function CommandPaletteNative() {
   )
 
   const { grouped, orderedFlat, flatIndexMap } = useMemo(() => {
-    const allCommands = [...buildCommands(userRole), ...extensionTabsToCommands(drawerTabs), ...extensionCommandsToCommands(extensionCommands)]
+    const enabledDrawerTabs = filterEnabledFrontendContributions(drawerTabs, extensions)
+    const enabledExtensionCommands = filterEnabledFrontendContributions(extensionCommands, extensions)
+    const allCommands = [...buildCommands(userRole), ...extensionTabsToCommands(enabledDrawerTabs), ...extensionCommandsToCommands(enabledExtensionCommands)]
       .map(translateCommand)
 
     let filtered = allCommands.filter((cmd) => {
@@ -141,7 +145,7 @@ function CommandPaletteNative() {
     }
 
     return { grouped: groups, orderedFlat: flat, flatIndexMap: idxMap }
-  }, [query, userRole, drawerTabs, extensionCommands, activeScopes, location.pathname, hiddenTabIds, hiddenPlacementIds])
+  }, [query, userRole, drawerTabs, extensionCommands, extensions, activeScopes, location.pathname, hiddenTabIds, hiddenPlacementIds])
 
   // Clamp active index when filtered list shrinks
   useEffect(() => {

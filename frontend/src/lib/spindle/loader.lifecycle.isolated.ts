@@ -630,6 +630,13 @@ afterAll(async () => {
 })
 
 describe('loader lifecycle orchestration', () => {
+  test('unload purges retained UI registrations without a live loader record', async () => {
+    await unloadFrontendExtension('disabled_without_loaded_record')
+
+    expect(placementDestroyCalls).toContain('disabled_without_loaded_record')
+    expect(uiEventDestroyAllCalls).toContain('disabled_without_loaded_record')
+  })
+
   test('force-stop cleans up when onStop returns without completing', async () => {
     const extensionId = 'stalled_stop'
     let stopCalls = 0

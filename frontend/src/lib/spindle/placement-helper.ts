@@ -28,6 +28,7 @@ import {
   activateExtensionSettingsTab,
   getExtensionSettingsTabRegistrations,
   registerExtensionSettingsTab,
+  unregisterExtensionSettingsTabsByExtension,
   type SpindleSettingsTabHandle,
   type SpindleSettingsTabOptions,
 } from './settings-tab-bridge'
@@ -1693,6 +1694,7 @@ export function destroyAllPlacementsForExtension(extensionId: string, generation
     else removePlacementStateIds(store, extensionId, scopedStateIds)
     destroyPresetEditorPlacementsForExtension(extensionId, generation)
     drainPlacementDisposers(extensionId, generation)
+    if (generation === undefined) unregisterExtensionSettingsTabsByExtension(extensionId)
   } finally {
     placementFullCleanupInProgress.delete(extensionId)
   }
