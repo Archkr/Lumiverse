@@ -2323,8 +2323,12 @@ export async function updateEmbeddingConfig(
     Array.isArray(input.connectionProfiles)
       ? input.connectionProfiles.map((profile) => ({ ...profile, id: ensureProfileId(profile.id) }))
       : undefined;
+  // Keep the caller's omission of connectionProfiles observable here. The
+  // legacy settings form still writes the flat provider/model/url fields; if
+  // we spread `current` into this object first, its stored profile array makes
+  // applyLegacyConnectionPatch think the caller supplied dedicated profiles
+  // and the flat changes are silently discarded.
   const patched = applyLegacyConnectionPatch(current, {
-    ...current,
     ...input,
     ...(incomingProfiles ? { connectionProfiles: incomingProfiles } : {}),
   });

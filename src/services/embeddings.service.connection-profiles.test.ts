@@ -147,6 +147,41 @@ describe("embedding connection profiles", () => {
     expect(stored.connectionProfiles?.[0]?.id).toBe(profile.id);
   });
 
+  test("legacy flat saves update the active profile and keep its credential on the selected provider", async () => {
+    putCfg(enabledProfiles({
+      connectionProfiles: [enabledProfiles().connectionProfiles[0]],
+      fallbackProfileIds: [],
+    }));
+    let requestUrl = "";
+    let authorization = "";
+    spies.push(spyOn(globalThis, "fetch").mockImplementation(asFetchStub(async (input, init) => {
+      requestUrl = String(input);
+      authorization = new Headers(init?.headers).get("authorization") || "";
+      return Response.json(openaiBody(2));
+    })));
+
+    const updated = await updateEmbeddingConfig(USER, {
+      provider: "bananabread",
+      api_url: "http://localhost:8008/v1/embeddings",
+      model: "mixedbread-ai/mxbai-embed-large-v1",
+      api_key: "bananabread-user-key",
+    });
+    await embedTexts(USER, ["hello"]);
+
+    expect(updated.provider).toBe("bananabread");
+    expect(updated.api_url).toBe("http://localhost:8008/v1/embeddings");
+    expect(updated.connectionProfiles[0]).toEqual(expect.objectContaining({
+      id: PRIMARY_ID,
+      provider: "bananabread",
+      api_url: "http://localhost:8008/v1/embeddings",
+      model: "mixedbread-ai/mxbai-embed-large-v1",
+      hasSecret: true,
+    }));
+    expect(secrets.get(sk(USER, embeddingProfileSecretKey(PRIMARY_ID)))).toBe("bananabread-user-key");
+    expect(requestUrl).toBe("http://localhost:8008/v1/embeddings");
+    expect(authorization).toBe("Bearer bananabread-user-key");
+  });
+
   test("copies a selected OpenAI-compatible LLM connection key into its dedicated embedding profile", async () => {
     const legacyKey = "shared-openai-compatible-key";
     putCfg(enabledProfiles());
