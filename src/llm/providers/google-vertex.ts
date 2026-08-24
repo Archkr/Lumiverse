@@ -10,6 +10,7 @@ import {
   GOOGLE_SEARCH_HANDLED_PARAMS,
   GOOGLE_SEARCH_PARAMETERS,
 } from "./google-search";
+import { splitLeadingSystemMessagePrefix } from "../system-message-prefix";
 
 // ── Service account JWT → OAuth2 access token ──────────────────────────────
 
@@ -559,8 +560,11 @@ export class GoogleVertexProvider implements LlmProvider {
   private buildBody(request: GenerationRequest): any {
     const params = request.parameters || {};
 
-    const systemMessages = request.messages.filter((m) => m.role === "system");
-    const otherMessages = request.messages.filter((m) => m.role !== "system");
+    // Vertex exposes a single systemInstruction. Preserve any system message
+    // after the leading prefix in-place as user-role content so configured
+    // in-history/post-history depth remains meaningful.
+    const { prefix: systemMessages, remainder: otherMessages } =
+      splitLeadingSystemMessagePrefix(request.messages);
     const toolNameById = this.buildToolNameMap(request.messages);
     const replayThoughtSignatures = params._replay_thought_signatures === true;
     const functionTools = request.tools ?? [];

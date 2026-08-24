@@ -3468,15 +3468,26 @@ export async function assemblePrompt(
       );
       if (resolved) {
         const role = (block.role || "system") as LlmMessage["role"];
-        result.push({ role, content: resolved });
-        breakdown.push({
-          type: "block",
-          name: block.name,
-          role: block.role,
-          content: resolved,
-          blockId: block.id,
-          marker: block.marker,
-        });
+        if (block.position === "in_history") {
+          pendingDepthBlocks.push({
+            role,
+            depth: Math.max(0, block.depth || 0),
+            content: resolved,
+            blockName: block.name,
+            blockId: block.id,
+            marker: block.marker,
+          });
+        } else {
+          result.push({ role, content: resolved });
+          breakdown.push({
+            type: "block",
+            name: block.name,
+            role: block.role,
+            content: resolved,
+            blockId: block.id,
+            marker: block.marker,
+          });
+        }
       }
       continue;
     }

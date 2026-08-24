@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { getTextContent } from "../types";
 import { throwProviderResponseError } from "../../utils/provider-errors";
+import { splitLeadingSystemMessagePrefix } from "../system-message-prefix";
 
 export class OpenAIProvider extends OpenAICompatibleProvider {
   readonly name = "openai";
@@ -122,16 +123,19 @@ export class OpenAIProvider extends OpenAICompatibleProvider {
    * Key differences from /v1/chat/completions:
    * - `messages` → `input`
    * - `max_tokens` → `max_output_tokens`
-   * - System messages are extracted into the top-level `instructions` field
+   * - The leading system-message prefix becomes top-level `instructions`
+   *   while later system messages remain transcript items
    * - `frequency_penalty`, `presence_penalty`, `stop` are not supported
    * - Multipart content uses `input_text` / `input_image` / `input_audio` types
    */
   private buildResponsesBody(request: GenerationRequest): Record<string, any> {
     const params = request.parameters || {};
 
-    // Separate system messages → instructions, keep user/assistant as input
-    const systemMessages = request.messages.filter((m) => m.role === "system");
-    const inputMessages = request.messages.filter((m) => m.role !== "system");
+    // Only the leading system prefix belongs in top-level instructions.
+    // Later system messages may be depth-positioned inside/after history, and
+    // Responses supports compatible message items for preserving transcripts.
+    const { prefix: systemMessages, remainder: inputMessages } =
+      splitLeadingSystemMessagePrefix(request.messages);
 
     const body: Record<string, any> = {
       model: request.model,

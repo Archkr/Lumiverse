@@ -5,6 +5,33 @@ import { GoogleVertexProvider } from "./google-vertex";
 // functionCall is {name, args}, functionResponse is {name, response} with
 // "output"/"error" keys per the docs.
 describe("GoogleVertexProvider tool calling wire shape", () => {
+  test("hoists only the leading system prefix and preserves later placement", () => {
+    const provider = new GoogleVertexProvider();
+    const body = (provider as any).buildBody({
+      model: "gemini-2.5-flash",
+      messages: [
+        { role: "system", content: "prefix one" },
+        { role: "system", content: "prefix two" },
+        { role: "user", content: "old turn" },
+        { role: "system", content: "depth instruction" },
+        { role: "assistant", content: "reply" },
+        { role: "system", content: "post-history instruction" },
+      ],
+      parameters: {},
+      tools: [],
+    });
+
+    expect(body.systemInstruction).toEqual({
+      parts: [{ text: "prefix one\n\nprefix two" }],
+    });
+    expect(body.contents.map((content: any) => [content.role, content.parts[0].text])).toEqual([
+      ["user", "old turn"],
+      ["user", "depth instruction"],
+      ["model", "reply"],
+      ["user", "post-history instruction"],
+    ]);
+  });
+
   test("tool_use part becomes a functionCall on a model-role Content", () => {
     const provider = new GoogleVertexProvider();
     const body = (provider as any).buildBody({

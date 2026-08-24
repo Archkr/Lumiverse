@@ -92,6 +92,30 @@ describe("OpenAIProvider Responses API tool calling wire shape", () => {
     expect(body.instructions).toBe("be nice");
     expect(body.input).toEqual([{ role: "user", content: "hi" }]);
   });
+
+  test("keeps in-history and post-history system messages at their positions", () => {
+    const provider = new OpenAIProvider();
+    const body = (provider as any).buildResponsesBody({
+      model: "gpt-5",
+      messages: [
+        { role: "system", content: "prefix one" },
+        { role: "system", content: "prefix two" },
+        { role: "user", content: "old turn" },
+        { role: "system", content: "depth instruction" },
+        { role: "assistant", content: "reply" },
+        { role: "system", content: "post-history instruction" },
+      ],
+      parameters: {},
+    });
+
+    expect(body.instructions).toBe("prefix one\n\nprefix two");
+    expect(body.input).toEqual([
+      { role: "user", content: "old turn" },
+      { role: "system", content: "depth instruction" },
+      { role: "assistant", content: "reply" },
+      { role: "system", content: "post-history instruction" },
+    ]);
+  });
 });
 
 describe("OpenAIProvider Responses API usage mapping", () => {
