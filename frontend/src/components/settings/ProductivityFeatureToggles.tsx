@@ -42,7 +42,12 @@ const TAB_LOCATION_OPTIONS = [
   { value: 'bottom', label: 'Bottom (End of list)' },
 ] as const
 
-export default function ProductivityFeatureToggles() {
+const SUITE_FEATURE_FLAGS = new Set<ProductivityFeatureFlag>([
+  'enableToolbarIconReorder',
+  'showComposerCustomizeGear',
+])
+
+export default function ProductivityFeatureToggles({ hasLumiverseSuite = false }: { hasLumiverseSuite?: boolean }) {
   const showEmbeddingFallbackUi = useStore((state) => readProductivityFlag(state, 'showEmbeddingFallbackUi'))
   const showCortexSecondaryUi = useStore((state) => readProductivityFlag(state, 'showCortexSecondaryUi'))
   const showEditAndSend = useStore((state) => readProductivityFlag(state, 'showEditAndSend'))
@@ -89,7 +94,7 @@ export default function ProductivityFeatureToggles() {
           </select>
           <small>Choose where the Productivity tab appears in the settings sidebar (defaults to behind Display &amp; Layout).</small>
         </div>
-        {PRODUCTIVITY_FEATURE_FLAGS.map((key) => {
+        {PRODUCTIVITY_FEATURE_FLAGS.filter((key) => hasLumiverseSuite || !SUITE_FEATURE_FLAGS.has(key)).map((key) => {
           const copy = FLAG_COPY[key]
           return (
             <div className={styles.checkField} key={key} data-productivity-feature-flag={key}>

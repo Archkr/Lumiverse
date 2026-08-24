@@ -42,6 +42,7 @@ import { ENTRY_METADATA_VERSION } from '@/lib/lorebookEntryColumns'
 import { getCharacterAvatarLargeUrlById } from '@/lib/avatarUrls'
 import { getHomepageCardMetadata, getHomepageVisibleTags } from '@/lib/characterDisplaySettings'
 import { readDeviceLandingPageStartTab, writeDeviceLandingPageStartTab } from '@/lib/landingPageStartTab'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import type { Character } from '@/types/api'
 import ProductivityFeatureToggles from './ProductivityFeatureToggles'
 import styles from './ProductivitySettings.module.css'
@@ -228,10 +229,7 @@ export default function ProductivitySettings() {
   const store = useStore((state) => state)
   const [toolbarQuery, setToolbarQuery] = useState('')
   const userId = (store as { user?: { id?: string } | null }).user?.id ?? null
-  const hasLumiverseSuite = ((store as { extensions?: unknown[] }).extensions ?? []).some((extension) => {
-    const candidate = extension as { identifier?: unknown; enabled?: unknown; has_frontend?: unknown }
-    return candidate.identifier === 'lumiverse_suite' && candidate.enabled === true && candidate.has_frontend === true
-  })
+  const hasLumiverseSuite = hasEnabledFrontendExtension(store.extensions, 'lumiverse_suite')
   const [landingStartTab, setLandingStartTab] = useState(() => readDeviceLandingPageStartTab(userId))
   useEffect(() => {
     setLandingStartTab(readDeviceLandingPageStartTab(userId))
@@ -368,8 +366,9 @@ export default function ProductivitySettings() {
   })
 
   return <section className={styles.panel}>
-    <ProductivityFeatureToggles />
+    <ProductivityFeatureToggles hasLumiverseSuite={hasLumiverseSuite} />
 
+    {hasLumiverseSuite && <>
     <section className={styles.card} aria-labelledby="productivity-quick-title" data-spindle-mount="settings_section" data-spindle-scope="settings-section:productivity:quick"><CardHeader id="productivity-quick-title" cardId="quick" title={labels.quickToolbarSettings} description="Choose a confirmed variant and persist its layout." action={<Toggle.Switch checked={quick.enabled !== false} onChange={(enabled) => update('quickToolbarSettings', { enabled })} aria-label="Enable Quick Toolbar" title="Enable Quick Toolbar" />} /><div className={styles.cardBody}>
       <div className={styles.quickToolbarControls} data-productivity-layout="quick-toolbar-controls">
         <SegmentedField label="Variant" value={quick.variant} options={[['v1-free', 'V1 Free'], ['v2-settings-adjacent', 'V2 Adjacent']]} onChange={(variant) => update('quickToolbarSettings', { variant })} />
@@ -549,5 +548,6 @@ export default function ProductivitySettings() {
       <div className={styles.lorebookMetadata} data-lorebook-section="metadata"><MetadataChecklist label="Visible entry metadata" options={LOREBOOK_ENTRY_METADATA_OPTIONS} value={lorebook.visibleEntryMetadata} onChange={(visibleEntryMetadata) => update('lorebookEditorSettings', { visibleEntryMetadata, entryMetadataVersion: ENTRY_METADATA_VERSION })} /></div>
       <div className={styles.lorebookResets} data-lorebook-section="resets"><div className={styles.presetRow}><button type="button" className={styles.resetButton} onClick={resetLorebookLayout}>Reset current editor layout</button><button type="button" className={styles.resetButton} onClick={() => update('lorebookEditorSettings', PRODUCTIVITY_DEFAULTS.lorebookEditorSettings)}>Reset all Lorebook Editor settings</button></div></div>
     </div></section>
+    </>}
   </section>
 }

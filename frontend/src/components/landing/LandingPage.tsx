@@ -64,6 +64,7 @@ import {
   type LandingPageTab,
 } from '@/lib/landingPageTabs'
 import { readDeviceLandingPageStartTab } from '@/lib/landingPageStartTab'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import { resolveLandingChatPageSize } from '@/lib/landingChatPagination'
 import {
   consumeLandingPageChatReturn,
@@ -1053,9 +1054,7 @@ function LandingPageNative() {
   const setSetting = useStore((s) => s.setSetting)
   const logout = useStore((s) => s.logout)
   const authUser = useStore((s) => s.user)
-  const suiteExtensionEnabled = useStore((s) => s.extensions.some((extension) => (
-    extension.identifier === 'lumiverse_suite' && extension.enabled && extension.has_frontend
-  )))
+  const suiteExtensionEnabled = useStore((s) => hasEnabledFrontendExtension(s.extensions, 'lumiverse_suite'))
   const [restoredSnapshot] = useState(() => readLandingPageSnapshot(authUser?.id))
   const [isChatReturn] = useState(() => consumeLandingPageChatReturn() || Boolean(restoredSnapshot))
   const hasRestoredChatReturn = Boolean(restoredSnapshot)

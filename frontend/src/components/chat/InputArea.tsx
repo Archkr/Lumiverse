@@ -80,6 +80,7 @@ import { registerChatDockerActionOwners } from './chatDockerActionCatalog'
 import { acknowledgeConnectionProfileSelection } from '@/lib/uiProductivityDefaults'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
 import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import { useQuickToolbarActions } from '@/components/quick-toolbar/useQuickToolbarActions'
 import InputAreaCustomizeModal, {
   fromComposerExtraId,
@@ -290,10 +291,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
   const messageSelectMode = useStore((s) => s.messageSelectMode)
   const enableToolbarIconReorder = useStore((state) => readProductivityFlag(state, 'enableToolbarIconReorder'))
   const showComposerCustomizeGear = useStore((state) => readProductivityFlag(state, 'showComposerCustomizeGear'))
-  const hasLumiverseSuite = useStore((state) => ((state as { extensions?: unknown[] }).extensions ?? []).some((extension) => {
-    const candidate = extension as { identifier?: unknown; enabled?: unknown; has_frontend?: unknown }
-    return candidate.identifier === 'lumiverse_suite' && candidate.enabled === true && candidate.has_frontend === true
-  }))
+  const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
   const [openPopover, setOpenPopover] = useState<null | 'guides' | 'quick' | 'persona' | 'tools' | 'extras' | 'altFields' | 'addons' | 'databank' | 'groupMember' | 'connections'>(null)
   const openPopoverRef = useRef(openPopover)
   useEffect(() => {
@@ -3287,7 +3285,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
               <Link2 size={14} />
             </button>
           ),
-          connectionsPicker: (() => {
+          connectionsPicker: hasLumiverseSuite ? (() => {
             const picker = qtActionById.get('lumiverse_suite.connections_picker.open')
             return (
               <button
@@ -3304,7 +3302,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
                 <Waypoints size={14} />
               </button>
             )
-          })(),
+          })() : null,
           altFields: altFieldsButton,
           addons: activePersonaId ? (
             <button
@@ -3397,7 +3395,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
               order={composerActionBar.order}
               isVisible={composerActionBar.isVisible}
               reorder={composerActionBar.reorder}
-              enableReorder={enableToolbarIconReorder}
+              enableReorder={hasLumiverseSuite && enableToolbarIconReorder}
               renderUnit={(id) => {
                 if (isComposerActionId(id)) return composerActions[id]
                 if (fromComposerExtraId(id) === 'lumiverse_suite.connections_picker.open') return composerActions.connectionsPicker
@@ -3443,7 +3441,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
         )
       })()}
 
-      {customizeOpen && (
+      {hasLumiverseSuite && customizeOpen && (
         <InputAreaCustomizeModal
           onClose={() => setCustomizeOpen(false)}
           order={composerActionBar.order}

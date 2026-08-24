@@ -1,8 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { resolve } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 
 import { PRODUCTIVITY_DEFAULTS } from '@/lib/uiProductivityDefaults'
@@ -42,6 +41,7 @@ Object.assign(globalThis, {
   window: dom.window,
   document: dom.window.document,
   HTMLElement: dom.window.HTMLElement,
+  HTMLInputElement: dom.window.HTMLInputElement,
   Element: dom.window.Element,
   Node: dom.window.Node,
   navigator: dom.window.navigator,
@@ -49,7 +49,13 @@ Object.assign(globalThis, {
 })
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+const { createRoot } = await import('react-dom/client')
+
 mock.module('@/store', () => ({ useStore }))
+// ProductivityFeatureToggles only needs tab metadata to build its location
+// options. Keep this Bun renderer test out of the registry's Vite-only i18n
+// resource graph (`import.meta.glob`).
+mock.module('@/lib/settings-tab-registry', () => ({ SETTINGS_TABS: [] }))
 mock.module('@/components/quick-toolbar/useQuickToolbarActions', () => ({
   DESIGN_DEFAULT_IDS: ['profile', 'connections', 'lorebook', 'settings'],
   useQuickToolbarActions: () => ({
@@ -81,6 +87,31 @@ mock.module('@/store/slices/settings', () => ({
 }))
 
 const { default: ProductivitySettings } = await import('./ProductivitySettings')
+
+beforeEach(() => {
+  Object.assign(state, {
+    ...PRODUCTIVITY_DEFAULTS,
+    quickToolbarSettings: {
+      ...PRODUCTIVITY_DEFAULTS.quickToolbarSettings,
+      variant: 'v2-settings-adjacent',
+    },
+    connectionsPickerSettings: {
+      ...PRODUCTIVITY_DEFAULTS.connectionsPickerSettings,
+      profileTags: [{ id: 'tag-1', name: 'Primary', color: '#64748B', order: 0 }],
+      visibleTagIds: ['tag-1'],
+    },
+    loreIndicatorSettings: {
+      ...PRODUCTIVITY_DEFAULTS.loreIndicatorSettings,
+      variant: 'v4-bottom-strip',
+    },
+    profiles: [],
+    user: { id: 'productivity-test-user' },
+    extensions: [{ identifier: 'lumiverse_suite', enabled: true, has_frontend: true }],
+  })
+  delete (state as typeof state & { characters?: unknown }).characters
+  persistedKeys.length = 0
+  document.body.replaceChildren()
+})
 
 describe('canonical Productivity settings renderer', () => {
   test('renders the approved variant controls and V2 scale guard', () => {
@@ -168,9 +199,9 @@ describe('canonical Productivity settings renderer', () => {
     expect(picker?.value).toBe('#123456')
     await act(async () => {
       if (picker) {
-        picker.value = '#abcdef'
-        picker.dispatchEvent(new Event('input', { bubbles: true }))
-        picker.dispatchEvent(new Event('change', { bubbles: true }))
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(picker, '#abcdef')
+        picker.dispatchEvent(new dom.window.Event('input', { bubbles: true, cancelable: true }))
+        await new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0))
       }
       await Promise.resolve()
     })
@@ -267,7 +298,7 @@ describe('canonical Productivity settings renderer', () => {
     const css = await Bun.file(resolve(import.meta.dir, 'ProductivitySettings.module.css')).text()
 
     expect(markup).toContain('data-productivity-layout="quick-toolbar-controls"')
-    expect((markup.match(/data-productivity-layout="quick-toolbar-slider-pair"/g) ?? []).length).toBe(2)
+    expect((markup.match(/data-productivity-layout="quick-toolbar-slider-pair"/g) ?? []).length).toBe(4)
     expect(markup).toMatch(/id="quick-scale"[^>]*disabled=""/)
     expect(markup).toContain('data-productivity-layout="character-thumbnail-pair"')
     expect(markup).toContain('data-lorebook-section="segments"')
@@ -306,7 +337,7 @@ describe('canonical Productivity settings renderer', () => {
     expect(css).toContain('@media (max-width: 720px)')
   })
 
-  test('only offers the device-local start view when Lumiverse Suite is enabled', () => {
+  test('removes Suite-owned settings when Lumiverse Suite is unavailable', () => {
     const originalExtensions = state.extensions
     state.extensions = []
 
@@ -314,6 +345,17 @@ describe('canonical Productivity settings renderer', () => {
 
     state.extensions = originalExtensions
     expect(markup).not.toContain('Landing page start view')
+    expect(markup).not.toContain('Enable Quick Toolbar')
+    expect(markup).not.toContain('Enable Connections Picker')
+    expect(markup).not.toContain('Enable Lore Indicator')
+    expect(markup).not.toContain('Homepage Character Library')
+    expect(markup).not.toContain('Character Tab Display')
+    expect(markup).not.toContain('Enable portrait dock')
+    expect(markup).not.toContain('Lorebook Editor')
+    expect(markup).not.toContain('Drag to reorder toolbar icons')
+    expect(markup).not.toContain('Customize composer gear')
+    expect(markup).toContain('Embedding fallback profiles')
+    expect(markup).toContain('Edit and Send')
   })
 
   test('uses the selected character avatar and metadata in the homepage preview', () => {
@@ -398,11 +440,11 @@ describe('canonical Productivity settings renderer', () => {
   test('keeps V2 toolbar slider cells symmetric and moves its helper below the pair', async () => {
     const markup = renderToStaticMarkup(<ProductivitySettings />)
     const css = await Bun.file(resolve(import.meta.dir, 'ProductivitySettings.module.css')).text()
-    const secondPairStart = markup.indexOf('data-productivity-layout="quick-toolbar-slider-pair"', markup.indexOf('data-productivity-layout="quick-toolbar-slider-pair"') + 1)
+    const lastPairStart = markup.lastIndexOf('data-productivity-layout="quick-toolbar-slider-pair"')
     const hintIndex = markup.indexOf('id="quick-scale-v2-hint"')
 
-    expect(secondPairStart).toBeGreaterThan(-1)
-    expect(hintIndex).toBeGreaterThan(secondPairStart)
+    expect(lastPairStart).toBeGreaterThan(-1)
+    expect(hintIndex).toBeGreaterThan(lastPairStart)
     expect(markup).toContain('aria-describedby="quick-scale-v2-hint"')
     expect((markup.match(/id="quick-scale-v2-hint"/g) ?? []).length).toBe(1)
     expect(css).toContain('.quickToolbarPairHint')

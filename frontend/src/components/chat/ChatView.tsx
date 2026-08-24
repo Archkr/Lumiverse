@@ -54,6 +54,7 @@ import clsx from 'clsx'
 import { markLandingPageChatReturn, peekLandingPageSnapshot } from '@/lib/landingPageSnapshot'
 import { holdImagesForTransition } from '@/lib/imageDecodeCache'
 import { takeChatNavigationSnapshot } from '@/lib/chatNavigationSnapshot'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 
 interface CortexNotice {
   variant: 'processing' | 'error'
@@ -256,11 +257,12 @@ export default function ChatView() {
   const portraitPanelOpen = useStore((s) => s.portraitPanelOpen)
   const togglePortraitPanel = useStore((s) => s.togglePortraitPanel)
   const portraitPanelSide = useStore((s) => s.portraitPanelSide)
+  const suiteExtensionEnabled = useStore((s) => hasEnabledFrontendExtension(s.extensions, 'lumiverse_suite'))
   const [portraitSurfaceOccupied, setPortraitSurfaceOccupied] = useState(false)
   const quickToolbarSettings = useStore((s) => s.quickToolbarSettings)
   const quickToolbarPlacement = readQuickToolbarPlacement(quickToolbarSettings)
-  const dockQuickToolbar = quickToolbarPlacement === 'chat_top_dock'
-  const keepFloatingDockHost = quickToolbarPlacement === 'floating' && keepDockEnabledWhenFloating(quickToolbarSettings)
+  const dockQuickToolbar = suiteExtensionEnabled && quickToolbarPlacement === 'chat_top_dock'
+  const keepFloatingDockHost = suiteExtensionEnabled && quickToolbarPlacement === 'floating' && keepDockEnabledWhenFloating(quickToolbarSettings)
   const chatTopDockRequest = effectiveQuickToolbarDockRequest(
     dockQuickToolbar || keepFloatingDockHost ? 'strip' : 'floating',
     quickToolbarSettings,
@@ -1250,7 +1252,7 @@ export default function ChatView() {
             <div data-spindle-mount="chat_header_center" data-spindle-scope={`chat:${chatId}:header-center`} style={{ display: 'contents' }} />
             <div data-spindle-mount="chat_header_right" data-spindle-scope={`chat:${chatId}:header-right`} style={{ display: 'contents' }} />
             <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request={chatTopDockRequest}>
-              {isShowNativeSelectMessages(quickToolbarSettings) && (
+              {suiteExtensionEnabled && isShowNativeSelectMessages(quickToolbarSettings) && (
                 <button
                   type="button"
                   hidden={!(dockQuickToolbar || keepFloatingDockHost)}
@@ -1263,7 +1265,7 @@ export default function ChatView() {
                   <ListChecks size={14} />
                 </button>
               )}
-              {isShowNativeScrollToTop(quickToolbarSettings) && totalChatLength > 1 && (
+              {suiteExtensionEnabled && isShowNativeScrollToTop(quickToolbarSettings) && totalChatLength > 1 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}
@@ -1277,7 +1279,7 @@ export default function ChatView() {
                     : <ArrowUp size={14} />}
                 </button>
               )}
-              {isShowNativeBrowseMessages(quickToolbarSettings) && totalChatLength > 0 && (
+              {suiteExtensionEnabled && isShowNativeBrowseMessages(quickToolbarSettings) && totalChatLength > 0 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}
