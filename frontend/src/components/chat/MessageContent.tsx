@@ -2175,7 +2175,7 @@ export default function MessageContent({
         >
           <div ref={contentBodyRef} className={styles.longMessageBody}>
             {renderedBlocks}
-            <SpindleMessageWidgets messageId={messageId} />
+      <SpindleMessageWidgets messageId={messageId} chatId={chatId} />
           </div>
         </div>
         {longMessageEligible && longMessageOverflowing && (

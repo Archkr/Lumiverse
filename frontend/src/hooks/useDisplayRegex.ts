@@ -356,7 +356,7 @@ function useDisplayPreprocessedState(
           }
           return { content, ok: false }
         })
-      assignedPromise = trackInitialDisplayResolve(promise)
+      assignedPromise = trackInitialDisplayResolve(promise, chatId)
       displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
     }
     displayPreprocessCache.get(key)?.promise?.then(apply)
@@ -766,7 +766,7 @@ export function useDisplayRegex(
           }
           return createEmptyResolvedTemplates()
         })
-      assignedPromise = trackInitialDisplayResolve(promise)
+      assignedPromise = trackInitialDisplayResolve(promise, activeChatId)
       displayRegexResolutionCache.set(templateCacheKey, { promise: assignedPromise })
     }
 
@@ -954,7 +954,7 @@ export function useDisplayRegex(
           }
           return fallbackContent
         })
-      assignedPromise = trackInitialDisplayResolve(promise)
+      assignedPromise = trackInitialDisplayResolve(promise, activeChatId)
 
       displayRegexContentCache.set(contentCacheKey, {
         promise: assignedPromise,

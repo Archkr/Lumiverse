@@ -266,21 +266,26 @@ function processMessageTagIntercepts(intercepts: PendingTagIntercept[], delivere
   // Handlers (SimTracker, scene-card widgets, etc.) insert DOM after this
   // return. Hold the reveal until those first-wave upserts have a chance to
   // land — otherwise the chat unmasks and the widgets shove every row.
-  let started = 0
+  const activeWorkScopes = new Set<string | undefined>()
   for (const { payload, interceptor } of intercepts) {
     const key = deliveryKey(payload, interceptor)
     if (delivered.has(key)) continue
     delivered.add(key)
-    if (started === 0) beginChatDisplayWork()
-    started += 1
+    const workScope = payload.chatId
+    if (!activeWorkScopes.has(workScope)) {
+      activeWorkScopes.add(workScope)
+      beginChatDisplayWork(workScope)
+    }
     try {
       interceptor.handler({ ...payload, extensionId: interceptor.extensionId })
     } catch (err) {
       console.error(`[Spindle] Tag interceptor failed (${interceptor.extensionId}):`, err)
     }
   }
-  if (started > 0) {
-    queueMicrotask(endChatDisplayWork)
+  if (activeWorkScopes.size > 0) {
+    queueMicrotask(() => {
+      for (const workScope of activeWorkScopes) endChatDisplayWork(workScope)
+    })
   }
 }
 

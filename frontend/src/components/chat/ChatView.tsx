@@ -26,7 +26,7 @@ import useIsMobile from '@/hooks/useIsMobile'
 import { chatLoreDockMode, chatTopDockMode, effectiveQuickToolbarDockRequest } from '@/lib/chatSurfaceLayout'
 import { measureLayoutHeight } from '@/lib/uiScale'
 import { resolveCouncilForChat } from '@/hooks/useCouncilProfiles'
-import { CHAT_REVEAL_SETTLE_CAP_MS } from '@/lib/chatDisplaySettle'
+import { CHAT_REVEAL_SETTLE_CAP_MS, getChatDisplaySettleDiagnostics } from '@/lib/chatDisplaySettle'
 import MessageList from './MessageList'
 import MessageSelectBar from './MessageSelectBar'
 import InputArea from './InputArea'
@@ -404,7 +404,9 @@ export default function ChatView() {
 
     setChatChromeEntering(true)
     document.body.setAttribute('data-chat-chrome-entering', 'true')
-    const handlePopulated = () => {
+    const handlePopulated = (event: Event) => {
+      const populatedChatId = (event as CustomEvent<{ chatId?: string }>).detail?.chatId
+      if (populatedChatId !== chatId) return
       setChatChromeEntering(false)
       document.body.removeAttribute('data-chat-chrome-entering')
       if (chromeEnterTimerRef.current !== null) {
@@ -412,7 +414,7 @@ export default function ChatView() {
         chromeEnterTimerRef.current = null
       }
     }
-    window.addEventListener('lumiverse:chat-items-populated', handlePopulated, { once: true })
+    window.addEventListener('lumiverse:chat-items-populated', handlePopulated)
 
     // Fallback if virtualizer fails or is completely empty. Must exceed the
     // MessageList settle gate (CHAT_REVEAL_SETTLE_CAP_MS) so a chat whose
@@ -420,6 +422,12 @@ export default function ChatView() {
     // timer racing the populated dispatch.
     chromeEnterTimerRef.current = window.setTimeout(() => {
       chromeEnterTimerRef.current = null
+      const detail = {
+        elapsedMs: CHAT_REVEAL_SETTLE_CAP_MS + 1500,
+        ...getChatDisplaySettleDiagnostics(chatId),
+      }
+      console.warn('[ChatDisplaySettle] ChatView fallback reveal', detail)
+      window.dispatchEvent(new CustomEvent('lumiverse:chat-display-fallback-timeout', { detail }))
       setChatChromeEntering(false)
       document.body.removeAttribute('data-chat-chrome-entering')
     }, CHAT_REVEAL_SETTLE_CAP_MS + 1500)
@@ -711,7 +719,7 @@ export default function ChatView() {
         if (msgPage.data.length === 0) {
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-              window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated'))
+              window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated', { detail: { chatId } }))
             })
           })
         }

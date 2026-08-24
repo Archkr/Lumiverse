@@ -4,6 +4,7 @@ import {
   applyMessageTagRuntimeCapabilityChange,
   areMessageTagRuntimeInterceptorsReady,
   clearAttachedMessageTagInterceptors,
+  getMessageTagRuntimeReadinessDiagnostics,
   noteMessageTagInterceptorAttached,
   noteMessageTagInterceptorDetached,
   reconcileMessageTagRuntimeCapabilities,
@@ -40,8 +41,20 @@ describe('message tag runtime readiness', () => {
     ])
     expect(areMessageTagRuntimeInterceptorsReady()).toBe(false)
 
+    expect(getMessageTagRuntimeReadinessDiagnostics()).toMatchObject({
+      ready: false,
+      snapshotReady: true,
+      declaredExtensions: [{ extensionId: 'tracker', attachedCount: 0 }],
+      missingExtensionIds: ['tracker'],
+    })
+
     noteMessageTagInterceptorAttached('tracker')
     expect(areMessageTagRuntimeInterceptorsReady()).toBe(true)
+    expect(getMessageTagRuntimeReadinessDiagnostics()).toMatchObject({
+      ready: true,
+      attachedInterceptors: [{ extensionId: 'tracker', count: 1 }],
+      missingExtensionIds: [],
+    })
 
     noteMessageTagInterceptorDetached('tracker')
     expect(areMessageTagRuntimeInterceptorsReady()).toBe(false)

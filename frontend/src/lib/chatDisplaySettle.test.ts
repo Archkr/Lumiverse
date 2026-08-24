@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   beginChatDisplayWork,
   endChatDisplayWork,
+  getChatDisplaySettleDiagnostics,
   isChatDisplaySettled,
   resetChatDisplaySettleForTests,
   trackInitialDisplayResolve,
@@ -56,5 +57,36 @@ describe('chatDisplaySettle', () => {
     expect(isChatDisplaySettled()).toBe(false)
     endChatDisplayWork()
     expect(isChatDisplaySettled()).toBe(true)
+  })
+
+  test('work from a previous chat does not hold the current chat closed', async () => {
+    let release!: (value: string) => void
+    const previousChatWork = trackInitialDisplayResolve(
+      new Promise<string>((resolve) => { release = resolve }),
+      'chat-a',
+    )
+    beginChatDisplayWork('chat-a')
+
+    expect(isChatDisplaySettled('chat-a')).toBe(false)
+    expect(isChatDisplaySettled('chat-b')).toBe(true)
+    expect(getChatDisplaySettleDiagnostics('chat-a')).toMatchObject({
+      chatId: 'chat-a',
+      settled: false,
+      blockers: ['initial-display-resolves', 'display-work'],
+      pendingFirstResolves: { chat: 1, global: 0 },
+      pendingDisplayWork: { chat: 1, global: 0 },
+    })
+    expect(getChatDisplaySettleDiagnostics('chat-b')).toMatchObject({
+      chatId: 'chat-b',
+      settled: true,
+      blockers: [],
+      pendingFirstResolves: { chat: 0, global: 0 },
+      pendingDisplayWork: { chat: 0, global: 0 },
+    })
+
+    endChatDisplayWork('chat-a')
+    release('done')
+    await previousChatWork
+    expect(isChatDisplaySettled('chat-a')).toBe(true)
   })
 })

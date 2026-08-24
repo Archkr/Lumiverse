@@ -18,6 +18,15 @@ let declaredExtensions = new Set<string>()
 const attachedCounts = new Map<string, number>()
 const queuedChanges: FrontendRuntimeCapabilityChange[] = []
 
+export type MessageTagRuntimeReadinessDiagnostics = {
+  ready: boolean
+  snapshotReady: boolean
+  visibleExtensionIds: string[]
+  declaredExtensions: Array<{ extensionId: string; attachedCount: number }>
+  attachedInterceptors: Array<{ extensionId: string; count: number }>
+  missingExtensionIds: string[]
+}
+
 function hasMessageTagCapability(extension: ExtensionWithRuntimeCapabilities): boolean {
   return Array.isArray(extension.frontend_runtime_capabilities)
     && extension.frontend_runtime_capabilities.includes(MESSAGE_TAG_INTERCEPTOR_RUNTIME_CAPABILITY)
@@ -79,6 +88,28 @@ export function areMessageTagRuntimeInterceptorsReady(): boolean {
     if ((attachedCounts.get(extensionId) ?? 0) === 0) return false
   }
   return true
+}
+
+/** Read-only state for diagnosing a chat reveal that reached its settle cap. */
+export function getMessageTagRuntimeReadinessDiagnostics(): MessageTagRuntimeReadinessDiagnostics {
+  const declared = [...declaredExtensions]
+    .sort()
+    .map((extensionId) => ({
+      extensionId,
+      attachedCount: attachedCounts.get(extensionId) ?? 0,
+    }))
+  return {
+    ready: areMessageTagRuntimeInterceptorsReady(),
+    snapshotReady,
+    visibleExtensionIds: [...visibleExtensionIds].sort(),
+    declaredExtensions: declared,
+    attachedInterceptors: [...attachedCounts]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([extensionId, count]) => ({ extensionId, count })),
+    missingExtensionIds: declared
+      .filter(({ attachedCount }) => attachedCount === 0)
+      .map(({ extensionId }) => extensionId),
+  }
 }
 
 export function resetMessageTagRuntimeReadinessForTests(): void {

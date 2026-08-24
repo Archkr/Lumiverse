@@ -84,7 +84,7 @@ export function removeMessageWidgetsByExtension(extensionId: string): void {
   if (changed) notify()
 }
 
-export function SpindleMessageWidgets({ messageId }: { messageId?: string }): ReactElement | null {
+export function SpindleMessageWidgets({ messageId, chatId }: { messageId?: string; chatId?: string }): ReactElement | null {
   useSyncExternalStore(subscribeMessageWidgets, getMessageWidgetVersion, getMessageWidgetVersion)
   if (!messageId) return null
   const widgets = widgetsByMessage.get(messageId) || []
@@ -92,13 +92,13 @@ export function SpindleMessageWidgets({ messageId }: { messageId?: string }): Re
   return (
     <>
       {widgets.map((widget) => (
-        <MessageWidgetFrame key={`${widget.extensionId}:${widget.widgetId}`} widget={widget} />
+        <MessageWidgetFrame key={`${widget.extensionId}:${widget.widgetId}`} widget={widget} chatId={chatId} />
       ))}
     </>
   )
 }
 
-function MessageWidgetFrame({ widget }: { widget: MessageWidgetRecord }): ReactElement {
+function MessageWidgetFrame({ widget, chatId }: { widget: MessageWidgetRecord; chatId?: string }): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const widgetKey = `${widget.extensionId}:${widget.messageId}:${widget.widgetId}:${hashWidgetHtml(widget.html)}`
 
@@ -108,11 +108,11 @@ function MessageWidgetFrame({ widget }: { widget: MessageWidgetRecord }): ReactE
 
     let dispose: (() => void) | null = null
     let workOpen = true
-    beginChatDisplayWork()
+    beginChatDisplayWork(chatId)
     const finishWork = () => {
       if (!workOpen) return
       workOpen = false
-      endChatDisplayWork()
+      endChatDisplayWork(chatId)
     }
     const cancel = scheduleSpindleDomTask(() => {
       if (!host.isConnected) {
@@ -158,7 +158,7 @@ function MessageWidgetFrame({ widget }: { widget: MessageWidgetRecord }): ReactE
       finishWork()
       dispose?.()
     }
-  }, [widget, widgetKey])
+  }, [chatId, widget, widgetKey])
 
   return <div ref={hostRef} data-spindle-message-widget-host={widget.widgetId} />
 }

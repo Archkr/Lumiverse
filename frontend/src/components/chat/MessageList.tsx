@@ -1,7 +1,11 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useSyncExternalStore, startTransition, memo, type PointerEvent, type ReactNode, type TouchEvent, type WheelEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer, defaultRangeExtractor, type Range, type VirtualItem, type Virtualizer } from '@tanstack/react-virtual'
-import { CHAT_REVEAL_SETTLE_CAP_MS, isChatDisplaySettled } from '@/lib/chatDisplaySettle'
+import {
+  CHAT_REVEAL_SETTLE_CAP_MS,
+  getChatDisplaySettleDiagnostics,
+  isChatDisplaySettled,
+} from '@/lib/chatDisplaySettle'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import { useChunkedMessages } from '@/hooks/useChunkedMessages'
 import {
@@ -1281,14 +1285,31 @@ export default function MessageList({ messages, chatId, isStreaming, findTarget 
     const dispatchPopulated = () => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          if (!cancelled) window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated'))
+          if (!cancelled) {
+            // Commit the delivered flag with the event. Chat hydration can
+            // temporarily clear the virtual rows during these two frames;
+            // its effect cleanup cancels this dispatch, and the next populated
+            // render must still be allowed to try again.
+            hasFadedInRef.current = true
+            window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated', { detail: { chatId } }))
+          }
         })
       })
     }
     const poll = () => {
       if (cancelled) return
-      if (isChatDisplaySettled() || Date.now() - startedAt >= CHAT_REVEAL_SETTLE_CAP_MS) {
-        hasFadedInRef.current = true
+      const settled = isChatDisplaySettled(chatId)
+      const elapsedMs = Date.now() - startedAt
+      const timedOut = elapsedMs >= CHAT_REVEAL_SETTLE_CAP_MS
+      if (settled || timedOut) {
+        if (timedOut && !settled) {
+          const detail = {
+            elapsedMs,
+            ...getChatDisplaySettleDiagnostics(chatId),
+          }
+          console.warn('[ChatDisplaySettle] Reveal reached settle cap', detail)
+          window.dispatchEvent(new CustomEvent('lumiverse:chat-display-settle-timeout', { detail }))
+        }
         dispatchPopulated()
         return
       }
