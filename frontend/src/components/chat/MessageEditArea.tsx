@@ -290,6 +290,7 @@ function MessageEditAreaNative({
           title={t('messageEdit.contentAria')}
           initialCursorPos={expandCursorRef.current}
           markdownOnly
+          sourceRef={contentRef}
         />
       )}
       {expandedField === 'reasoning' && hasReasoning && (
@@ -301,6 +302,7 @@ function MessageEditAreaNative({
           placeholder={t('messageEdit.reasoningPlaceholder')}
           initialCursorPos={expandCursorRef.current}
           markdownOnly
+          sourceRef={reasoningRef}
         />
       )}
     </div>

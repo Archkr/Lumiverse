@@ -1004,6 +1004,7 @@ export function BlockEditor({
           placeholder={t('blockEditor.contentPlaceholder')}
           macros={availableMacros}
           onRefreshMacros={refreshMacros}
+          sourceRef={textareaRef}
         />
       )}
     </div>
