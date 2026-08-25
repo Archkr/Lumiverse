@@ -29,6 +29,13 @@ export interface DeviceLinkDeps {
   now?: () => number;
 }
 
+export interface DeviceLinkRunnerOptions {
+  /** Stops the local pickup loop without changing the Illarin request. */
+  signal?: AbortSignal;
+  /** Test seam; production waits with an abort-aware timer. */
+  sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+}
+
 const MAX_BACKOFF_MS = 60_000;
 
 export class DeviceLinkSession {
@@ -112,4 +119,39 @@ export class DeviceLinkSession {
         return { status: "unknown_code" };
     }
   }
+}
+
+function sleepUntilNextPoll(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, delayMs);
+    function done(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * Keep an approved remote-device request alive until the installation picks
+ * up its token grant. This belongs in the backend: the browser that displayed
+ * the manual code may close, navigate away, or be on another machine.
+ *
+ * Returns null when the owner starts a replacement link, unlinks, or the
+ * process shuts down. Terminal protocol outcomes are returned after
+ * `onLinked` has durably persisted a successful grant.
+ */
+export async function runDeviceLinkUntilTerminal(
+  session: Pick<DeviceLinkSession, "pollIfDue">,
+  options: DeviceLinkRunnerOptions = {},
+): Promise<Exclude<DeviceLinkStatus, { status: "pending" }> | null> {
+  const sleep = options.sleep ?? sleepUntilNextPoll;
+  while (!options.signal?.aborted) {
+    const result = await session.pollIfDue();
+    if (result.status !== "pending") return result;
+    await sleep(result.retryInMs, options.signal);
+  }
+  return null;
 }

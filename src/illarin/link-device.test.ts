@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DeviceLinkSession } from "./link-device";
+import { DeviceLinkSession, runDeviceLinkUntilTerminal } from "./link-device";
 import type { IllarinFetch } from "./api";
 import type { DeviceRequestResponse, TokenPair } from "./types";
 
@@ -156,5 +156,38 @@ describe("illarin device link state machine", () => {
     harness.advance(20_000);
     const recovered = await harness.session.pollIfDue();
     expect(recovered.status).toBe("linked");
+  });
+
+  test("backend pickup continues without browser-driven status requests", async () => {
+    const harness = makeSession([
+      () => Response.json({ status: "pending" }),
+      () => Response.json({ status: "linked", ...TOKENS }),
+    ]);
+
+    const result = await runDeviceLinkUntilTerminal(harness.session, {
+      sleep: async (delayMs) => {
+        harness.advance(delayMs);
+      },
+    });
+
+    expect(result?.status).toBe("linked");
+    expect(harness.calls()).toBe(2);
+    expect(harness.linked).toEqual([TOKENS]);
+  });
+
+  test("backend pickup stops when its link attempt is cancelled", async () => {
+    const harness = makeSession([() => Response.json({ status: "pending" })]);
+    const controller = new AbortController();
+
+    const result = await runDeviceLinkUntilTerminal(harness.session, {
+      signal: controller.signal,
+      sleep: async (delayMs) => {
+        harness.advance(delayMs);
+        controller.abort();
+      },
+    });
+
+    expect(result).toBeNull();
+    expect(harness.calls()).toBe(0);
   });
 });

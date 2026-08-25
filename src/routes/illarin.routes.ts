@@ -3,8 +3,9 @@
  *
  * The loopback callback never touches this app — the browser hits the
  * backend's temporary listener directly, so unlike the LumiHub flow there is
- * no unauthenticated callback route here. The frontend starts a link,
- * receives the pending link id, and polls /status until the session resolves.
+ * no unauthenticated callback route here. The frontend starts a link and
+ * observes its status; remote-device token pickup runs in this backend so it
+ * survives the settings page closing or running on another machine.
  *
  * Local unlink removes credentials only: until Illarin publishes a remote
  * revocation endpoint, the owner revokes the matching instance (matched by
@@ -18,7 +19,7 @@ import * as svc from "../services/illarin-instance.service";
 import { buildDeclaration } from "../illarin/declaration";
 import { LINK_TIMEOUT_MS, runBrowserLink } from "../illarin/link-browser";
 import { createDeviceRequest } from "../illarin/api";
-import { DeviceLinkSession } from "../illarin/link-device";
+import { DeviceLinkSession, runDeviceLinkUntilTerminal } from "../illarin/link-device";
 import { readBackendVersion } from "../illarin/warmup";
 import { handleTerminalUnauthorized } from "../illarin/tokens";
 import type { BrowserLinkOutcome } from "../illarin/link-browser";
@@ -43,6 +44,10 @@ interface PendingDeviceLink {
   applicationName: string;
   declarationJson: string;
   expiresAt: number;
+  status: "pending" | "linked" | "denied" | "expired" | "unknown_code" | "failed";
+  instanceId?: string;
+  completedAt?: number;
+  controller: AbortController;
 }
 
 // One active device attempt per user, keyed by userId.
@@ -54,7 +59,14 @@ function sweepPendingLinks(): void {
     if (link.status !== "pending" && now > link.expiresAt + 60_000) pendingLinks.delete(id);
   }
   for (const [userId, device] of pendingDeviceLinks) {
-    if (now > device.expiresAt) pendingDeviceLinks.delete(userId);
+    if (device.status === "pending" && now > device.expiresAt) {
+      device.controller.abort();
+      device.status = "expired";
+      device.completedAt = now;
+    }
+    if (device.status !== "pending" && now > (device.completedAt ?? device.expiresAt) + 60_000) {
+      pendingDeviceLinks.delete(userId);
+    }
   }
 }
 
@@ -65,6 +77,15 @@ export function stopIllarinSweeps(): void {
     clearInterval(sweepTimer);
     sweepTimer = null;
   }
+  for (const device of pendingDeviceLinks.values()) device.controller.abort();
+  pendingDeviceLinks.clear();
+}
+
+function cancelDeviceLink(userId: string): void {
+  const pending = pendingDeviceLinks.get(userId);
+  if (!pending) return;
+  pending.controller.abort();
+  pendingDeviceLinks.delete(userId);
 }
 
 function activeLinkFor(userId: string): PendingBrowserLink | undefined {
@@ -200,6 +221,7 @@ illarinRoutes.post("/unlink", async (c) => {
   for (const [id, link] of pendingLinks) {
     if (link.userId === userId) pendingLinks.delete(id);
   }
+  cancelDeviceLink(userId);
   await handleTerminalUnauthorized(userId, "unlinked");
   return c.json({
     success: true,
@@ -235,7 +257,7 @@ illarinRoutes.post("/link/device", async (c) => {
     throw err;
   }
 
-  pendingDeviceLinks.delete(userId);
+  cancelDeviceLink(userId);
 
   const instanceName = typeof body?.instance_name === "string" && body.instance_name.trim()
     ? body.instance_name.trim()
@@ -274,7 +296,7 @@ illarinRoutes.post("/link/device", async (c) => {
     },
   });
   const expiresAt = Date.parse(request.expiresAt);
-  pendingDeviceLinks.set(userId, {
+  const pending: PendingDeviceLink = {
     userId,
     baseUrl,
     session,
@@ -282,7 +304,27 @@ illarinRoutes.post("/link/device", async (c) => {
     applicationName: declaration.applicationName,
     declarationJson,
     expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 10 * 60_000,
-  });
+    status: "pending",
+    controller: new AbortController(),
+  };
+  pendingDeviceLinks.set(userId, pending);
+
+  // The installation, rather than the settings browser, owns grant pickup.
+  // This remains active when the UI closes and follows every interval/backoff
+  // decision made by DeviceLinkSession.
+  void runDeviceLinkUntilTerminal(session, { signal: pending.controller.signal })
+    .then((result) => {
+      if (!result || pendingDeviceLinks.get(userId) !== pending) return;
+      pending.status = result.status;
+      pending.completedAt = Date.now();
+      if (result.status === "linked") pending.instanceId = result.tokens.instance.id;
+    })
+    .catch((err) => {
+      if (pendingDeviceLinks.get(userId) !== pending || pending.controller.signal.aborted) return;
+      console.warn("[Illarin] Device link pickup failed:", err instanceof Error ? err.message : err);
+      pending.status = "failed";
+      pending.completedAt = Date.now();
+    });
 
   // The private deviceCode stays server-side by design.
   return c.json({
@@ -292,21 +334,14 @@ illarinRoutes.post("/link/device", async (c) => {
   });
 });
 
-/** Drive one poll-if-due step of the user's active device attempt. */
+/** Observe the backend-owned remote-device pickup state. */
 illarinRoutes.get("/link/device/status", async (c) => {
   const userId = c.get("userId");
   const pending = pendingDeviceLinks.get(userId);
   if (!pending) return c.json({ status: "none" });
 
-  const result = await pending.session.pollIfDue();
-  if (result.status !== "pending") {
-    pendingDeviceLinks.delete(userId);
+  if (pending.status === "linked") {
+    return c.json({ status: "linked", instance_id: pending.instanceId });
   }
-  if (result.status === "pending") {
-    return c.json({ status: "pending", retry_in_ms: result.retryInMs });
-  }
-  if (result.status === "linked") {
-    return c.json({ status: "linked", instance_id: result.tokens.instance.id });
-  }
-  return c.json({ status: result.status });
+  return c.json({ status: pending.status });
 });
