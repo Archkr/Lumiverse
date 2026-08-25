@@ -39,8 +39,8 @@ export const ILLARIN_CAPABILITIES = Object.freeze([
  * SillyTavern themes are deliberately absent — Lumiverse does not accept them.
  */
 export const ILLARIN_ACCEPTED_TARGETS = Object.freeze([
-  "chara_card_v3",
   "charx",
+  "chara_card_v3",
   "chara_card_v2",
   "lorebook",
   "lorebook_sillytavern",

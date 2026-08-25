@@ -155,17 +155,23 @@ function requireSuccess(result: { success: boolean; error?: string }, delivery: 
   if (!result.success) throw new Error(result.error || `Illarin ${delivery.kind} installation failed`);
 }
 
+export function characterInstallPayload(delivery: IllarinDelivery) {
+  return {
+    source: "illarin" as const,
+    characterId: delivery.assetId,
+    characterName: delivery.name,
+    importUrl: exportUrl(delivery),
+    importEmbeddedWorldbook: true,
+    ...(delivery.format === "charx"
+      ? {}
+      : { galleryImageUrls: delivery.artifacts.filter((item) => item.kind === "picture").map((item) => item.url) }),
+  };
+}
+
 export async function installIllarinDelivery(userId: string, delivery: IllarinDelivery): Promise<void> {
   switch (delivery.kind) {
     case "character": {
-      const result = await installCharacter(delivery.id, userId, {
-        source: "illarin",
-        characterId: delivery.assetId,
-        characterName: delivery.name,
-        importUrl: exportUrl(delivery),
-        importEmbeddedWorldbook: true,
-        galleryImageUrls: delivery.artifacts.filter((item) => item.kind === "picture").map((item) => item.url),
-      });
+      const result = await installCharacter(delivery.id, userId, characterInstallPayload(delivery));
       requireSuccess(result, delivery);
       return;
     }

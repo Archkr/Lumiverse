@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { persistIllarinPresetCover, type PresetCoverDependencies } from "./delivery-installer";
+import {
+  characterInstallPayload,
+  persistIllarinPresetCover,
+  type PresetCoverDependencies,
+} from "./delivery-installer";
 import type { IllarinDelivery } from "./types";
 
 function presetDelivery(artifacts: IllarinDelivery["artifacts"]): IllarinDelivery {
@@ -18,6 +22,27 @@ function presetDelivery(artifacts: IllarinDelivery["artifacts"]): IllarinDeliver
 }
 
 describe("Illarin delivery installer", () => {
+  test("does not import pictures twice when CharX already contains them", () => {
+    const delivery: IllarinDelivery = {
+      id: "delivery-1",
+      assetId: "asset-1",
+      contentGeneration: 2,
+      kind: "character",
+      name: "Aster",
+      format: "charx",
+      label: "Character Card Exchange",
+      queuedAt: "2026-08-24T20:00:00Z",
+      leaseExpiresAt: "2026-08-24T20:15:00Z",
+      artifacts: [
+        { kind: "export", url: "https://illarin.xyz/export" },
+        { kind: "picture", url: "https://illarin.xyz/avatar", role: "avatar", isCover: true },
+        { kind: "picture", url: "https://illarin.xyz/expression", role: "expression", isCover: false },
+      ],
+    };
+
+    expect(characterInstallPayload(delivery).galleryImageUrls).toBeUndefined();
+  });
+
   test("durably stores the designated preset cover and returns its local URL", async () => {
     const fetched: string[] = [];
     const uploaded: File[] = [];

@@ -31,6 +31,7 @@ import {
 } from "./types";
 
 export const DEFAULT_ILLARIN_BASE_URL = "https://illarin.xyz";
+const DELIVERY_COLLECT_TIMEOUT_MS = 40_000;
 
 export class IllarinApiError extends Error {
   readonly status: number;
@@ -75,6 +76,11 @@ export interface IllarinRequestOptions {
   fetchImpl?: IllarinFetch;
 }
 
+interface RequestJsonOptions extends IllarinRequestOptions {
+  accessToken?: string;
+  timeoutMs?: number;
+}
+
 function normalizeBaseUrl(url: string, allowTestHttp = false): string {
   const trimmed = url.trim().replace(/\/+$/, "");
   let parsed: URL;
@@ -101,7 +107,7 @@ async function requestJson<T>(
   method: "POST" | "PUT",
   path: string,
   body: unknown,
-  options?: IllarinRequestOptions & { accessToken?: string },
+  options?: RequestJsonOptions,
 ): Promise<JsonResponse<T>> {
   const doFetch = options?.fetchImpl ?? safeFetch;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -116,6 +122,7 @@ async function requestJson<T>(
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
   } catch {
     // Network failure. For state-changing calls the outcome is unknown;
@@ -320,7 +327,7 @@ export async function collectDeliveries(
     "POST",
     path,
     { acknowledge: [...acknowledge] },
-    { ...options, accessToken },
+    { ...options, accessToken, timeoutMs: DELIVERY_COLLECT_TIMEOUT_MS },
   );
   if (status === 204) return [];
   if (!data || !Array.isArray(data.deliveries) || !data.deliveries.every(isDelivery)) {

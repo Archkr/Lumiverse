@@ -31,8 +31,8 @@ describe("buildDeclaration", () => {
       "chat.lumiverse:theme-install",
     ]);
     expect(declaration.acceptedTargets).toEqual([
-      "chara_card_v3",
       "charx",
+      "chara_card_v3",
       "chara_card_v2",
       "lorebook",
       "lorebook_sillytavern",
