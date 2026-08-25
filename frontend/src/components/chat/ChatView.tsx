@@ -261,6 +261,9 @@ export default function ChatView() {
   const [portraitSurfaceOccupied, setPortraitSurfaceOccupied] = useState(false)
   const quickToolbarSettings = useStore((s) => s.quickToolbarSettings)
   const quickToolbarPlacement = readQuickToolbarPlacement(quickToolbarSettings)
+  const showNativeSelectMessages = !suiteExtensionEnabled || isShowNativeSelectMessages(quickToolbarSettings)
+  const showNativeScrollToTop = !suiteExtensionEnabled || isShowNativeScrollToTop(quickToolbarSettings)
+  const showNativeBrowseMessages = !suiteExtensionEnabled || isShowNativeBrowseMessages(quickToolbarSettings)
   const dockQuickToolbar = suiteExtensionEnabled && quickToolbarPlacement === 'chat_top_dock'
   const keepFloatingDockHost = suiteExtensionEnabled && quickToolbarPlacement === 'floating' && keepDockEnabledWhenFloating(quickToolbarSettings)
   const chatTopDockRequest = effectiveQuickToolbarDockRequest(
@@ -1252,10 +1255,10 @@ export default function ChatView() {
             <div data-spindle-mount="chat_header_center" data-spindle-scope={`chat:${chatId}:header-center`} style={{ display: 'contents' }} />
             <div data-spindle-mount="chat_header_right" data-spindle-scope={`chat:${chatId}:header-right`} style={{ display: 'contents' }} />
             <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request={chatTopDockRequest}>
-              {suiteExtensionEnabled && isShowNativeSelectMessages(quickToolbarSettings) && (
+              {showNativeSelectMessages && (
                 <button
                   type="button"
-                  hidden={!(dockQuickToolbar || keepFloatingDockHost)}
+                  hidden={suiteExtensionEnabled && !(dockQuickToolbar || keepFloatingDockHost)}
                   className={clsx(styles.toolbarBtn, messageSelectMode && styles.toolbarBtnActive)}
                   onClick={toggleSelectMode}
                   title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
@@ -1265,7 +1268,7 @@ export default function ChatView() {
                   <ListChecks size={14} />
                 </button>
               )}
-              {suiteExtensionEnabled && isShowNativeScrollToTop(quickToolbarSettings) && totalChatLength > 1 && (
+              {showNativeScrollToTop && totalChatLength > 1 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}
@@ -1279,7 +1282,7 @@ export default function ChatView() {
                     : <ArrowUp size={14} />}
                 </button>
               )}
-              {suiteExtensionEnabled && isShowNativeBrowseMessages(quickToolbarSettings) && totalChatLength > 0 && (
+              {showNativeBrowseMessages && totalChatLength > 0 && (
                 <button
                   type="button"
                   className={styles.toolbarBtn}

@@ -10,28 +10,30 @@ describe('ChatView native select-messages toolbar', () => {
     expect(isShowNativeSelectMessages({ showNativeSelectMessages: false })).toBe(false)
   })
 
-  test('ChatView gates the Suite toolbar controls and keeps MessageSelectBar', async () => {
+  test('ChatView restores native controls without mounting the Suite toolbar', async () => {
     const source = await Bun.file(resolve(import.meta.dir, 'ChatView.tsx')).text()
 
     expect(source).toContain("import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'")
     expect(source).toContain("const suiteExtensionEnabled = useStore((s) => hasEnabledFrontendExtension(s.extensions, 'lumiverse_suite'))")
     expect(source).toContain('ListChecks')
-    expect(source).toMatch(/suiteExtensionEnabled\s*&&\s*isShowNativeSelectMessages\(quickToolbarSettings\)\s*&&\s*\(/)
-    expect(source).toMatch(/suiteExtensionEnabled\s*&&\s*isShowNativeScrollToTop\(quickToolbarSettings\)/)
-    expect(source).toMatch(/suiteExtensionEnabled\s*&&\s*isShowNativeBrowseMessages\(quickToolbarSettings\)/)
+    expect(source).toContain('const showNativeSelectMessages = !suiteExtensionEnabled || isShowNativeSelectMessages(quickToolbarSettings)')
+    expect(source).toContain('const showNativeScrollToTop = !suiteExtensionEnabled || isShowNativeScrollToTop(quickToolbarSettings)')
+    expect(source).toContain('const showNativeBrowseMessages = !suiteExtensionEnabled || isShowNativeBrowseMessages(quickToolbarSettings)')
     expect(source).toContain("const dockQuickToolbar = suiteExtensionEnabled && quickToolbarPlacement === 'chat_top_dock'")
+    expect(source).toContain('{dockQuickToolbar && <QuickToolbar />}')
+    expect(source).toContain('hidden={suiteExtensionEnabled && !(dockQuickToolbar || keepFloatingDockHost)}')
     expect(source).toMatch(/aria-pressed=\{messageSelectMode\}/)
     expect(source).toMatch(/\{messageSelectMode && <MessageSelectBar chatId=\{chatId\} \/>\}/)
 
     const nativeButton = source.match(
-      /\{suiteExtensionEnabled && isShowNativeSelectMessages\(quickToolbarSettings\) && \([\s\S]*?<ListChecks size=\{14\} \/>[\s\S]*?<\/button>\s*\)\}/,
+      /\{showNativeSelectMessages && \([\s\S]*?<ListChecks size=\{14\} \/>[\s\S]*?<\/button>\s*\)\}/,
     )?.[0] ?? ''
     expect(nativeButton).toContain('aria-pressed={messageSelectMode}')
     expect(nativeButton).toContain('ListChecks')
     expect(nativeButton).not.toContain('MessageSelectBar')
 
     const selectBarIndex = source.indexOf('{messageSelectMode && <MessageSelectBar chatId={chatId} />}')
-    const gateIndex = source.indexOf('isShowNativeSelectMessages(quickToolbarSettings)')
+    const gateIndex = source.indexOf('{showNativeSelectMessages && (')
     expect(selectBarIndex).toBeGreaterThan(gateIndex)
     expect(source.slice(gateIndex, selectBarIndex)).toContain('</button>')
   })
