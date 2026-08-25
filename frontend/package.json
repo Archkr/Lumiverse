@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run generate && vite",
-    "generate": "bun run --parallel extract-props extract-css-vars",
+    "generate": "bun run extract-props && bun run extract-css-vars",
     "extract-props": "bun run scripts/extract-props.ts",
     "extract-css-vars": "bun run scripts/extract-css-vars.ts",
     "typecheck": "bun run generate && tsc -b",
