@@ -313,7 +313,16 @@ setTimeout(() => {
 // version changed since Illarin last accepted one. Deferred like LumiHub.
 setTimeout(() => {
   import("./illarin/warmup").then(({ warmUpInstances }) => {
-    warmUpInstances().catch((err) => console.error("[Illarin] Warmup failed:", err));
+    void warmUpInstances()
+      .catch((err) => console.error("[Illarin] Warmup failed:", err))
+      .then(async () => {
+        try {
+          const { startAllDeliveryWorkers } = await import("./illarin/delivery-worker");
+          await startAllDeliveryWorkers();
+        } catch (err) {
+          console.error("[Illarin] Delivery workers failed to start:", err);
+        }
+      });
   });
 }, 0);
 
@@ -393,12 +402,14 @@ async function gracefulShutdown(signal: string) {
   const { stopOAuthStateSweep } = await import("./spindle/oauth-state");
   const { stopPkceSweep } = await import("./routes/lumihub.routes");
   const { stopIllarinSweeps } = await import("./routes/illarin.routes");
+  const { stopAllDeliveryWorkers } = await import("./illarin/delivery-worker");
   const { stopChatChunkVectorizationWorker, stopQueryCacheCleanup, stopWorldBookVectorizationSweep } = await import("./services/vectorization-queue.service");
   const { stopVersionCheckCleanup } = await import("./services/embeddings.service");
   stopTicketSweep();
   stopOAuthStateSweep();
   stopPkceSweep();
   stopIllarinSweeps();
+  stopAllDeliveryWorkers();
   stopChatChunkVectorizationWorker();
   stopQueryCacheCleanup();
   stopWorldBookVectorizationSweep();

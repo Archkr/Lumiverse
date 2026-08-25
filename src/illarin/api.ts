@@ -57,6 +57,17 @@ export class IllarinRateLimitError extends IllarinApiError {
   }
 }
 
+/** A saturated Illarin collector. Retry-After is authoritative when present. */
+export class IllarinUnavailableError extends IllarinApiError {
+  readonly retryAfterSeconds: number | null;
+
+  constructor(endpoint: string, retryAfterSeconds: number | null) {
+    super(503, endpoint, `Illarin ${endpoint} temporarily unavailable`);
+    this.name = "IllarinUnavailableError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 export type IllarinFetch = typeof safeFetch;
 
 export interface IllarinRequestOptions {
@@ -117,6 +128,9 @@ async function requestJson<T>(
   }
   if (response.status === 429) {
     throw new IllarinRateLimitError(path, parseRetryAfter(response.headers.get("Retry-After")));
+  }
+  if (response.status === 503) {
+    throw new IllarinUnavailableError(path, parseRetryAfter(response.headers.get("Retry-After")));
   }
   if (!response.ok) {
     // Server-provided detail is intentionally discarded: response bodies are

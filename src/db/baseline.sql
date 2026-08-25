@@ -379,6 +379,17 @@ CREATE TABLE illarin_instance (
   last_refresh_at TEXT
 );
 
+CREATE TABLE illarin_delivery_receipt (
+  user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL,
+  delivery_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  content_generation INTEGER NOT NULL,
+  installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  acknowledged_at TEXT,
+  PRIMARY KEY (user_id, delivery_id)
+);
+
 CREATE TABLE image_gen_connections (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -1234,6 +1245,9 @@ CREATE INDEX idx_images_user_owner_extension
 
 CREATE UNIQUE INDEX idx_illarin_instance_user_id
 ON illarin_instance(user_id);
+
+CREATE INDEX idx_illarin_delivery_receipt_pending
+ON illarin_delivery_receipt(user_id, instance_id, acknowledged_at);
 
 CREATE INDEX idx_loom_items_pack_id ON loom_items(pack_id);
 

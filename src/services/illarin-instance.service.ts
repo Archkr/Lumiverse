@@ -218,3 +218,57 @@ export function updateLastDeclaration(userId: string, declarationJson: string): 
 export function deleteInstance(userId: string): void {
   getDb().query("DELETE FROM illarin_instance WHERE user_id = ?").run(userId);
 }
+
+/** Delivery ids installed locally but not yet acknowledged to Illarin. */
+export function pendingDeliveryAcknowledgements(userId: string, instanceId: string): string[] {
+  const rows = getDb().query(
+    `SELECT delivery_id FROM illarin_delivery_receipt
+     WHERE user_id = ? AND instance_id = ? AND acknowledged_at IS NULL
+     ORDER BY installed_at ASC LIMIT 32`,
+  ).all(userId, instanceId) as Array<{ delivery_id: string }>;
+  return rows.map((row) => row.delivery_id);
+}
+
+export function hasDeliveryReceipt(userId: string, instanceId: string, deliveryId: string): boolean {
+  return Boolean(getDb().query(
+    `SELECT 1 FROM illarin_delivery_receipt
+     WHERE user_id = ? AND instance_id = ? AND delivery_id = ? LIMIT 1`,
+  ).get(userId, instanceId, deliveryId));
+}
+
+/** Record only after every required artifact has been stored successfully. */
+export function recordDeliveryInstalled(
+  userId: string,
+  instanceId: string,
+  deliveryId: string,
+  assetId: string,
+  contentGeneration: number,
+): void {
+  getDb().query(
+    `INSERT OR IGNORE INTO illarin_delivery_receipt
+       (user_id, instance_id, delivery_id, asset_id, content_generation)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(userId, instanceId, deliveryId, assetId, contentGeneration);
+}
+
+/** A repeated delivery is acknowledged again without being reinstalled. */
+export function queueDeliveryAcknowledgement(userId: string, instanceId: string, deliveryId: string): void {
+  getDb().query(
+    `UPDATE illarin_delivery_receipt SET acknowledged_at = NULL
+     WHERE user_id = ? AND instance_id = ? AND delivery_id = ?`,
+  ).run(userId, instanceId, deliveryId);
+}
+
+/** The collect response commits every acknowledgement carried in its request. */
+export function markDeliveriesAcknowledged(
+  userId: string,
+  instanceId: string,
+  deliveryIds: readonly string[],
+): void {
+  if (deliveryIds.length === 0) return;
+  const placeholders = deliveryIds.map(() => "?").join(", ");
+  getDb().query(
+    `UPDATE illarin_delivery_receipt SET acknowledged_at = datetime('now')
+     WHERE user_id = ? AND instance_id = ? AND delivery_id IN (${placeholders})`,
+  ).run(userId, instanceId, ...deliveryIds);
+}

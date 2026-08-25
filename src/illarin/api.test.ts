@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   IllarinApiError,
   IllarinUnauthorizedError,
+  IllarinUnavailableError,
   collectDeliveries,
   createBrowserAuthorization,
   createDeviceRequest,
@@ -207,6 +208,21 @@ describe("illarin api client", () => {
     expect(await response.text()).toBe("card bytes");
     expect(artifact.requests[0].method).toBe("GET");
     expect(artifact.requests[0].headers.get("authorization")).toBeNull();
+  });
+
+  test("preserves Retry-After when Illarin has no delivery wait capacity", async () => {
+    const illarin = mock(() => new Response(null, {
+      status: 503,
+      headers: { "Retry-After": "17" },
+    }));
+
+    try {
+      await collectDeliveries(illarin.baseUrl, "ia1.live", [], { fetchImpl: illarin.testFetch });
+      throw new Error("expected rejection");
+    } catch (err) {
+      expect(err).toBeInstanceOf(IllarinUnavailableError);
+      expect((err as IllarinUnavailableError).retryAfterSeconds).toBe(17);
+    }
   });
 
   test("syncs library reports and enforces snapshot and size bounds", async () => {

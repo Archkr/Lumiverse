@@ -298,7 +298,7 @@ async function installFromUrl(
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
       characterId: character.id,
       characterName: final?.name || payload.characterName,
-      source: "lumihub",
+      source: payload.source,
     }, userId);
 
     return {
@@ -329,7 +329,7 @@ async function installFromUrl(
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
       characterId: character.id,
       characterName: final?.name || payload.characterName,
-      source: "lumihub",
+      source: payload.source,
     }, userId);
 
     return {
@@ -362,7 +362,7 @@ async function installFromUrl(
   eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
     characterId: character.id,
     characterName: final?.name || payload.characterName,
-    source: "lumihub",
+    source: payload.source,
   }, userId);
 
   return {
@@ -507,7 +507,7 @@ export async function installWorldbook(
   try {
     let importData: { name: string; description: string; entries: any[] };
 
-    if (payload.source === "lumihub" && payload.worldbookData) {
+    if ((payload.source === "lumihub" || payload.source === "illarin") && payload.worldbookData) {
       // Inline worldbook data from LumiHub
       importData = payload.worldbookData;
     } else if (payload.source === "chub" && payload.importUrl) {
@@ -621,7 +621,7 @@ export async function installTheme(
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
       characterId: payload.themeId,
       characterName: payload.themeName,
-      source: "lumihub",
+      source: payload.source,
       type: "theme",
     }, userId);
 
@@ -734,7 +734,7 @@ export async function installPreset(
         promptVariables,
         compatibility: isPlainObject(exported.compatibility) ? exported.compatibility : {},
         coverUrl,
-        _lumiverse_install_source: "lumihub",
+        _lumiverse_install_source: payload.source,
         _lumiverse_lumihub_id: payload.presetId,
         _lumiverse_preset_version: presetVersion,
         _lumiverse_preset_slug: presetSlug,
@@ -790,7 +790,7 @@ export async function installPreset(
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
       characterId: saved.id,
       characterName: saved.name,
-      source: "lumihub",
+      source: payload.source,
       type: "preset",
     }, userId);
 

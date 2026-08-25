@@ -117,6 +117,19 @@ describe("illarin protocol conformance checklist", () => {
 
   test("illarin_instance credentials are excluded from export/import", () => {
     expect(EXCLUDED_TABLES.has("illarin_instance")).toBe(true);
+    expect(EXCLUDED_TABLES.has("illarin_delivery_receipt")).toBe(true);
+  });
+
+  test("delivery receipts remain pending until a successful acknowledgement", () => {
+    svc.recordDeliveryInstalled(USER_A, "instance-a", "delivery-1", "asset-1", 4);
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual(["delivery-1"]);
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-b")).toEqual([]);
+
+    svc.markDeliveriesAcknowledged(USER_A, "instance-a", ["delivery-1"]);
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual([]);
+
+    svc.queueDeliveryAcknowledgement(USER_A, "instance-a", "delivery-1");
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual(["delivery-1"]);
   });
 
   test("two installations link, refresh, and tear down without sharing state", async () => {

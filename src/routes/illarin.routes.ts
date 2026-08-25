@@ -22,6 +22,7 @@ import { createDeviceRequest } from "../illarin/api";
 import { DeviceLinkSession, runDeviceLinkUntilTerminal } from "../illarin/link-device";
 import { readBackendVersion } from "../illarin/warmup";
 import { handleTerminalUnauthorized } from "../illarin/tokens";
+import { startDeliveryWorker, stopDeliveryWorker } from "../illarin/delivery-worker";
 import type { BrowserLinkOutcome } from "../illarin/link-browser";
 
 interface PendingBrowserLink {
@@ -177,6 +178,7 @@ illarinRoutes.post("/link/browser", async (c) => {
           applicationName: declaration.applicationName,
           declarationJson: JSON.stringify(declaration),
         });
+        startDeliveryWorker(userId);
         session.status = "linked";
       } else {
         session.status = "failed";
@@ -222,6 +224,7 @@ illarinRoutes.post("/unlink", async (c) => {
     if (link.userId === userId) pendingLinks.delete(id);
   }
   cancelDeviceLink(userId);
+  stopDeliveryWorker(userId);
   await handleTerminalUnauthorized(userId, "unlinked");
   return c.json({
     success: true,
@@ -293,6 +296,7 @@ illarinRoutes.post("/link/device", async (c) => {
         applicationName: declaration.applicationName,
         declarationJson,
       });
+      startDeliveryWorker(userId);
     },
   });
   const expiresAt = Date.parse(request.expiresAt);
