@@ -201,6 +201,15 @@ describe("illarin api client", () => {
     expect(JSON.parse(empty.requests[0].body!)).toEqual({ acknowledge: [] });
   });
 
+  test("allows Illarin's full delivery wait to finish", async () => {
+    const longPoll: IllarinFetch = async (_url, options) => {
+      expect(options?.timeoutMs).toBeGreaterThan(30_000);
+      return new Response(null, { status: 204 });
+    };
+
+    expect(await collectDeliveries("http://127.0.0.1", "ia1.live", [], { fetchImpl: longPoll })).toEqual([]);
+  });
+
   test("fetches signed delivery artifacts without forwarding a bearer token", async () => {
     const artifact = mock(() => new Response("card bytes", { status: 200 }));
     const response = await fetchDeliveryArtifact(`${artifact.baseUrl}/signed-card`, { fetchImpl: artifact.testFetch });
