@@ -9,14 +9,26 @@ import {
   installTheme,
   installWorldbook,
 } from "../lumihub/installer";
+import * as imagesSvc from "../services/images.service";
 import * as packsSvc from "../services/packs.service";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 
 const MAX_JSON_BYTES = 100 * 1024 * 1024;
+const MAX_PRESET_COVER_BYTES = 50 * 1024 * 1024;
 const MAX_THEME_BYTES = 200 * 1024 * 1024;
 const MAX_THEME_ENTRIES = 500;
 const MAX_THEME_EXPANDED_BYTES = 250 * 1024 * 1024;
+
+const PRESET_COVER_EXTENSIONS: Readonly<Record<string, string>> = {
+  "image/apng": "apng",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/gif": "gif",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 
 function exportUrl(delivery: IllarinDelivery): string {
   const artifact = delivery.artifacts.find((item) => item.kind === "export");
@@ -31,6 +43,46 @@ async function fetchJsonArtifact(delivery: IllarinDelivery): Promise<Record<stri
     throw new Error(`Illarin delivery ${delivery.id} is not a JSON object`);
   }
   return value as Record<string, any>;
+}
+
+export interface PresetCoverDependencies {
+  fetchArtifact: (url: string, options: { maxBytes: number }) => Promise<Response>;
+  uploadImage: (userId: string, file: File) => Promise<{ url: string }>;
+}
+
+const presetCoverDependencies: PresetCoverDependencies = {
+  fetchArtifact: fetchDeliveryArtifact,
+  uploadImage: imagesSvc.uploadImage,
+};
+
+/**
+ * Copy Illarin's short-lived cover artifact into Lumiverse-owned storage.
+ * The local image URL remains usable after the delivery lease and signed URL
+ * expire, and the worker will not acknowledge the delivery until this returns.
+ */
+export async function persistIllarinPresetCover(
+  userId: string,
+  delivery: IllarinDelivery,
+  dependencies: PresetCoverDependencies = presetCoverDependencies,
+): Promise<string | null> {
+  const cover = delivery.artifacts.find((artifact) => artifact.kind === "picture" && artifact.isCover === true);
+  if (!cover) return null;
+
+  const response = await dependencies.fetchArtifact(cover.url, { maxBytes: MAX_PRESET_COVER_BYTES });
+  const contentType = (response.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+  const extension = PRESET_COVER_EXTENSIONS[contentType];
+  if (!extension) {
+    throw new Error(`Illarin preset delivery ${delivery.id} has an unsupported cover type`);
+  }
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_PRESET_COVER_BYTES) {
+    throw new Error(`Illarin preset delivery ${delivery.id} has an invalid cover size`);
+  }
+  const stored = await dependencies.uploadImage(
+    userId,
+    new File([bytes], `illarin-preset-cover.${extension}`, { type: contentType }),
+  );
+  return stored.url;
 }
 
 function safeArchivePath(value: string): boolean {
@@ -130,12 +182,13 @@ export async function installIllarinDelivery(userId: string, delivery: IllarinDe
     }
     case "preset": {
       const preset = await fetchJsonArtifact(delivery);
+      const coverUrl = await persistIllarinPresetCover(userId, delivery);
       const result = await installPreset(delivery.id, userId, {
         source: "illarin",
         presetId: delivery.assetId,
         presetName: delivery.name,
         presetVersion: typeof preset.presetVersion === "string" ? preset.presetVersion : null,
-        presetData: { preset },
+        presetData: { preset, coverUrl },
       });
       requireSuccess(result, delivery);
       return;

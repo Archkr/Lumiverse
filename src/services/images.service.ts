@@ -1631,6 +1631,10 @@ export function isImageReferenced(userId: string, id: string): boolean {
       [userId, id, needle],
     ) ||
     hasImageReference(
+      "SELECT 1 AS found FROM presets WHERE user_id = ? AND metadata LIKE ? LIMIT 1",
+      [userId, needle],
+    ) ||
+    hasImageReference(
       "SELECT 1 AS found FROM theme_assets WHERE user_id = ? AND image_id = ? LIMIT 1",
       [userId, id],
     ) ||
@@ -1732,6 +1736,9 @@ export function findReferencedImageIds(userId: string, candidates: ReadonlySet<s
     }
     if (!done()) {
       for (const row of bulkRows("SELECT metadata FROM personas WHERE user_id = ?", [userId])) scanText(row.metadata);
+    }
+    if (!done()) {
+      for (const row of bulkRows("SELECT metadata FROM presets WHERE user_id = ?", [userId])) scanText(row.metadata);
     }
     if (!done()) {
       const rows = bulkRows(

@@ -74,7 +74,7 @@ import { presetsApi, type StashedPromptBlock } from '@/api/presets'
 import { imagesApi } from '@/api/images'
 import { usePresetProfiles } from '@/hooks/usePresetProfiles'
 import { getEffectivePromptVariableValues } from '@/hooks/preset-profile-prompt-variables'
-import { computeGroups, createBlock, createMarkerBlock, resolvePromptBlockPlacements, shouldShowLumiHubPresetBadge } from '@/lib/loom/service'
+import { computeGroups, createBlock, createMarkerBlock, getRemotePresetOrigin, resolvePromptBlockPlacements } from '@/lib/loom/service'
 import { sanitizeCharacterTagTrigger, splitCharacterTagTriggerInput } from '@/lib/loom/characterTagTrigger'
 import {
   PROMPT_TEMPLATES,
@@ -1517,7 +1517,7 @@ function PresetSelector({ registry, activePresetId, activePresetName, onSelect, 
                   {entry.coverUrl && (
                     <img
                       key={entry.coverUrl}
-                      src={imagesApi.remoteUrl(entry.coverUrl)}
+                      src={imagesApi.displayUrl(entry.coverUrl)}
                       alt=""
                       className={s.presetManagerCoverImage}
                       onLoad={(event) => { event.currentTarget.style.display = '' }}
@@ -1607,25 +1607,28 @@ function PresetCoverHeader({ preset }: { preset: LoomPreset }) {
   const { t } = useLb()
   const coverUrl = preset.coverUrl?.trim()
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null)
-  if (!coverUrl || failedCoverUrl === coverUrl) return null
-
   const description = preset.description?.trim()
-  const showLumiHubBadge = shouldShowLumiHubPresetBadge(preset)
+  const origin = getRemotePresetOrigin(preset)
+  const visibleCoverUrl = coverUrl && failedCoverUrl !== coverUrl ? coverUrl : null
+  if (!visibleCoverUrl && !origin && !preset.presetVersion) return null
 
   return (
-    <section className={s.presetCoverHeader} aria-label={t('preset.coverAria', { name: preset.name })}>
-      <img
-        key={coverUrl}
-        className={s.presetCoverImage}
-        src={imagesApi.remoteUrl(coverUrl)}
-        alt=""
-        aria-hidden="true"
-        onLoad={(event) => { event.currentTarget.style.display = '' }}
-        onError={() => setFailedCoverUrl(coverUrl)}
-      />
+    <section className={s.presetCoverHeader} aria-label={visibleCoverUrl ? t('preset.coverAria', { name: preset.name }) : undefined}>
+      {visibleCoverUrl && (
+        <img
+          key={visibleCoverUrl}
+          className={s.presetCoverImage}
+          src={imagesApi.displayUrl(visibleCoverUrl)}
+          alt=""
+          aria-hidden="true"
+          onLoad={(event) => { event.currentTarget.style.display = '' }}
+          onError={() => setFailedCoverUrl(visibleCoverUrl)}
+        />
+      )}
       <div className={s.presetCoverContent}>
         <div className={s.presetCoverBadgeRow}>
-          {showLumiHubBadge && <span className={s.presetCoverBadge}>{t('preset.lumihubBadge')}</span>}
+          {origin === 'lumihub' && <span className={s.presetCoverBadge}>{t('preset.lumihubBadge')}</span>}
+          {origin === 'illarin' && <span className={s.presetCoverBadge}>{t('preset.illarinBadge')}</span>}
           {preset.presetVersion && (
             <span className={s.presetCoverBadge}>{t('preset.version', { version: preset.presetVersion })}</span>
           )}

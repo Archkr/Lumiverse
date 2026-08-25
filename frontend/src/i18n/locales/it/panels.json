@@ -3219,6 +3219,7 @@
       "create": "Crea",
       "renameAction": "Rinomina",
       "lumihubBadge": "Preset LumiHub",
+      "illarinBadge": "Preset Illarin",
       "version": "v{{version}}",
       "blocks_one": "{{count}} blocco",
       "blocks_other": "{{count}} blocchi",

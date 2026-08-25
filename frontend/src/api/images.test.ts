@@ -26,6 +26,14 @@ afterEach(() => {
 })
 
 describe('imagesApi thumbnail rebuild', () => {
+  test('renders durable local images directly and proxies remote covers', () => {
+    expect(imagesApi.displayUrl('/api/v1/images/local-id')).toBe('/api/v1/images/local-id')
+    expect(imagesApi.displayUrl('/custom/api/images/local-id')).toBe('/custom/api/images/local-id')
+    expect(imagesApi.displayUrl('https://cdn.example.test/cover.webp')).toBe(
+      '/custom/api/images/remote?url=https%3A%2F%2Fcdn.example.test%2Fcover.webp',
+    )
+  })
+
   test('uses the shared API client for an ordinary rebuild', async () => {
     await imagesApi.rebuildThumbnails()
 

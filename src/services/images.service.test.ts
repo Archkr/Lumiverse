@@ -238,6 +238,23 @@ describe("images.service ownership filters", () => {
     expect(getImage("u1", "img-1")).not.toBeNull();
   });
 
+  test("treats locally stored preset covers as image references", () => {
+    seedImage("img-1", 100);
+    getDb().run(`CREATE TABLE presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      metadata TEXT NOT NULL DEFAULT '{}'
+    )`);
+    getDb().query("INSERT INTO presets (id, user_id, metadata) VALUES (?, ?, ?)").run(
+      "preset-1",
+      "u1",
+      JSON.stringify({ coverUrl: "/api/v1/images/img-1" }),
+    );
+
+    expect(deleteImageIfUnreferenced("u1", "img-1")).toBe(false);
+    expect(getImage("u1", "img-1")).not.toBeNull();
+  });
+
   test("deletes wallpaper-library images and clears global plus chat assignments", () => {
     seedImage("img-1", 100, { owner_extension_identifier: WALLPAPER_LIBRARY_OWNER });
     seedImage("img-2", 90, { owner_extension_identifier: WALLPAPER_LIBRARY_OWNER });

@@ -3,6 +3,7 @@ import type { Preset } from '@/types/api'
 import {
   coerceImportedLoomPreset,
   createPortableLoomPresetExport,
+  getRemotePresetOrigin,
   marshalPreset,
   marshalUpdate,
   shouldShowLumiHubPresetBadge,
@@ -110,6 +111,15 @@ describe('Loom extension metadata preservation', () => {
       lumihubMeta: { _lumiverse_install_source: 'local' },
     })).toBe(false)
     expect(shouldShowLumiHubPresetBadge({ presetVersion: null, lumihubMeta: null })).toBe(false)
+  })
+
+  test('reports Illarin provenance without treating it as a LumiHub install', () => {
+    const preset = {
+      presetVersion: '2.1.0',
+      lumihubMeta: { _lumiverse_install_source: 'illarin' },
+    }
+    expect(getRemotePresetOrigin(preset)).toBe('illarin')
+    expect(shouldShowLumiHubPresetBadge(preset)).toBe(false)
   })
 
   test('removes the local preset id from portable exports', () => {

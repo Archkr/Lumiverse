@@ -3509,6 +3509,7 @@
       "create": "Create",
       "renameAction": "Rename",
       "lumihubBadge": "LumiHub preset",
+      "illarinBadge": "Illarin preset",
       "version": "v{{version}}",
       "blocks_one": "{{count}} block",
       "blocks_other": "{{count}} blocks",

@@ -292,9 +292,19 @@ function extractLumihubMeta(meta: Record<string, any>): Record<string, unknown> 
 export function shouldShowLumiHubPresetBadge(
   preset: Pick<LoomPreset, 'presetVersion' | 'lumihubMeta'>,
 ): boolean {
+  return getRemotePresetOrigin(preset) === 'lumihub'
+}
+
+export type RemotePresetOrigin = 'lumihub' | 'illarin'
+
+/** Resolve explicit provenance, retaining the legacy LumiHub-version fallback. */
+export function getRemotePresetOrigin(
+  preset: Pick<LoomPreset, 'presetVersion' | 'lumihubMeta'>,
+): RemotePresetOrigin | null {
   const installSource = preset.lumihubMeta?._lumiverse_install_source
-  if (typeof installSource === 'string') return installSource === 'lumihub'
-  return !!preset.presetVersion
+  if (installSource === 'lumihub' || installSource === 'illarin') return installSource
+  if (typeof installSource === 'string') return null
+  return preset.presetVersion ? 'lumihub' : null
 }
 
 function markPresetAsLocalImport(preset: LoomPreset): LoomPreset {

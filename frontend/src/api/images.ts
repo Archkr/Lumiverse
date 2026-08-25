@@ -100,6 +100,16 @@ export const imagesApi = {
     return `${joinApiPath('/images/remote')}?url=${encodeURIComponent(url)}`
   },
 
+  /** Render a durable local image directly; proxy only third-party URLs. */
+  displayUrl(url: string) {
+    const value = url.trim()
+    const apiBase = BASE_URL.replace(/\/+$/, '')
+    if (value.startsWith(`${apiBase}/images/`) || value.startsWith('/api/v1/images/')) {
+      return value
+    }
+    return `${joinApiPath('/images/remote')}?url=${encodeURIComponent(value)}`
+  },
+
   rebuildThumbnails(options?: {
     onProgress?: (p: ThumbnailRebuildProgress) => void
   }): Promise<ThumbnailRebuildProgress> {
