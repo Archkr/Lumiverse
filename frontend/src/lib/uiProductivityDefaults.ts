@@ -224,6 +224,13 @@ export const DEFAULT_QUICK_TOOLBAR_SETTINGS: QuickToolbarSettings & {
   showNativeSelectMessages: true,
   showNativeScrollToTop: true,
   showNativeBrowseMessages: true,
+  editAndSendSide: 'right',
+  branchChatOnEditAndSend: true,
+  // Off by default. `mergeStoredSetting` backfills missing keys from these
+  // defaults, so `false` is also the value every existing stored row gets —
+  // chat bindings keep winning until the user opts in.
+  editAndSendAlwaysUseActiveConnection: false,
+  nativeDockActionSide: 'right',
   opaqueToolbarBackdrop: false,
   backdropColor: DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR,
   cardWidth: 0,
