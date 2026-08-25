@@ -149,7 +149,7 @@ afterEach(() => {
 });
 
 describe("POST /:chatId/edit-and-send", () => {
-  test("commits a swipe branch then dispatches the durable generation identity", async () => {
+  test("commits a historical branch and dispatches only the copied assistant identity", async () => {
     const started: StartEditAndSendGenerationInput[] = [];
     setEditAndSendStartGeneration(async (input) => {
       started.push(input);
@@ -164,31 +164,80 @@ describe("POST /:chatId/edit-and-send", () => {
         content: "Hello again",
         expectedVersion: 1,
         requestId: "req-1",
+        branchChatOnEditAndSend: true,
       }),
     });
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.branchChatId).toBeString();
-    expect(body.editedMessageId).toBeString();
-    expect(body.immediateAssistantId).toBeString();
-    expect(body.generationCursor).toMatchObject({
-      requestId: "req-1",
-      mode: "swipe",
-      chatId: body.branchChatId,
+    expect(body).toEqual({
+      branchChatId: expect.any(String),
+      editedMessageId: expect.any(String),
+      immediateAssistantId: expect.any(String),
+      generationCursor: {
+        generationId: expect.any(String),
+        chatId: expect.any(String),
+        requestId: "req-1",
+        mode: "swipe",
+      },
     });
-    expect(started).toHaveLength(1);
-    expect(started[0]).toMatchObject({
+    expect(body.branchChatId).not.toBe("chat-1");
+    expect(body.editedMessageId).not.toBe("user-1");
+    expect(body.immediateAssistantId).not.toBe("asst-1");
+    expect(body.generationCursor.chatId).toBe(body.branchChatId);
+    expect(getDb().query(
+      "SELECT id, chat_id, is_user, content, revision FROM messages WHERE id = ?",
+    ).get(body.immediateAssistantId)).toEqual({
+      id: body.immediateAssistantId,
+      chat_id: body.branchChatId,
+      is_user: 0,
+      content: "There",
+      revision: 1,
+    });
+    expect(getDb().query(
+      "SELECT id, chat_id, is_user, content, revision FROM messages WHERE id = ?",
+    ).get("asst-1")).toEqual({
+      id: "asst-1",
+      chat_id: "chat-1",
+      is_user: 0,
+      content: "There",
+      revision: 1,
+    });
+    expect(started).toEqual([{
       userId: USER_ID,
       chat_id: body.branchChatId,
       generationId: body.generationCursor.generationId,
       generation_type: "swipe",
       message_id: body.immediateAssistantId,
-    });
+    }]);
+
     const outbox = getGenerationOutboxByRequest(USER_ID, "chat-1", "req-1");
-    expect(outbox?.status).toBe("running");
-    expect(outbox?.dispatched_at).toBeNumber();
-    expect(outbox?.generation_id).toBe(body.generationCursor.generationId);
+    expect(outbox).toEqual({
+      id: expect.any(String),
+      request_id: "req-1",
+      user_id: USER_ID,
+      chat_id: "chat-1",
+      branch_chat_id: body.branchChatId,
+      edited_message_id: body.editedMessageId,
+      target_message_id: body.immediateAssistantId,
+      target_swipe_index: 1,
+      expected_version: 1,
+      generation_id: body.generationCursor.generationId,
+      mode: "swipe",
+      status: "running",
+      lease_owner: expect.any(String),
+      lease_expires_at: expect.any(Number),
+      attempt_count: 1,
+      next_attempt_at: null,
+      last_error_code: null,
+      terminal_reason: null,
+      dispatched_at: expect.any(Number),
+      completed_at: null,
+      cancelled_at: null,
+      created_at: expect.any(Number),
+      updated_at: expect.any(Number),
+    });
+    expect(getGenerationOutboxByRequest(USER_ID, body.branchChatId, "req-1")).toBeNull();
   });
 
   test("validates the body and is idempotent for the same requestId", async () => {
@@ -255,5 +304,75 @@ describe("POST /:chatId/edit-and-send", () => {
       }),
     });
     expect(clash.status).toBe(409);
+  });
+
+  test("accepts in-place mode and dispatches the source chat and source assistant", async () => {
+    const started: StartEditAndSendGenerationInput[] = [];
+    setEditAndSendStartGeneration(async (input) => {
+      started.push(input);
+      return { generationId: input.generationId, status: "streaming" };
+    });
+
+    const response = await app.request("http://localhost/chat-1/edit-and-send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messageId: "user-1",
+        content: "Hello in place",
+        expectedVersion: 1,
+        requestId: "req-in-place",
+        branchChatOnEditAndSend: false,
+      }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      branchChatId: "chat-1",
+      editedMessageId: "user-1",
+      immediateAssistantId: "asst-1",
+      generationCursor: {
+        generationId: expect.any(String),
+        chatId: "chat-1",
+        requestId: "req-in-place",
+        mode: "swipe",
+      },
+    });
+    expect(started).toEqual([{
+      userId: USER_ID,
+      chat_id: "chat-1",
+      generationId: body.generationCursor.generationId,
+      generation_type: "swipe",
+      message_id: "asst-1",
+    }]);
+    expect(getGenerationOutboxByRequest(USER_ID, "chat-1", "req-in-place")).toMatchObject({
+      request_id: "req-in-place",
+      user_id: USER_ID,
+      chat_id: "chat-1",
+      branch_chat_id: "chat-1",
+      edited_message_id: "user-1",
+      target_message_id: "asst-1",
+      target_swipe_index: 1,
+      expected_version: 1,
+      generation_id: body.generationCursor.generationId,
+      mode: "swipe",
+      status: "running",
+      attempt_count: 1,
+    });
+  });
+
+  test("rejects a non-boolean branch mode", async () => {
+    const response = await app.request("http://localhost/chat-1/edit-and-send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        messageId: "user-1",
+        content: "Hello",
+        expectedVersion: 1,
+        requestId: "req-bad-mode",
+        branchChatOnEditAndSend: "false",
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "branchChatOnEditAndSend must be a boolean" });
   });
 });
