@@ -18,8 +18,16 @@ mock.module('@/components/shared/ExpandedTextEditor', () => ({
   default: () => null,
   ExpandableTextarea: () => null,
 }))
+let mockQuickToolbarSettings: { editAndSendSide?: string } | undefined
+let mockSuiteEnabled = true
+
 mock.module('@/store', () => ({
-  useStore: (selector: (state: Record<string, unknown>) => unknown) => selector({}),
+  useStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
+    extensions: mockSuiteEnabled
+      ? [{ identifier: 'lumiverse_suite', enabled: true, has_frontend: true }]
+      : [],
+    quickToolbarSettings: mockQuickToolbarSettings,
+  }),
 }))
 mock.module('@/lib/spindle/productivity-feature-toggles', () => ({
   readProductivityFlag: () => true,
@@ -77,7 +85,13 @@ async function render(props: {
   onCancel?: () => void
   messageId?: string
   editAndSendDisabled?: boolean
+  editAndSendSide?: string
+  suiteEnabled?: boolean
 }): Promise<HTMLDivElement> {
+  mockSuiteEnabled = props.suiteEnabled !== false
+  mockQuickToolbarSettings = props.editAndSendSide === undefined
+    ? undefined
+    : { editAndSendSide: props.editAndSendSide }
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
@@ -100,6 +114,8 @@ async function render(props: {
 
 describe('MessageEditArea edit-and-send', () => {
   afterEach(async () => {
+    mockQuickToolbarSettings = undefined
+    mockSuiteEnabled = true
     for (const root of [...mountedRoots]) {
       await act(async () => { root.unmount() })
       mountedRoots.delete(root)
@@ -119,11 +135,37 @@ describe('MessageEditArea edit-and-send', () => {
     const mount = host.querySelector('[data-spindle-mount="message_edit_actions"]')
     expect(mount).not.toBeNull()
     expect(mount?.getAttribute('data-spindle-scope-key')).toBe('message:user-1:edit-actions')
+    expect(mount?.getAttribute('data-edit-and-send-side')).toBe('right')
 
     const button = host.querySelector('button[aria-label="Edit and Send"]') as HTMLButtonElement | null
     expect(button).not.toBeNull()
     expect(button?.textContent).toContain('Edit and Send')
     expect(button?.disabled).toBe(false)
+  })
+  test('uses explicit left placement and restores native right DOM order', async () => {
+    const actionLabels = (host: HTMLElement) => [...host.querySelectorAll('[data-spindle-mount="message_edit_actions"] > button')]
+      .map((button) => button.textContent?.trim())
+
+    const leftHost = await render({ onEditAndSend: () => {}, editAndSendSide: 'left' })
+    expect(leftHost.querySelector('[data-spindle-mount="message_edit_actions"]')?.getAttribute('data-edit-and-send-side')).toBe('left')
+    expect(actionLabels(leftHost)).toEqual(['Edit and Send', 'actions.cancel', 'actions.save'])
+
+    const rightHost = await render({ onEditAndSend: () => {}, editAndSendSide: 'right' })
+    expect(rightHost.querySelector('[data-spindle-mount="message_edit_actions"]')?.getAttribute('data-edit-and-send-side')).toBe('right')
+    expect(actionLabels(rightHost)).toEqual(['actions.cancel', 'actions.save', 'Edit and Send'])
+  })
+
+  test('resolves missing and reset-like placement values to native right', async () => {
+    const missingHost = await render({ onEditAndSend: () => {} })
+    expect(missingHost.querySelector('[data-spindle-mount="message_edit_actions"]')?.getAttribute('data-edit-and-send-side')).toBe('right')
+
+    const invalidHost = await render({ onEditAndSend: () => {}, editAndSendSide: 'reset' })
+    expect(invalidHost.querySelector('[data-spindle-mount="message_edit_actions"]')?.getAttribute('data-edit-and-send-side')).toBe('right')
+  })
+
+  test('marks Edit and Send separately for side-specific CSS ordering', async () => {
+    const host = await render({ onEditAndSend: () => {} })
+    expect(host.querySelector('[data-edit-and-send-action="true"]')).not.toBeNull()
   })
 
   test('clicking Edit and Send fires the handler immediately', async () => {
@@ -150,6 +192,15 @@ describe('MessageEditArea edit-and-send', () => {
   test('hides Edit and Send when onEditAndSend is omitted', async () => {
     const host = await render({ messageId: 'user-1' })
     expect(host.querySelector('button[aria-label="Edit and Send"]')).toBeNull()
+  })
+
+  test('hides Edit and Send and ignores persisted left placement when Suite is disabled', async () => {
+    const host = await render({ onEditAndSend: () => {}, editAndSendSide: 'left', suiteEnabled: false })
+    const actions = host.querySelector('[data-spindle-mount="message_edit_actions"]')
+    expect(actions?.getAttribute('data-edit-and-send-side')).toBe('right')
+    expect(actions?.querySelector('button[aria-label="Edit and Send"]')).toBeNull()
+    expect([...actions!.querySelectorAll('button')].map((button) => button.textContent?.trim()))
+      .toEqual(['actions.cancel', 'actions.save'])
   })
 
   test('disables every completion action while Edit and Send is pending', async () => {
