@@ -45,6 +45,11 @@ import {
   readQuickToolbarPlacement,
 } from '../quick-toolbar/quickToolbarDock'
 import { registerChatDockerActionOwners } from './chatDockerActionCatalog'
+import {
+  OLDEST_MESSAGE_ACTION_ID,
+  quickToolbarOwnsOldestMessage,
+  quickToolbarRendersOldestMessageAction,
+} from './chatNativeDockOwnership'
 import { keepDockEnabledWhenFloating } from '@/lib/uiProductivityDefaults'
 import { wsClient } from '@/ws/client'
 import { EventType } from '@/ws/events'
@@ -260,16 +265,34 @@ export default function ChatView() {
   const suiteExtensionEnabled = useStore((s) => hasEnabledFrontendExtension(s.extensions, 'lumiverse_suite'))
   const [portraitSurfaceOccupied, setPortraitSurfaceOccupied] = useState(false)
   const quickToolbarSettings = useStore((s) => s.quickToolbarSettings)
+  const nativeDockActionSide = suiteExtensionEnabled && quickToolbarSettings?.nativeDockActionSide === 'left' ? 'left' : 'right'
   const quickToolbarPlacement = readQuickToolbarPlacement(quickToolbarSettings)
-  const showNativeSelectMessages = !suiteExtensionEnabled || isShowNativeSelectMessages(quickToolbarSettings)
-  const showNativeScrollToTop = !suiteExtensionEnabled || isShowNativeScrollToTop(quickToolbarSettings)
-  const showNativeBrowseMessages = !suiteExtensionEnabled || isShowNativeBrowseMessages(quickToolbarSettings)
+  // Native chat-top visibility follows the persisted flags in both Suite states.
+  // Settings exposes these checkboxes with and without the Suite, so an absent
+  // Suite no longer has to force them on to stay reachable.
+  const showNativeSelectMessages = isShowNativeSelectMessages(quickToolbarSettings)
+  const showNativeScrollToTop = isShowNativeScrollToTop(quickToolbarSettings)
+  const showNativeBrowseMessages = isShowNativeBrowseMessages(quickToolbarSettings)
   const dockQuickToolbar = suiteExtensionEnabled && quickToolbarPlacement === 'chat_top_dock'
   const keepFloatingDockHost = suiteExtensionEnabled && quickToolbarPlacement === 'floating' && keepDockEnabledWhenFloating(quickToolbarSettings)
-  const chatTopDockRequest = effectiveQuickToolbarDockRequest(
-    dockQuickToolbar || keepFloatingDockHost ? 'strip' : 'floating',
+  // Starts optimistic so the settings-derived answer still holds for server
+  // rendering and the first commit; the probe below corrects it from the DOM.
+  const [quickToolbarRendersOldestAction, setQuickToolbarRendersOldestAction] = useState(true)
+  const quickToolbarSettingsClaimOldestMessage = quickToolbarOwnsOldestMessage(
+    suiteExtensionEnabled,
     quickToolbarSettings,
   )
+  // Ownership must follow the action that is actually rendered. The persisted
+  // setting alone hands the oldest-message action to a toolbar that may not be
+  // mounted (floating host absent, hidden behind an overlay, replaced by an
+  // extension) or that normalizes/packs the action out of its rendered list,
+  // which left an eligible chat with no oldest-message control at all.
+  const quickToolbarOwnsOldestMessageAction = quickToolbarSettingsClaimOldestMessage
+    && quickToolbarRendersOldestAction
+  // Native controls own the top strip. QuickToolbar placement is a separate
+  // Suite concern and must not move or hide this native group.
+  const nativeDockRequest = 'strip' as const
+  const chatTopDockRequest = nativeDockRequest
   useEffect(() => {
     const readOccupied = () => {
       // The extension root can survive a ChatView transition while its new mount
@@ -280,6 +303,10 @@ export default function ChatView() {
       setPortraitSurfaceOccupied(Boolean(
         document.querySelector('[data-spindle-host-surface="portrait_dock.workspace"]'),
       ))
+      // Same authority rule for the shared oldest-message action: the rendered
+      // control decides ownership, not the persisted toolbar setting. The
+      // native copy is excluded by its own marker, so this cannot oscillate.
+      setQuickToolbarRendersOldestAction(quickToolbarRendersOldestMessageAction(document))
     }
     readOccupied()
     const Observer = document.defaultView?.MutationObserver
@@ -723,7 +750,9 @@ export default function ChatView() {
 
         if (msgPage.data.length === 0) {
           requestAnimationFrame(() => {
+            if (cancelled) return
             requestAnimationFrame(() => {
+              if (cancelled) return
               window.dispatchEvent(new CustomEvent('lumiverse:chat-items-populated', { detail: { chatId } }))
             })
           })
@@ -1097,11 +1126,13 @@ export default function ChatView() {
       else anchor.removeAttribute('data-spindle-occupied')
     }
 
-    const syncDockRequest = (anchor: HTMLElement, resolve: (request: unknown) => string, defaultRequest: string | null = null) => {
+    const syncDockRequest = (anchor: HTMLElement, resolve: (request: unknown) => string, defaultRequest: string | null = null, resolveChild: (request: unknown) => string = resolve) => {
       const child = findExtensionChild(anchor)
-      const request = resolve(child?.getAttribute('data-dock-request') ?? defaultRequest)
+      const requested = child?.getAttribute('data-dock-request') ?? defaultRequest
+      const request = resolve(requested)
+      const childRequest = child ? resolveChild(requested) : null
       if (anchor.getAttribute('data-dock-request') !== request) anchor.setAttribute('data-dock-request', request)
-      if (child && child.getAttribute('data-dock-request') !== request) child.setAttribute('data-dock-request', request)
+      if (child && childRequest !== null && child.getAttribute('data-dock-request') !== childRequest) child.setAttribute('data-dock-request', childRequest)
     }
 
     const syncTopDockHeight = () => {
@@ -1115,7 +1146,7 @@ export default function ChatView() {
       syncOccupied(chatTopDock)
       if (composerAbove) syncOccupied(composerAbove)
       syncDockRequest(chatColumnTop, (request) => effectiveQuickToolbarDockRequest(request, quickToolbarSettings))
-      syncDockRequest(chatTopDock, (request) => effectiveQuickToolbarDockRequest(request, quickToolbarSettings), dockQuickToolbar || keepFloatingDockHost ? 'strip' : 'floating')
+      syncDockRequest(chatTopDock, () => nativeDockRequest, nativeDockRequest, (request) => effectiveQuickToolbarDockRequest(request, quickToolbarSettings))
       if (composerAbove) syncDockRequest(composerAbove, chatLoreDockMode)
       syncTopDockHeight()
     }
@@ -1254,56 +1285,29 @@ export default function ChatView() {
             <div data-spindle-mount="chat_header_left" data-spindle-scope={`chat:${chatId}:header-left`} style={{ display: 'contents' }} />
             <div data-spindle-mount="chat_header_center" data-spindle-scope={`chat:${chatId}:header-center`} style={{ display: 'contents' }} />
             <div data-spindle-mount="chat_header_right" data-spindle-scope={`chat:${chatId}:header-right`} style={{ display: 'contents' }} />
-            <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request={chatTopDockRequest}>
-              {showNativeSelectMessages && (
-                <button
-                  type="button"
-                  hidden={suiteExtensionEnabled && !(dockQuickToolbar || keepFloatingDockHost)}
-                  className={clsx(styles.toolbarBtn, messageSelectMode && styles.toolbarBtnActive)}
-                  onClick={toggleSelectMode}
-                  title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
-                  aria-label={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')}
-                  aria-pressed={messageSelectMode}
-                >
-                  <ListChecks size={14} />
-                </button>
-              )}
-              {showNativeScrollToTop && totalChatLength > 1 && (
-                <button
-                  type="button"
-                  className={styles.toolbarBtn}
-                  onClick={() => void navigateToOldestMessage()}
-                  disabled={loadingOldestMessage}
-                  title={t('scrollToTop')}
-                  aria-label={t('scrollToTop')}
-                >
-                  {loadingOldestMessage
-                    ? <LoaderCircle size={14} className={styles.toolbarSpinner} />
-                    : <ArrowUp size={14} />}
-                </button>
-              )}
-              {showNativeBrowseMessages && totalChatLength > 0 && (
-                <button
-                  type="button"
-                  className={styles.toolbarBtn}
-                  onClick={() => setMessageNavigatorOpen(true)}
-                  title={t('messageNavigator.open')}
-                  aria-label={t('messageNavigator.open')}
-                >
-                  <List size={14} />
-                </button>
-              )}
-              {messageEditDraft?.chatId === chatId && (
-                <button
-                  type="button"
-                  className={clsx(styles.toolbarBtn, styles.toolbarBtnActive)}
-                  onClick={returnToEditedMessage}
-                  title={t('messageNavigator.returnToEdit')}
-                  aria-label={t('messageNavigator.returnToEdit')}
-                >
-                  <Pencil size={14} />
-                </button>
-              )}
+            <div ref={chatTopDockRef} className={styles.chatToolbar} data-spindle-mount="chat_top_dock" data-spindle-scope={`chat:${chatId}:top-dock`} data-dock-request={chatTopDockRequest} data-native-action-side={nativeDockActionSide}>
+              <div className={styles.nativeDockActions}>
+                {showNativeSelectMessages && (
+                  <button type="button" className={clsx(styles.toolbarBtn, messageSelectMode && styles.toolbarBtnActive)} onClick={toggleSelectMode} title={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')} aria-label={messageSelectMode ? t('chatView.exitSelectionMode') : t('chatView.selectMessages')} aria-pressed={messageSelectMode}>
+                    <ListChecks size={14} />
+                  </button>
+                )}
+                {!quickToolbarOwnsOldestMessageAction && showNativeScrollToTop && totalChatLength > 1 && (
+                  <button type="button" className={styles.toolbarBtn} data-toolbar-action={OLDEST_MESSAGE_ACTION_ID} data-native-dock-action={OLDEST_MESSAGE_ACTION_ID} onClick={() => void navigateToOldestMessage()} disabled={loadingOldestMessage} title={t('scrollToTop')} aria-label={t('scrollToTop')}>
+                    {loadingOldestMessage ? <LoaderCircle size={14} className={styles.toolbarSpinner} /> : <ArrowUp size={14} />}
+                  </button>
+                )}
+                {showNativeBrowseMessages && totalChatLength > 0 && (
+                  <button type="button" className={styles.toolbarBtn} onClick={() => setMessageNavigatorOpen(true)} title={t('messageNavigator.open')} aria-label={t('messageNavigator.open')}>
+                    <List size={14} />
+                  </button>
+                )}
+                {messageEditDraft?.chatId === chatId && (
+                  <button type="button" className={clsx(styles.toolbarBtn, styles.toolbarBtnActive)} onClick={returnToEditedMessage} title={t('messageNavigator.returnToEdit')} aria-label={t('messageNavigator.returnToEdit')}>
+                    <Pencil size={14} />
+                  </button>
+                )}
+              </div>
               {dockQuickToolbar && <QuickToolbar />}
             </div>
             <ChatFindBar

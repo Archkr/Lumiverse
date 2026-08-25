@@ -53,10 +53,10 @@ describe('P12 chat dock preservation contracts', () => {
     expect(source).toContain("from '@/lib/chatSurfaceLayout'")
     expect(source).toContain('effectiveQuickToolbarDockRequest')
     expect(source).toMatch(/syncDockRequest\(\s*chatColumnTop\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest/)
-    expect(source).toMatch(/syncDockRequest\(\s*chatTopDock\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest/)
+    expect(source).toMatch(/syncDockRequest\(\s*chatTopDock\s*,\s*\(\)\s*=>\s*nativeDockRequest\s*,\s*nativeDockRequest\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest/)
     expect(source).toMatch(/const child = findExtensionChild\(anchor\)/)
     expect(source).toMatch(/child\.getAttribute\(['"]data-dock-request['"]\)/)
-    expect(source).toContain("child.setAttribute('data-dock-request', request)")
+    expect(source).toContain("child.setAttribute('data-dock-request', childRequest)")
     expect(source).toMatch(/syncDockRequest\(\s*composerAbove\s*,\s*chatLoreDockMode\s*\)/)
     expect(source).toContain('data-dock-request')
     expect(source).toContain('data-spindle-occupied')
@@ -202,7 +202,7 @@ describe('P12 chat dock preservation contracts', () => {
 
     expect(chatCss).toMatch(/\.chatToolbar\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?padding:\s*6px 8px;[\s\S]*?gap:\s*6px;/)
     expect(chatCss).toMatch(/\.toolbarBtn\s*\{[\s\S]*?order:\s*0;/)
-    expect(chatCss).not.toMatch(/\.toolbarBtn\s*\{[\s\S]*?margin-left:\s*auto;/)
+    expect(chatCss).not.toMatch(/\.toolbarBtn\s*\{[^}]*?margin-left:\s*auto;/)
     expect(toolbarCss).toMatch(/\.cardStrip\s*\{[^}]*?justify-content:\s*center;/)
   })
 
@@ -224,7 +224,7 @@ describe('P12 chat dock preservation contracts', () => {
   test('suppresses the transient blank rail when a retained dock surface is empty and floating', async () => {
     const css = await readSource('ChatView.module.css')
 
-    expect(css).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)[\s\S]*?display:\s*contents;/)
+    expect(css).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \.nativeDockActions > button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)[\s\S]*?display:\s*contents;/)
     expect(css).toMatch(/data-surface-id='quick_toolbar\.workspace'\]:not\(:has\(\*\)\)[\s\S]*?display:\s*contents;/)
   })
 
@@ -244,8 +244,9 @@ describe('P12 chat dock preservation contracts', () => {
     expect(cardSlotRules).toMatch(/flex:\s*1 1 0px !important;/)
     const dockCardSlotRules = toolbarCss.slice(toolbarCss.indexOf(".root[data-fill-top-dock='1'] .cardSlot"), toolbarCss.indexOf('}', toolbarCss.indexOf(".root[data-fill-top-dock='1'] .cardSlot")) + 1)
     expect(dockCardSlotRules).toMatch(/flex:\s*1 1 0px !important;/)
-    expect(toolbarCss).toMatch(/\.root\[data-fill-screen='1'\] \.cardSlot \.card[\s\S]*?width:\s*100% !important;/)
-    expect(toolbarCss).toMatch(/\.root\[data-fill-top-dock='1'\] \.cardSlot \.card[\s\S]*?width:\s*100% !important;/)
+    expect(toolbarCss).toContain(".root[data-fill-screen='1'] .cardSlot .card")
+    expect(toolbarCss).toContain(".root[data-fill-top-dock='1'] .cardSlot .card")
+    expect(toolbarCss).toContain('width: var(--quick-toolbar-card-width, 100%) !important;')
     const fillDockSelector = ".root[data-quick-toolbar-placement='chat_top_dock'][data-fill-top-dock='1'] .cardStrip"
     expect(toolbarCss).toContain(fillDockSelector)
     const fillDockStart = toolbarCss.indexOf(fillDockSelector)
@@ -285,10 +286,13 @@ describe('P12 chat dock preservation contracts', () => {
     expect(toolbarCss).toMatch(/\.rootAnchored\[data-quick-toolbar-variant='v1'\] \.toolbarHorizontal\s*\{[\s\S]*?margin-inline:\s*auto;[\s\S]*?justify-content:\s*center;/)
   })
 
-  test('preserves native strip dock request in ChatView syncDockRequest when no child extension is present', async () => {
+  test('keeps native top dock strip independent of QuickToolbar placement', async () => {
     const source = await readSource('ChatView.tsx')
 
-    expect(source).toMatch(/syncDockRequest\(\s*chatTopDock\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest\(request,\s*quickToolbarSettings\)\s*,\s*dockQuickToolbar\s*\|\|\s*keepFloatingDockHost\s*\?\s*['"]strip['"]\s*:\s*['"]floating['"]\s*\)/)
+    expect(source).toContain("const nativeDockRequest = 'strip' as const")
+    expect(source).toContain('const chatTopDockDefaultRequest = nativeDockRequest')
+    expect(source).toContain('const chatTopDockRequest = nativeDockRequest')
+    expect(source).toMatch(/syncDockRequest\(\s*chatTopDock\s*,\s*\(\)\s*=>\s*nativeDockRequest\s*,\s*nativeDockRequest\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest\(request,\s*quickToolbarSettings\)\s*\)/)
   })
 
   test('enforces strip dockrail min-height and prevents display:contents on data-dock-request=strip', async () => {
@@ -299,7 +303,7 @@ describe('P12 chat dock preservation contracts', () => {
     expect(chatCss).not.toMatch(/\.chatToolbar\[data-dock-request='strip'\][^{]*display:\s*contents/)
 
     // Floating dock collapses only when empty/unoccupied
-    expect(chatCss).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)/)
+    expect(chatCss).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \.nativeDockActions > button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)/)
   })
 })
 
