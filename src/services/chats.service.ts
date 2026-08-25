@@ -3350,6 +3350,7 @@ export interface EditAndSendInput {
   content: string;
   expectedVersion: number;
   requestId: string;
+  branchChatOnEditAndSend?: boolean;
 }
 
 export interface EditAndSendGenerationCursor {
@@ -3378,6 +3379,7 @@ function editAndSendFingerprint(input: EditAndSendInput): string {
       messageId: input.messageId,
       content: input.content,
       expectedVersion: input.expectedVersion,
+      branchChatOnEditAndSend: input.branchChatOnEditAndSend ?? true,
     }))
     .digest("hex");
 }
@@ -3413,6 +3415,8 @@ function messageRevision(row: { revision?: unknown }): number {
   return typeof row.revision === "number" && Number.isInteger(row.revision) ? row.revision : 1;
 }
 
+class EditAndSendBranchMappingError extends Error {}
+
 export function editAndSend(
   userId: string,
   chatId: string,
@@ -3433,6 +3437,7 @@ export function editAndSend(
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     return { status: "bad_request", error: "expectedVersion must be a positive integer" };
   }
+  const branchChatOnEditAndSend = input.branchChatOnEditAndSend ?? true;
 
   const fingerprint = editAndSendFingerprint(input);
   const now = Date.now();
@@ -3440,10 +3445,11 @@ export function editAndSend(
   // tracked by control-flow analysis on the bare `let`, which collapsed the
   // post-transaction guard to `never`.
   const branchRef: { current: CreatedChatBranch | null } = { current: null };
-  let created: CreatedChatBranch | null = null;
   let editedCopy: Message | null = null;
 
-  const outcome = withImmediateTransaction((): EditAndSendResult => {
+  let outcome: EditAndSendResult;
+  try {
+    outcome = withImmediateTransaction((): EditAndSendResult => {
     const db = getDb();
     const existingRequest = db.query(
       `SELECT request_fingerprint, response FROM edit_and_send_requests
@@ -3476,13 +3482,35 @@ export function editAndSend(
     const branchAt = subsequentAssistant ?? source;
     const mode: EditAndSendMode = subsequentAssistant ? "swipe" : "normal";
 
-    created = createChatBranchRows(userId, chat, branchAt);
-    branchRef.current = created;
-    const editedMessageId = created.idMap.get(source.id);
-    if (!editedMessageId) return { status: "not_found", error: "Failed to copy edited message" };
-    const targetMessageId = subsequentAssistant
-      ? created.idMap.get(subsequentAssistant.id) ?? null
-      : null;
+    let targetChatId: string;
+    let editedMessageId: string;
+    let targetMessageId: string | null;
+
+    if (branchChatOnEditAndSend) {
+      const createdBranch = createChatBranchRows(userId, chat, branchAt);
+      branchRef.current = createdBranch;
+
+      const copiedUserMessageId = createdBranch.idMap.get(source.id);
+      if (!copiedUserMessageId) {
+        throw new EditAndSendBranchMappingError("Failed to copy edited message");
+      }
+
+      targetChatId = createdBranch.newChatId;
+      editedMessageId = copiedUserMessageId;
+      if (subsequentAssistant) {
+        const copiedAssistantMessageId = createdBranch.idMap.get(subsequentAssistant.id);
+        if (!copiedAssistantMessageId) {
+          throw new EditAndSendBranchMappingError("Failed to copy immediate assistant message");
+        }
+        targetMessageId = copiedAssistantMessageId;
+      } else {
+        targetMessageId = null;
+      }
+    } else {
+      targetChatId = chatId;
+      editedMessageId = source.id;
+      targetMessageId = subsequentAssistant?.id ?? null;
+    }
     const targetSwipeIndex = subsequentAssistant ? subsequentAssistant.swipes.length : null;
 
     const copied = getMessage(userId, editedMessageId);
@@ -3509,23 +3537,18 @@ export function editAndSend(
       swipeSlot,
       JSON.stringify(nextDates),
       editedMessageId,
-      created.newChatId,
+      targetChatId,
     );
-    if (hasRevision) {
-      db.query(
-        `UPDATE messages SET revision = revision + 1 WHERE id = ? AND chat_id = ? AND revision = ?`,
-      ).run(source.id, chatId, input.expectedVersion);
-    }
 
     editedCopy = getMessage(userId, editedMessageId);
     const generationId = crypto.randomUUID();
     const payload: EditAndSendSuccess = {
-      branchChatId: created.newChatId,
+      branchChatId: targetChatId,
       editedMessageId,
       immediateAssistantId: targetMessageId,
       generationCursor: {
         generationId,
-        chatId: created.newChatId,
+        chatId: targetChatId,
         requestId: input.requestId,
         mode,
       },
@@ -3546,7 +3569,7 @@ export function editAndSend(
       chatId,
       input.requestId,
       fingerprint,
-      created.newChatId,
+      targetChatId,
       editedMessageId,
       targetMessageId,
       targetSwipeIndex,
@@ -3567,7 +3590,7 @@ export function editAndSend(
       input.requestId,
       userId,
       chatId,
-      created.newChatId,
+      targetChatId,
       editedMessageId,
       targetMessageId,
       targetSwipeIndex,
@@ -3578,14 +3601,21 @@ export function editAndSend(
       now,
     );
 
-    return { status: "ok", replayed: false, payload };
-  });
+      return { status: "ok", replayed: false, payload };
+    });
+  } catch (error) {
+    if (error instanceof EditAndSendBranchMappingError) {
+      return { status: "not_found", error: error.message };
+    }
+    throw error;
+  }
 
-  if (outcome.status === "ok" && !outcome.replayed && branchRef.current) {
-    emitCreatedChatBranch(userId, branchRef.current);
+  if (outcome.status === "ok" && !outcome.replayed) {
+    if (branchRef.current) emitCreatedChatBranch(userId, branchRef.current);
     if (editedCopy) {
-      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: branchRef.current.newChatId, message: editedCopy }, userId);
-      try { invalidateChatMemoryCache(branchRef.current.newChatId); } catch { /* optional in tests */ }
+      const targetChatId = branchRef.current?.newChatId ?? chatId;
+      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: targetChatId, message: editedCopy }, userId);
+      try { invalidateChatMemoryCache(targetChatId); } catch { /* optional in tests */ }
     }
   }
 
