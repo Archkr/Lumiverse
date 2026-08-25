@@ -43,6 +43,7 @@ const TAB_LOCATION_OPTIONS = [
 ] as const
 
 const SUITE_FEATURE_FLAGS = new Set<ProductivityFeatureFlag>([
+  'showEditAndSend',
   'enableToolbarIconReorder',
   'showComposerCustomizeGear',
 ])
