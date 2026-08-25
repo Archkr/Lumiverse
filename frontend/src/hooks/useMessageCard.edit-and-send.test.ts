@@ -113,6 +113,7 @@ const storeState = {
   mpCharacterAvatar: null,
   mpParticipants: [],
   reasoningSettings: { autoParse: false },
+  quickToolbarSettings: { branchChatOnEditAndSend: true } as { branchChatOnEditAndSend?: boolean },
   activeChatAvatarId: null,
   activeChatMetadata: null as Record<string, unknown> | null,
   setActiveChatMetadata: mock(() => {}),
@@ -277,6 +278,7 @@ describe('useMessageCard edit-and-send', () => {
     nextRequestId = 0
     storeState.setActiveChat.mockClear()
     storeState.isStreaming = false
+    storeState.quickToolbarSettings = { branchChatOnEditAndSend: true }
     storeState.editingMessageId = 'user-1'
     storeState.messageEditDraft = {
       chatId: 'chat-1',
@@ -315,6 +317,7 @@ describe('useMessageCard edit-and-send', () => {
       content: 'rewritten',
       expectedVersion: 7,
       requestId: 'request-1',
+      branchChatOnEditAndSend: true,
     })
     expect(editAndSend).toHaveBeenCalledTimes(1)
     expect(messagesUpdate).not.toHaveBeenCalled()
@@ -327,6 +330,22 @@ describe('useMessageCard edit-and-send', () => {
     expect(storeState.editingMessageId).toBeNull()
     expect(storeState.messageEditDraft).toBeNull()
     expect(navigate).toHaveBeenCalledWith('/chat/branch-1')
+  })
+
+  test('in-place mode submits the flag without navigating to a branch', async () => {
+    storeState.quickToolbarSettings = { branchChatOnEditAndSend: false }
+    editAndSend.mockResolvedValueOnce({
+      branchChatId: 'chat-1',
+      editedMessageId: 'user-1',
+      immediateAssistantId: null,
+      generationCursor: { generationId: 'gen-3', chatId: 'chat-1', requestId: 'server-request-3', mode: 'normal' },
+    })
+    await renderHook(user)
+    await act(async () => { hookSurface.setEditContent('rewritten'); await Promise.resolve() })
+    await act(async () => { await hookSurface.handleEditAndSend() })
+    expect(editAndSend).toHaveBeenCalledWith('chat-1', expect.objectContaining({ branchChatOnEditAndSend: false }))
+    expect(preloadChatNavigationSnapshotById).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   test('historical: leaves swipe dispatch to the durable endpoint', async () => {
