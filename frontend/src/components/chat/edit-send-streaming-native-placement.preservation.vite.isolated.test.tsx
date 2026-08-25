@@ -162,10 +162,14 @@ describe('Property 2 preservation: productivity feature toggles', () => {
     }
   })
 
-  test('Suite availability filters only Suite-owned flags and retains navigation choices', () => {
+  test('Suite availability filters every Suite-owned flag and retains navigation choices', () => {
     const withoutSuite = renderToStaticMarkup(<ProductivityFeatureToggles hasLumiverseSuite={false} />)
-    expect(withoutSuite).toContain('data-productivity-feature-flag="showEmbeddingFallbackUi"')
-    expect(withoutSuite).toContain('data-productivity-feature-flag="showCortexSecondaryUi"')
+    // showEmbeddingFallbackUi and showCortexSecondaryUi are Suite-owned too.
+    // They used to stay visible here while their surfaces had no Suite gate at
+    // all, so a persisted true kept Suite-only UI mounted after the extension
+    // was disabled and the checkbox controlled nothing.
+    expect(withoutSuite).not.toContain('data-productivity-feature-flag="showEmbeddingFallbackUi"')
+    expect(withoutSuite).not.toContain('data-productivity-feature-flag="showCortexSecondaryUi"')
     expect(withoutSuite).not.toContain('data-productivity-feature-flag="showEditAndSend"')
     expect(withoutSuite).not.toContain('data-productivity-feature-flag="enableToolbarIconReorder"')
     expect(withoutSuite).not.toContain('data-productivity-feature-flag="showComposerCustomizeGear"')

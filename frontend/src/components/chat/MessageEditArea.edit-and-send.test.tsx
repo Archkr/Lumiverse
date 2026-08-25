@@ -31,6 +31,7 @@ mock.module('@/store', () => ({
 }))
 mock.module('@/lib/spindle/productivity-feature-toggles', () => ({
   readProductivityFlag: () => true,
+  readProductivityFeature: () => true,
 }))
 mock.module('@/lib/spindle/use-spindle-component-override', () => ({
   useSpindleComponentOverride: (_name: string, Component: (props: Record<string, unknown>) => unknown, props: Record<string, unknown>) =>

@@ -360,7 +360,10 @@ describe('canonical Productivity settings renderer', () => {
     expect(markup).not.toContain('Lorebook Editor')
     expect(markup).not.toContain('Drag to reorder toolbar icons')
     expect(markup).not.toContain('Customize composer gear')
-    expect(markup).toContain('Embedding fallback profiles')
+    // Every Suite-owned feature toggle goes with the Suite, so a persisted
+    // true cannot leave a Suite-only surface mounted or an inert checkbox behind.
+    expect(markup).not.toContain('Embedding fallback profiles')
+    expect(markup).not.toContain('Cortex secondary connections')
     expect(markup).not.toContain('Edit and Send')
   })
 
