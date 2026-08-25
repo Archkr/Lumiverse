@@ -169,6 +169,89 @@ describe("LumiHub preset installer metadata", () => {
     });
   });
 
+  test("imports and versions Illarin-packaged regexes with Illarin provenance", async () => {
+    const illarinPayload = (version: string, findRegex: string): InstallPresetPayload => ({
+      source: "illarin",
+      presetId: "illarin-asset-1",
+      presetName: "Illarin preset",
+      presetVersion: version,
+      presetData: {
+        preset: {
+          name: "Illarin preset",
+          presetVersion: version,
+          blocks: [],
+          regex_scripts: [{
+            name: `Bundled ${version}`,
+            find_regex: findRegex,
+            folder: "Publisher scripts",
+            disabled: false,
+          }],
+        },
+      },
+    });
+
+    const first = await installPreset("illarin-v1", illarinPayload("1.0.0", "v1"));
+    expect(first.success).toBe(true);
+    const local = createRegexScript(USER_ID, {
+      name: "Local publisher script",
+      find_regex: "local",
+      folder: "Publisher scripts",
+      disabled: false,
+    });
+    expect(typeof local).not.toBe("string");
+
+    const second = await installPreset("illarin-v2", illarinPayload("2.0.0", "v2"));
+    expect(second.success).toBe(true);
+    expect(second.presetId).toBe(first.presetId);
+
+    const preset = getPreset(USER_ID, first.presetId!);
+    expect(preset?.metadata).toMatchObject({
+      _lumiverse_install_source: "illarin",
+      _lumiverse_illarin_asset_id: "illarin-asset-1",
+      _lumiverse_preset_version: "2.0.0",
+    });
+    expect(preset?.metadata._lumiverse_lumihub_id).toBeUndefined();
+
+    const bundled = getRegexScriptsByPresetId(USER_ID, first.presetId!);
+    const v1 = bundled.find((script) => script.metadata._lumiverse_illarin_preset?.version === "1.0.0");
+    const v2 = bundled.find((script) => script.metadata._lumiverse_illarin_preset?.version === "2.0.0");
+    expect(v1).toMatchObject({
+      disabled: true,
+      folder: "Publisher scripts · v1.0.0",
+      metadata: { _lumiverse_illarin_preset: { id: "illarin-asset-1", folderName: "Publisher scripts" } },
+    });
+    expect(v2).toMatchObject({
+      folder: "Publisher scripts · Illarin",
+      metadata: { _lumiverse_illarin_preset: { id: "illarin-asset-1", folderName: "Publisher scripts" } },
+    });
+    expect(getRegexScript(USER_ID, (local as { id: string }).id)).toMatchObject({
+      disabled: false,
+      folder: "Publisher scripts",
+      preset_id: null,
+      metadata: {},
+    });
+  });
+
+  test("fails an Illarin install when its packaged regex set is incomplete", async () => {
+    const result = await installPreset("illarin-invalid-regex", {
+      source: "illarin",
+      presetId: "illarin-asset-invalid",
+      presetName: "Broken Illarin preset",
+      presetVersion: "1.0.0",
+      presetData: {
+        preset: {
+          name: "Broken Illarin preset",
+          presetVersion: "1.0.0",
+          blocks: [],
+          regex_scripts: [null],
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Illarin preset regex import was incomplete");
+  });
+
   test("preserves internal passthrough metadata on create and serialized metadata on update", async () => {
     const first = await installPreset("request-1", installPayload("hub-1", {
       name: "Hub preset",

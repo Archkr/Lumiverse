@@ -88,33 +88,41 @@ function getRegexPerformanceMetadata(script: RegexScript): RegexPerformanceMetad
   return raw as RegexPerformanceMetadata
 }
 
-function getLumiHubPresetVersions(
+type RemotePresetVersion = { source: 'lumihub' | 'illarin'; version: string }
+
+function getRemotePresetVersions(
   scripts: RegexScript[],
   presets: Record<string, { metadata?: Record<string, unknown> }>,
-): string[] {
-  const versions = new Set<string>()
+): RemotePresetVersion[] {
+  const versions = new Map<string, RemotePresetVersion>()
   for (const script of scripts) {
-    const attribution = script.metadata?._lumiverse_lumihub_preset
-    const attributedVersion = attribution && typeof attribution === 'object'
-      && typeof attribution.version === 'string'
-      ? attribution.version.trim()
-      : ''
-    if (attributedVersion) {
-      versions.add(attributedVersion)
-      continue
+    let attributed = false
+    for (const source of ['lumihub', 'illarin'] as const) {
+      const key = source === 'lumihub' ? '_lumiverse_lumihub_preset' : '_lumiverse_illarin_preset'
+      const attribution = script.metadata?.[key]
+      const attributedVersion = attribution && typeof attribution === 'object'
+        && 'version' in attribution && typeof attribution.version === 'string'
+        ? attribution.version.trim()
+        : ''
+      if (attributedVersion) {
+        versions.set(`${source}:${attributedVersion}`, { source, version: attributedVersion })
+        attributed = true
+      }
     }
+    if (attributed) continue
 
     const preset = script.preset_id ? presets[script.preset_id] : undefined
-    if (preset?.metadata?._lumiverse_install_source !== 'lumihub') continue
+    const source = preset?.metadata?._lumiverse_install_source
+    if (source !== 'lumihub' && source !== 'illarin') continue
     const version = typeof preset.metadata._lumiverse_preset_version === 'string'
       ? preset.metadata._lumiverse_preset_version.trim()
       : ''
-    if (version) versions.add(version)
+    if (version) versions.set(`${source}:${version}`, { source, version })
   }
-  return [...versions].sort((left, right) => left.localeCompare(right, undefined, {
-    numeric: true,
-    sensitivity: 'base',
-  }))
+  return [...versions.values()].sort((left, right) => (
+    left.source.localeCompare(right.source)
+    || left.version.localeCompare(right.version, undefined, { numeric: true, sensitivity: 'base' })
+  ))
 }
 
 function getSpindleExtensionFolderVersions(
@@ -829,7 +837,7 @@ export default function RegexPanel() {
                   const isCollapsed = collapsedFolders.has(folderKey)
                   const folderLabel = group.folder || t('shared:uncategorized')
                   const isNamedFolder = Boolean(group.folder)
-                  const presetVersions = getLumiHubPresetVersions(group.scripts, presets)
+                  const presetVersions = getRemotePresetVersions(group.scripts, presets)
                   const spindleVersions = getSpindleExtensionFolderVersions(group.scripts)
                   return (
                     <div key={folderKey}>
@@ -859,11 +867,13 @@ export default function RegexPanel() {
                         <span className={styles.folderName}>
                           {folderLabel}
                         </span>
-                        {presetVersions.map((version) => (
+                        {presetVersions.map(({ source, version }) => (
                           <span
-                            key={version}
+                            key={`${source}:${version}`}
                             className={styles.folderVersionBadge}
-                            title={t('regexPanel.lumihubPresetVersion', { version: formatVersionLabel(version) })}
+                            title={t(source === 'illarin' ? 'regexPanel.illarinPresetVersion' : 'regexPanel.lumihubPresetVersion', {
+                              version: formatVersionLabel(version),
+                            })}
                           >
                             <Badge color="info" size="sm">{formatVersionLabel(version)}</Badge>
                           </span>

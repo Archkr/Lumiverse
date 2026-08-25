@@ -669,8 +669,10 @@ export async function installPreset(
     // the immutable Hub id, then use that same slug identity as a constrained
     // fallback so a re-created/migrated Hub listing still updates the installed
     // row instead of producing a second local copy.
-    const existing = presetsSvc.findPresetByLumihubId(userId, payload.presetId)
-      ?? (presetSlug ? presetsSvc.findLumihubPresetBySlug(userId, presetSlug) : null);
+    const existing = payload.source === "illarin"
+      ? presetsSvc.findPresetByIllarinAssetId(userId, payload.presetId)
+      : presetsSvc.findPresetByLumihubId(userId, payload.presetId)
+        ?? (presetSlug ? presetsSvc.findLumihubPresetBySlug(userId, presetSlug) : null);
     const existingPassthroughMetadata = existing
       ? extractPresetPassthroughMetadata({ metadata: existing.metadata })
       : {};
@@ -735,7 +737,9 @@ export async function installPreset(
         compatibility: isPlainObject(exported.compatibility) ? exported.compatibility : {},
         coverUrl,
         _lumiverse_install_source: payload.source,
-        _lumiverse_lumihub_id: payload.presetId,
+        ...(payload.source === "illarin"
+          ? { _lumiverse_illarin_asset_id: payload.presetId }
+          : { _lumiverse_lumihub_id: payload.presetId }),
         _lumiverse_preset_version: presetVersion,
         _lumiverse_preset_slug: presetSlug,
         _lumiverse_preset_creator: presetCreator,
@@ -743,8 +747,8 @@ export async function installPreset(
       },
     };
 
-    // Update the existing installation in place when this preset was installed
-    // from LumiHub before, so "Update" advances the version instead of duplicating.
+    // Update an existing remote installation in place so "Update" advances the
+    // version instead of duplicating the preset.
     let saved;
     if (existing) {
       saved = presetsSvc.updatePreset(userId, existing.id, {
@@ -756,35 +760,61 @@ export async function installPreset(
       eventBus.emit(EventType.PRESET_CHANGED, { id: saved.id, preset: saved }, userId);
     }
 
-    // Preset-bound regex scripts ride at the top level of the export (sibling to
-    // `preset`). On update, preserve older LumiHub-attributed versions as disabled
-    // history and replace only an existing copy of the incoming version. Folder
+    // Preset-bound regex scripts ride at the top level of a LumiHub export or
+    // inside Illarin's raw preset document. On update, preserve older remotely
+    // attributed versions as disabled history and replace only an existing copy
+    // of the incoming version. Folder
     // names are never used as ownership, so same-named local folders are untouched.
-    // Best-effort — the preset is already saved, and retired scripts remain recoverable
-    // if importing the new payload fails.
+    // LumiHub retains its historical best-effort behavior. Illarin propagates an
+    // incomplete import so durable delivery work is not acknowledged prematurely.
     try {
       const regexScripts = extractPresetRegexScripts(exported);
-      regexSvc.installLumiHubPresetRegexScripts(userId, {
-        presetId: saved.id,
-        presetName: saved.name,
-        hubPresetId: payload.presetId,
-        presetVersion,
-        scripts: regexScripts,
-        previous: existing ? {
-          hubPresetId: typeof existing.metadata?._lumiverse_lumihub_id === "string"
+      const previousVersion = typeof existing?.metadata?._lumiverse_preset_version === "string"
+        ? existing.metadata._lumiverse_preset_version
+        : null;
+      if (payload.source === "illarin") {
+        const previousAssetId = typeof existing?.metadata?._lumiverse_illarin_asset_id === "string"
+          ? existing.metadata._lumiverse_illarin_asset_id
+          : typeof existing?.metadata?._lumiverse_lumihub_id === "string"
             ? existing.metadata._lumiverse_lumihub_id
-            : null,
-          version: typeof existing.metadata?._lumiverse_preset_version === "string"
-            ? existing.metadata._lumiverse_preset_version
-            : null,
-          presetName: existing.name,
-        } : null,
-      });
+            : null;
+        regexSvc.installIllarinPresetRegexScripts(userId, {
+          presetId: saved.id,
+          presetName: saved.name,
+          assetId: payload.presetId,
+          presetVersion,
+          scripts: regexScripts,
+          previous: existing ? {
+            assetId: previousAssetId,
+            version: previousVersion,
+            presetName: existing.name,
+          } : null,
+        });
+      } else {
+        regexSvc.installLumiHubPresetRegexScripts(userId, {
+          presetId: saved.id,
+          presetName: saved.name,
+          hubPresetId: payload.presetId,
+          presetVersion,
+          scripts: regexScripts,
+          previous: existing ? {
+            hubPresetId: typeof existing.metadata?._lumiverse_lumihub_id === "string"
+              ? existing.metadata._lumiverse_lumihub_id
+              : null,
+            version: previousVersion,
+            presetName: existing.name,
+          } : null,
+        });
+      }
       if (regexScripts.length > 0 && presetsSvc.reconcileActiveLoomPreset(userId) === saved.id) {
         regexSvc.activatePresetBoundRegexScripts(userId, saved.id);
       }
     } catch (err) {
-      console.warn("[LumiHub Installer] Preset regex import failed:", err);
+      console.warn(`[${payload.source === "illarin" ? "Illarin" : "LumiHub"} Installer] Preset regex import failed:`, err);
+      // LumiHub remote installs historically treat regexes as best-effort.
+      // Illarin deliveries are durable work: acknowledging a preset whose
+      // packaged scripts were dropped would permanently lose part of it.
+      if (payload.source === "illarin") throw err;
     }
 
     eventBus.emit(EventType.LUMIHUB_INSTALL_COMPLETED, {
@@ -801,7 +831,7 @@ export async function installPreset(
       presetName: saved.name,
     };
   } catch (err: any) {
-    console.error("[LumiHub Installer] Preset install error:", err);
+    console.error(`[${payload.source === "illarin" ? "Illarin" : "LumiHub"} Installer] Preset install error:`, err);
     return { requestId, success: false, error: err.message || "Unknown error during preset install" };
   }
 }

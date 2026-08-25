@@ -244,6 +244,23 @@ export function findPresetByLumihubId(userId: string, lumihubId: string): Preset
   return row ? rowToPreset(row) : null;
 }
 
+/** Find an Illarin preset by its immutable asset id for in-place updates. */
+export function findPresetByIllarinAssetId(userId: string, assetId: string): Preset | null {
+  const row = getDb()
+    .query(
+      `SELECT * FROM presets
+       WHERE user_id = ?
+         AND json_extract(metadata, '$._lumiverse_install_source') = 'illarin'
+         AND COALESCE(
+           json_extract(metadata, '$._lumiverse_illarin_asset_id'),
+           json_extract(metadata, '$._lumiverse_lumihub_id')
+         ) = ?
+       LIMIT 1`,
+    )
+    .get(userId, assetId) as any;
+  return row ? rowToPreset(row) : null;
+}
+
 /**
  * Resolve an installed LumiHub preset by the canonical slug used by the Hub's
  * install manifest. This is the identity fallback for listings whose Hub row

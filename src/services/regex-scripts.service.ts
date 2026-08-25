@@ -720,21 +720,36 @@ function prepareCharacterBoundImportedScript<T extends Record<string, any>>(inpu
 }
 
 export interface PresetBoundRegexAttribution {
-  source?: "lumihub";
+  source?: "lumihub" | "illarin";
+  remotePresetId?: string | null;
+  /** Legacy LumiHub call-site alias. */
   hubPresetId?: string | null;
   presetVersion?: string | null;
   folderName?: string | null;
 }
 
-interface LumiHubPresetRegexAttribution {
+interface RemotePresetRegexAttribution {
   id: string | null;
   version: string | null;
   folderName: string | null;
 }
 
-function getLumiHubPresetRegexAttribution(metadata: unknown): LumiHubPresetRegexAttribution | null {
+type RemotePresetRegexSource = "lumihub" | "illarin";
+
+function remotePresetMetadataKey(source: RemotePresetRegexSource): string {
+  return source === "lumihub" ? "_lumiverse_lumihub_preset" : "_lumiverse_illarin_preset";
+}
+
+function remotePresetLabel(source: RemotePresetRegexSource): string {
+  return source === "lumihub" ? "LumiHub" : "Illarin";
+}
+
+function getRemotePresetRegexAttribution(
+  metadata: unknown,
+  source: RemotePresetRegexSource,
+): RemotePresetRegexAttribution | null {
   if (!isPlainMetadataRecord(metadata)) return null;
-  const raw = metadata._lumiverse_lumihub_preset;
+  const raw = metadata[remotePresetMetadataKey(source)];
   if (!isPlainMetadataRecord(raw)) return null;
   const id = normalizeOptionalId(raw.id);
   const version = normalizeOptionalId(raw.version);
@@ -760,7 +775,13 @@ function preparePresetBoundImportedScript<T extends Record<string, any>>(
 
   if (attribution?.source === "lumihub") {
     metadata._lumiverse_lumihub_preset = {
-      id: normalizeOptionalId(attribution.hubPresetId),
+      id: normalizeOptionalId(attribution.remotePresetId ?? attribution.hubPresetId),
+      version: normalizeOptionalId(attribution.presetVersion),
+      folderName: normalizeOptionalId(attribution.folderName),
+    };
+  } else if (attribution?.source === "illarin") {
+    metadata._lumiverse_illarin_preset = {
+      id: normalizeOptionalId(attribution.remotePresetId),
       version: normalizeOptionalId(attribution.presetVersion),
       folderName: normalizeOptionalId(attribution.folderName),
     };
@@ -2117,24 +2138,37 @@ export interface RetireLumiHubPresetRegexResult {
   replacedIds: string[];
 }
 
+interface RetireRemotePresetRegexOptions {
+  source: RemotePresetRegexSource;
+  presetId: string;
+  remotePresetId: string;
+  previousRemotePresetId?: string | null;
+  previousVersion?: string | null;
+  incomingVersion?: string | null;
+  presetName: string;
+  preserveIds?: string[];
+}
+
 function versionLabel(version: string | null): string {
   if (!version) return "previous";
   return /^v/i.test(version) ? version : `v${version}`;
 }
 
 /** Recover the author-provided source folder for older rows that predate explicit storage. */
-function getLumiHubSourceFolder(
+function getRemotePresetSourceFolder(
   script: Pick<RegexScript, "folder">,
-  attribution: LumiHubPresetRegexAttribution | null,
+  attribution: RemotePresetRegexAttribution | null,
   fallback: string,
   version: string | null,
+  source: RemotePresetRegexSource,
 ): string {
   const stored = normalizeOptionalId(attribution?.folderName);
   if (stored) return stored;
 
   const folder = normalizeOptionalId(script.folder);
   if (!folder) return fallback;
-  const currentMatch = folder.match(/^(.*?) · LumiHub(?: \(\d+\))?$/);
+  const label = remotePresetLabel(source);
+  const currentMatch = folder.match(new RegExp(`^(.*?) · ${label}(?: \\(\\d+\\))?$`));
   if (currentMatch?.[1]?.trim()) return currentMatch[1].trim();
   const historicalSuffix = ` · ${versionLabel(version)}`;
   if (folder.endsWith(historicalSuffix)) return folder.slice(0, -historicalSuffix.length).trim() || fallback;
@@ -2145,16 +2179,17 @@ function chooseAvailableRegexFolder(
   userId: string,
   desiredFolder: string,
   allowedOccupantIds: Set<string>,
-  reserveLumiHubNamespace = false,
+  reserveRemoteNamespace = false,
+  remoteLabel = "LumiHub",
 ): string {
   const db = getDb();
-  const base = desiredFolder.trim() || "LumiHub preset";
-  const candidates = reserveLumiHubNamespace
-    ? [`${base} · LumiHub`]
-    : [base, `${base} · LumiHub`];
+  const base = desiredFolder.trim() || `${remoteLabel} preset`;
+  const candidates = reserveRemoteNamespace
+    ? [`${base} · ${remoteLabel}`]
+    : [base, `${base} · ${remoteLabel}`];
 
   for (let suffix = 2; suffix < 1000; suffix++) {
-    candidates.push(`${base} · LumiHub (${suffix})`);
+    candidates.push(`${base} · ${remoteLabel} (${suffix})`);
   }
 
   for (const candidate of candidates) {
@@ -2164,44 +2199,44 @@ function chooseAvailableRegexFolder(
     if (occupants.every((row) => allowedOccupantIds.has(row.id))) return candidate;
   }
 
-  return `${base} · LumiHub (${Date.now()})`;
+  return `${base} · ${remoteLabel} (${Date.now()})`;
 }
 
 /**
- * Preserve historical LumiHub regex payloads while making an update safe:
+ * Preserve historical remote-preset regex payloads while making an update safe:
  * older versions are disabled and moved into version-specific folders, while a
  * repeat install of the incoming version is replaced instead of duplicated.
  *
- * Selection is based exclusively on preset ownership plus LumiHub attribution.
+ * Selection is based exclusively on preset ownership plus source attribution.
  * Folder names are never used to decide which rows to mutate.
  */
-export function retireLumiHubPresetRegexScriptsForUpdate(
+function retireRemotePresetRegexScriptsForUpdate(
   userId: string,
-  options: RetireLumiHubPresetRegexOptions,
+  options: RetireRemotePresetRegexOptions,
 ): RetireLumiHubPresetRegexResult {
-  const hubPresetId = normalizeOptionalId(options.hubPresetId);
-  const previousHubPresetId = normalizeOptionalId(options.previousHubPresetId);
+  const remotePresetId = normalizeOptionalId(options.remotePresetId);
+  const previousRemotePresetId = normalizeOptionalId(options.previousRemotePresetId);
   const previousVersion = normalizeOptionalId(options.previousVersion);
   const incomingVersion = normalizeOptionalId(options.incomingVersion);
-  if (!hubPresetId) return { archivedIds: [], replacedIds: [] };
+  if (!remotePresetId) return { archivedIds: [], replacedIds: [] };
 
-  const acceptedHubIds = new Set([hubPresetId, previousHubPresetId].filter((id): id is string => !!id));
+  const acceptedRemoteIds = new Set([remotePresetId, previousRemotePresetId].filter((id): id is string => !!id));
   const preserveIds = new Set(options.preserveIds ?? []);
   const rows = getRegexScriptsByPresetId(userId, options.presetId);
   const matching = rows.flatMap((script) => {
     if (preserveIds.has(script.id)) return [];
-    const attribution = getLumiHubPresetRegexAttribution(script.metadata);
-    if (attribution?.id && !acceptedHubIds.has(attribution.id)) return [];
+    const attribution = getRemotePresetRegexAttribution(script.metadata, options.source);
+    if (attribution?.id && !acceptedRemoteIds.has(attribution.id)) return [];
 
     // Rows from installations predating explicit per-regex attribution are
     // still attributable through their preset_id, but only when the containing
-    // preset was already a tracked LumiHub installation.
-    if (!attribution?.id && !previousHubPresetId) return [];
+    // preset was already a tracked installation from the same remote source.
+    if (!attribution?.id && !previousRemotePresetId) return [];
     const version = attribution?.version ?? previousVersion;
     return [{
       script,
       version,
-      folderName: getLumiHubSourceFolder(script, attribution, options.presetName, version),
+      folderName: getRemotePresetSourceFolder(script, attribution, options.presetName, version, options.source),
     }];
   });
 
@@ -2223,7 +2258,13 @@ export function retireLumiHubPresetRegexScriptsForUpdate(
   for (const [key, group] of archiveGroups) {
     const allowedOccupants = new Set([...group.ids, ...replaceIdSet]);
     const desired = `${group.folderName} · ${versionLabel(group.version)}`;
-    foldersByArchiveKey.set(key, chooseAvailableRegexFolder(userId, desired, allowedOccupants));
+    foldersByArchiveKey.set(key, chooseAvailableRegexFolder(
+      userId,
+      desired,
+      allowedOccupants,
+      false,
+      remotePresetLabel(options.source),
+    ));
   }
 
   const db = getDb();
@@ -2237,7 +2278,7 @@ export function retireLumiHubPresetRegexScriptsForUpdate(
     );
     for (const { script, version, folderName } of archived) {
       const metadata = isPlainMetadataRecord(script.metadata) ? { ...script.metadata } : {};
-      metadata._lumiverse_lumihub_preset = { id: hubPresetId, version, folderName };
+      metadata[remotePresetMetadataKey(options.source)] = { id: remotePresetId, version, folderName };
       updateRow.run(
         foldersByArchiveKey.get(archiveKey(version, folderName))!,
         JSON.stringify(metadata),
@@ -2256,7 +2297,49 @@ export function retireLumiHubPresetRegexScriptsForUpdate(
   return { archivedIds, replacedIds };
 }
 
+export function retireLumiHubPresetRegexScriptsForUpdate(
+  userId: string,
+  options: RetireLumiHubPresetRegexOptions,
+): RetireLumiHubPresetRegexResult {
+  return retireRemotePresetRegexScriptsForUpdate(userId, {
+    source: "lumihub",
+    presetId: options.presetId,
+    remotePresetId: options.hubPresetId,
+    previousRemotePresetId: options.previousHubPresetId,
+    previousVersion: options.previousVersion,
+    incomingVersion: options.incomingVersion,
+    presetName: options.presetName,
+    preserveIds: options.preserveIds,
+  });
+}
+
 /** Pick a current-version folder without merging into an unrelated local folder. */
+function resolveRemotePresetRegexInstallFolder(
+  source: RemotePresetRegexSource,
+  userId: string,
+  presetId: string,
+  remotePresetId: string,
+  presetName: string,
+  sourceFolder = presetName,
+): string {
+  const normalizedRemoteId = normalizeOptionalId(remotePresetId);
+  const normalizedSourceFolder = normalizeOptionalId(sourceFolder) ?? presetName;
+  const allowedIds = new Set(
+    getRegexScriptsByPresetId(userId, presetId)
+      .filter((script) => {
+        const attribution = getRemotePresetRegexAttribution(script.metadata, source);
+        return attribution?.id === normalizedRemoteId
+          && getRemotePresetSourceFolder(script, attribution, presetName, attribution.version, source) === normalizedSourceFolder;
+      })
+      .map((script) => script.id),
+  );
+  // The unqualified preset name is user-owned namespace. Even if an older
+  // remote installation is the only current occupant, do not reuse it: a
+  // user can later add local regexes to that folder and the UI groups solely
+  // by folder name. The current remote payload always gets a reserved folder.
+  return chooseAvailableRegexFolder(userId, normalizedSourceFolder, allowedIds, true, remotePresetLabel(source));
+}
+
 export function resolveLumiHubPresetRegexInstallFolder(
   userId: string,
   presetId: string,
@@ -2264,22 +2347,21 @@ export function resolveLumiHubPresetRegexInstallFolder(
   presetName: string,
   sourceFolder = presetName,
 ): string {
-  const normalizedHubId = normalizeOptionalId(hubPresetId);
-  const normalizedSourceFolder = normalizeOptionalId(sourceFolder) ?? presetName;
-  const allowedIds = new Set(
-    getRegexScriptsByPresetId(userId, presetId)
-      .filter((script) => {
-        const attribution = getLumiHubPresetRegexAttribution(script.metadata);
-        return attribution?.id === normalizedHubId
-          && getLumiHubSourceFolder(script, attribution, presetName, attribution.version) === normalizedSourceFolder;
-      })
-      .map((script) => script.id),
+  return resolveRemotePresetRegexInstallFolder(
+    "lumihub", userId, presetId, hubPresetId, presetName, sourceFolder,
   );
-  // The unqualified preset name is user-owned namespace. Even if an older
-  // LumiHub installation is the only current occupant, do not reuse it: a
-  // user can later add local regexes to that folder and the UI groups solely
-  // by folder name. LumiHub's current payload always gets a reserved folder.
-  return chooseAvailableRegexFolder(userId, normalizedSourceFolder, allowedIds, true);
+}
+
+export function resolveIllarinPresetRegexInstallFolder(
+  userId: string,
+  presetId: string,
+  assetId: string,
+  presetName: string,
+  sourceFolder = presetName,
+): string {
+  return resolveRemotePresetRegexInstallFolder(
+    "illarin", userId, presetId, assetId, presetName, sourceFolder,
+  );
 }
 
 export interface InstallLumiHubPresetRegexOptions {
@@ -2295,14 +2377,41 @@ export interface InstallLumiHubPresetRegexOptions {
   } | null;
 }
 
+export interface InstallIllarinPresetRegexOptions {
+  presetId: string;
+  presetName: string;
+  assetId: string;
+  presetVersion?: string | null;
+  scripts: any[];
+  previous?: {
+    assetId?: string | null;
+    version?: string | null;
+    presetName?: string | null;
+  } | null;
+}
+
+interface InstallRemotePresetRegexOptions {
+  source: RemotePresetRegexSource;
+  presetId: string;
+  presetName: string;
+  remotePresetId: string;
+  presetVersion?: string | null;
+  scripts: any[];
+  previous?: {
+    remotePresetId?: string | null;
+    version?: string | null;
+    presetName?: string | null;
+  } | null;
+}
+
 /**
- * Stage a LumiHub regex payload before retiring the previous version. A partial
+ * Stage a remote preset's regex payload before retiring the previous version. A partial
  * import is removed and the old restore-list is reinstated, leaving the prior
  * working set untouched.
  */
-export function installLumiHubPresetRegexScripts(
+function installRemotePresetRegexScripts(
   userId: string,
-  options: InstallLumiHubPresetRegexOptions,
+  options: InstallRemotePresetRegexOptions,
 ): { imported: number; archived: number; replaced: number; folder: string | null } {
   const previousRestore = readStoredPresetRegexIdsRecord(userId, options.presetId);
   const beforeIds = new Set(getRegexScriptsByPresetId(userId, options.presetId).map((script) => script.id));
@@ -2317,8 +2426,8 @@ export function installLumiHubPresetRegexScripts(
         options.presetName,
         options.scripts,
         {
-          source: "lumihub",
-          hubPresetId: options.hubPresetId,
+          source: options.source,
+          remotePresetId: options.remotePresetId,
           presetVersion: options.presetVersion,
         },
       );
@@ -2327,7 +2436,7 @@ export function installLumiHubPresetRegexScripts(
         .map((script) => script.id);
       folder = newIds.length > 0 ? getRegexScript(userId, newIds[0])?.folder ?? null : null;
       if (imported.skipped > 0 || imported.imported !== options.scripts.length) {
-        throw new Error(`LumiHub preset regex import was incomplete (${imported.imported}/${options.scripts.length})`);
+        throw new Error(`${remotePresetLabel(options.source)} preset regex import was incomplete (${imported.imported}/${options.scripts.length})`);
       }
     }
 
@@ -2335,10 +2444,11 @@ export function installLumiHubPresetRegexScripts(
       ? readStoredPresetRegexIdsRecord(userId, options.presetId).ids
       : [];
     const retired = options.previous
-      ? retireLumiHubPresetRegexScriptsForUpdate(userId, {
+      ? retireRemotePresetRegexScriptsForUpdate(userId, {
+          source: options.source,
           presetId: options.presetId,
-          hubPresetId: options.hubPresetId,
-          previousHubPresetId: options.previous.hubPresetId,
+          remotePresetId: options.remotePresetId,
+          previousRemotePresetId: options.previous.remotePresetId,
           previousVersion: options.previous.version,
           incomingVersion: options.presetVersion,
           presetName: normalizeOptionalId(options.previous.presetName) ?? options.presetName,
@@ -2367,6 +2477,44 @@ export function installLumiHubPresetRegexScripts(
     }
     throw error;
   }
+}
+
+export function installLumiHubPresetRegexScripts(
+  userId: string,
+  options: InstallLumiHubPresetRegexOptions,
+): { imported: number; archived: number; replaced: number; folder: string | null } {
+  return installRemotePresetRegexScripts(userId, {
+    source: "lumihub",
+    presetId: options.presetId,
+    presetName: options.presetName,
+    remotePresetId: options.hubPresetId,
+    presetVersion: options.presetVersion,
+    scripts: options.scripts,
+    previous: options.previous ? {
+      remotePresetId: options.previous.hubPresetId,
+      version: options.previous.version,
+      presetName: options.previous.presetName,
+    } : null,
+  });
+}
+
+export function installIllarinPresetRegexScripts(
+  userId: string,
+  options: InstallIllarinPresetRegexOptions,
+): { imported: number; archived: number; replaced: number; folder: string | null } {
+  return installRemotePresetRegexScripts(userId, {
+    source: "illarin",
+    presetId: options.presetId,
+    presetName: options.presetName,
+    remotePresetId: options.assetId,
+    presetVersion: options.presetVersion,
+    scripts: options.scripts,
+    previous: options.previous ? {
+      remotePresetId: options.previous.assetId,
+      version: options.previous.version,
+      presetName: options.previous.presetName,
+    } : null,
+  });
 }
 
 export function activatePresetBoundRegexScripts(userId: string, presetId?: string | null): { changedIds: string[]; restoredIds: string[] } {
@@ -2773,17 +2921,18 @@ export function importPresetBoundRegexScripts(
       continue;
     }
     const before = new Set(getRegexScriptsByPresetId(userId, presetId).map((s) => s.id));
-    // Keep the publisher's folder grouping, but namespace it for this LumiHub
+    // Keep the publisher's folder grouping, but namespace it for this remote
     // installation so a local folder with the same author-provided name cannot
     // be merged into it.
     const sourceFolder = normalizeOptionalId(script.folder) ?? presetName;
-    const hubPresetId = attribution?.source === "lumihub"
-      ? normalizeOptionalId(attribution.hubPresetId)
+    const remoteSource = attribution?.source;
+    const remotePresetId = remoteSource
+      ? normalizeOptionalId(attribution.remotePresetId ?? attribution.hubPresetId)
       : null;
-    const folder = hubPresetId
-      ? resolveLumiHubPresetRegexInstallFolder(userId, presetId, hubPresetId, presetName, sourceFolder)
+    const folder = remoteSource && remotePresetId
+      ? resolveRemotePresetRegexInstallFolder(remoteSource, userId, presetId, remotePresetId, presetName, sourceFolder)
       : normalizeOptionalId(attribution?.folderName) ?? sourceFolder;
-    const scriptAttribution = attribution?.source === "lumihub"
+    const scriptAttribution = remoteSource
       ? { ...attribution, folderName: sourceFolder }
       : attribution;
     const result = importRegexScripts(userId, {
