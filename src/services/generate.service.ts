@@ -158,7 +158,7 @@ import {
 } from "./prompt-assembly-worker-client";
 import { isPromptRegexChatOwned } from "../spindle/prompt-regex-ownership";
 import { isRunning as isExtensionRunning } from "../spindle/lifecycle";
-import { clampErrorMessage, describeProviderError, ProviderRequestError } from "../utils/provider-errors";
+import { clampErrorMessage, ConnectionCredentialError, describeProviderError, ProviderRequestError } from "../utils/provider-errors";
 
 interface GenerateInput {
   userId: string;
@@ -198,20 +198,72 @@ interface GenerateInput {
  * authoritative over the caller's active/global connection. If the bound
  * profile was deleted, fall back to the requested/default profile so an old
  * metadata reference cannot make the chat unusable.
+ *
+ * When no `connection_id` was supplied by the caller — i.e. the generation was
+ * triggered server-side (Edit-and-Send outbox dispatch, multiplayer host,
+ * spindle sends that forward an `undefined` id) — the fallback is the ACTING
+ * connection (`resolveActingConnectionId`: validated `activeProfileId` → the
+ * `is_default` profile → any owned profile) rather than `is_default` alone.
+ * `is_default` alone is the 401 defect: it is a different piece of state from
+ * the `activeProfileId` the UI sends, so the dispatched generation could run on
+ * a connection the user never selected. A supplied-but-stale id still throws
+ * rather than silently retargeting.
+ *
+ * `opts.preferActiveConnection` is the `editAndSendAlwaysUseActiveConnection`
+ * opt-in, and it is set only for Edit-and-Send dispatches. See below.
  */
 function resolveChatGenerationConnection(
   userId: string,
   metadata: Record<string, any> | null | undefined,
   requestedConnectionId?: string,
+  opts?: { preferActiveConnection?: boolean },
 ): ConnectionProfile {
+  // An empty/whitespace-only id already fell through to the default profile
+  // today; normalizing here keeps that outcome while letting the acting
+  // fallback below see "no id was supplied".
+  const requestedId = requestedConnectionId?.trim() || undefined;
+
+  // The opt-in: the user's STRICT active profile wins over a live chat-scoped
+  // binding, for Edit-and-Send only, and only when no explicit id was supplied
+  // (so every interactive path stays bit-identical). The binding's
+  // `connection_model` override is deliberately NOT carried across: the pinned
+  // model belongs to the pinned profile and is very often not a model the
+  // active profile's endpoint serves, so carrying it over would produce a
+  // second, subtler failure of exactly the kind this fix exists to remove.
+  // When the strict rung resolves nothing, control falls through to the
+  // unchanged ladder below — the prescribed safe degradation, structural rather
+  // than defensive: this branch only ever replaces the FIRST choice.
+  if (opts?.preferActiveConnection && !requestedId) {
+    const activeId = connectionsSvc.resolveActiveConnectionId(userId);
+    if (activeId) {
+      const activeConnection = connectionsSvc.resolveConnection(userId, activeId);
+      if (activeConnection) return activeConnection;
+    }
+  }
+
   const boundId = typeof metadata?.connection_profile_id === "string"
     ? metadata.connection_profile_id.trim()
     : "";
   const boundConnection = boundId
     ? connectionsSvc.resolveConnection(userId, boundId)
     : null;
+  // The acting chain (active → is_default → any owned) is evaluated in stages
+  // rather than as one `resolveActingConnectionId` call so that the rungs beyond
+  // `is_default` are only reached when the earlier ones actually came up empty.
+  // `resolveConnection` is the seam every caller and test harness already stubs;
+  // `getDefaultConnection` / `listConnections` are not, and eagerly calling them
+  // would make every generation start touch the database. The staged form is
+  // equivalent to `resolveConnection(userId, resolveActingConnectionId(userId))`
+  // rung for rung — `resolveActingConnectionId` remains the single owner of the
+  // chain and is what the last stage delegates to.
   const connection = boundConnection
-    ?? connectionsSvc.resolveConnection(userId, requestedConnectionId);
+    ?? connectionsSvc.resolveConnection(
+      userId,
+      requestedId ?? connectionsSvc.resolveActiveConnectionId(userId),
+    )
+    ?? (requestedId
+      ? null
+      : connectionsSvc.resolveConnection(userId, connectionsSvc.resolveActingConnectionId(userId)));
 
   if (!connection) {
     throw new Error("No connection profile found. Configure a default connection or select one for this chat.");
@@ -221,6 +273,32 @@ function resolveChatGenerationConnection(
     ? metadata.connection_model.trim()
     : "";
   return modelOverride ? { ...connection, model: modelOverride } : connection;
+}
+
+/**
+ * The `editAndSendAlwaysUseActiveConnection` Productivity setting, read from the
+ * persisted per-user `quickToolbarSettings` blob at DISPATCH time — the same way
+ * `activeProfileId`, `activePersonaId`, and `activeLoomPresetId` are already
+ * read — so the decision is identical whether the Edit-and-Send dispatch runs
+ * in the POST handler, on a periodic retry tick, or during startup recovery.
+ * Nothing is captured at request time, so nothing can be dropped on the two
+ * paths that lack a user-facing error surface, and no `generation_outbox`
+ * column, schema, baseline, or migration change is needed.
+ *
+ * Strict `=== true`: an absent row, an absent key, `null`, `undefined`, a
+ * non-object or array value, an explicit `false`, and the coercible `"true"` /
+ * `0` all mean OFF. No truthiness coercion anywhere, so an explicit `false`
+ * cannot be flipped. Frontend defaults are deliberately NOT merged server-side
+ * (`DEFAULT_QUICK_TOOLBAR_SETTINGS` is a frontend module) — a default merge is
+ * the one way a wrong value could be reintroduced. Only the CANONICAL
+ * `quickToolbarSettings` row is read; the namespaced compatibility mirror
+ * `spindle:lumiverse_suite:quick_toolbar:quickToolbarSettings` is never
+ * authoritative.
+ */
+function readEditAndSendAlwaysUseActiveConnection(userId: string): boolean {
+  const value = settingsSvc.getSetting(userId, "quickToolbarSettings")?.value;
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).editAndSendAlwaysUseActiveConnection === true;
 }
 
 /** Lifecycle context passed from startGeneration → runGeneration */
@@ -262,6 +340,9 @@ interface GenerationLifecycle {
   chatHistoryMessages?: LlmMessage[];
   /** Full assembled outbound message list for prompt breakdown inspection. */
   messages?: LlmMessage[];
+  /** Resolved connection display name, used to enrich a provider 401/403 that
+   *  came back from a connection which sent no stored credential. */
+  connectionName?: string;
   /** Model + provider + preset info for breakdown storage */
   model?: string;
   providerName?: string;
@@ -454,7 +535,10 @@ export const __test__ = {
   injectConnectionMetadataFlags,
   omitChatHistoryBreakdownEntries,
   omitChatHistoryTokenBreakdown,
+  readEditAndSendAlwaysUseActiveConnection,
+  resolveChatGenerationConnection,
   resolveDryRunMessageReasoning,
+  resolveProviderAndKey,
   sumChatHistoryBreakdownTokens,
 };
 
@@ -763,6 +847,32 @@ function errorMessage(err: unknown): string {
   } catch {
     return "Unknown error";
   }
+}
+
+/**
+ * The residual keyless case the credential preflight deliberately leaves
+ * permissive: a connection with `has_api_key = 0` on a provider that does not
+ * declare a key as required sends no `Authorization` header at all (see
+ * `OpenAICompatibleProvider.headers`). Legitimate for a local endpoint —
+ * misconfiguration for a gateway that wants a key, and indistinguishable up
+ * front. When such a call comes back 401/403, name the connection and say that
+ * no stored key was sent, so the user gets a remedy instead of the raw provider
+ * status line alone. `describeProviderError` has no connection context and is
+ * left untouched.
+ */
+function enrichUnauthenticatedConnectionError(
+  message: string,
+  err: unknown,
+  opts: { apiKey: string; connectionName?: string },
+): string {
+  if (opts.apiKey) return message;
+  if (!(err instanceof ProviderRequestError)) return message;
+  if (err.status !== 401 && err.status !== 403) return message;
+  const connectionName = opts.connectionName?.trim();
+  if (!connectionName) return message;
+  return clampErrorMessage(
+    `${message} No stored API key was sent for connection "${connectionName}" — add one via the connection settings, or switch this chat to a connection that has one.`,
+  );
 }
 
 function parseInlineToolCallName(
@@ -1362,14 +1472,37 @@ async function resolveProviderAndKey(
     throw new Error(`Unknown provider: ${connection.provider}`);
   }
 
-  const apiKey = await secretsSvc.getSecret(
-    userId,
-    connectionsSvc.connectionSecretKey(connection.id),
-  );
+  const secretKeyName = connectionsSvc.connectionSecretKey(connection.id);
+  const apiKey = await secretsSvc.getSecret(userId, secretKeyName);
   if (!apiKey && provider.capabilities.apiKeyRequired) {
     throw new Error(
       `No API key found for connection "${connection.name}". Add one via the connection settings.`,
     );
+  }
+  // Credential preflight. `apiKeyRequired` cannot carry this decision: it is a
+  // per-provider constant, and `Custom (OpenAI-compatible)` legitimately serves
+  // both a keyless llama.cpp on loopback and a keyed remote gateway. The signal
+  // that IS per-connection and already durable is `has_api_key`, which the user
+  // sets by storing a key and clears by removing one. Classification on the pair
+  // (has_api_key, resolved secret):
+  //   any   + non-empty          → authenticated, proceed (unchanged)
+  //   false + empty, required    → existing descriptive error above, unchanged
+  //   true  + empty/unreadable   → MISCONFIGURED: fail before any outbound call
+  //   false + empty, not required→ intentionally keyless, proceed (unchanged)
+  // The last row stays permissive on purpose: hard-failing it would break every
+  // working keyless local endpoint. The `has_api_key = true` + empty row is
+  // unambiguous — the profile asserts a credential exists and it cannot be
+  // produced (deleted secret row, failed decrypt, profile duplicated without its
+  // secret) — and it is exactly the case that would otherwise reach a provider
+  // unauthenticated. Key NAME only; no credential value is read into the
+  // message, logged, or persisted.
+  if (!apiKey && connection.has_api_key) {
+    throw new ConnectionCredentialError({
+      connectionId: connection.id,
+      connectionName: connection.name,
+      provider: provider.displayName,
+      secretKeyName,
+    });
   }
 
   return {
@@ -1847,8 +1980,24 @@ function reusableStagedSwipeIndex(message: Message): number | undefined {
   return message.swipes[lastIdx] === "" ? lastIdx : undefined;
 }
 
+/**
+ * Out-of-band start options. Deliberately a SECOND POSITIONAL ARGUMENT rather
+ * than a field on `GenerateInput`: `chatRoute` in `src/routes/generate.routes.ts`
+ * builds its service input as `handler({ ...body, userId, signal, ...extras })`,
+ * so any in-band field would be settable by any client on `POST /generate`,
+ * `/regenerate`, and `/continue` — handing a forged interactive send the
+ * Edit-and-Send override. `chatRoute` calls `handler(inputObject)` with exactly
+ * one argument, as do `multiplayer.triggerHostGeneration` and
+ * `src/spindle/worker-host.ts`, so a second parameter is structurally
+ * unreachable from body spreading and is `undefined` on every interactive path.
+ */
+export interface StartGenerationOptions {
+  origin?: "edit_and_send";
+}
+
 export async function startGeneration(
   input: GenerateInput,
+  options?: StartGenerationOptions,
 ): Promise<{ generationId: string; status: string }> {
   const requestedGenerationId =
     typeof input.generationId === "string" ? input.generationId.trim() : "";
@@ -1996,6 +2145,14 @@ export async function startGeneration(
       input.userId,
       chat?.metadata,
       input.connection_id,
+      {
+        // Short-circuited on the origin: interactive paths never reach the
+        // settings read, so they issue ZERO extra queries (and
+        // `generate.service.edit-and-send.test.ts` runs startGeneration with no
+        // database at all).
+        preferActiveConnection: options?.origin === "edit_and_send"
+          && readEditAndSendAlwaysUseActiveConnection(input.userId),
+      },
     );
     input.connection_id = connection.id;
     const isNoPresetChat = isNoPresetChatMetadata(chat?.metadata);
@@ -2137,6 +2294,7 @@ export async function startGeneration(
 
     const lifecycle: GenerationLifecycle = {
       characterName,
+      connectionName: connection.name,
       generationType: genType,
       personaId: resolvedPersona?.id,
       personaName: resolvedPersona?.name || "User",
@@ -4569,7 +4727,10 @@ async function runGeneration(
         emittedStopped = true;
       }
     } else {
-      const msg = errorMessage(err);
+      const msg = enrichUnauthenticatedConnectionError(errorMessage(err), err, {
+        apiKey,
+        connectionName: lifecycle.connectionName,
+      });
       abortChatBackground(userId, chatId);
       // Socket drops, provider 5xx mid-stream, etc. — persist whatever was
       // already streamed so the user keeps the visible content rather than
