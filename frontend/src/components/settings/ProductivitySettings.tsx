@@ -368,6 +368,15 @@ export default function ProductivitySettings() {
   return <section className={styles.panel}>
     <ProductivityFeatureToggles hasLumiverseSuite={hasLumiverseSuite} />
 
+    {!hasLumiverseSuite && <section className={styles.card} aria-labelledby="productivity-native-chat-title">
+      <CardHeader id="productivity-native-chat-title" cardId="native-chat" title="Native chat toolbar" description="Choose which built-in chat actions remain available when LumiVerse Suite is unavailable." />
+      <div className={styles.cardBody}>
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-select-messages" label="Show select-messages on chat top bar" checked={isShowNativeSelectMessages(quick)} onChange={(showNativeSelectMessages) => update('quickToolbarSettings', { showNativeSelectMessages })} hint="Keep the native ListChecks button on the chat top bar." />
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-scroll-to-top" label="Show go to oldest message on chat top bar" checked={isShowNativeScrollToTop(quick)} onChange={(showNativeScrollToTop) => update('quickToolbarSettings', { showNativeScrollToTop })} hint="Keep the native ArrowUp button on the chat top bar." />
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-browse-messages" label="Show browse messages on chat top bar" checked={isShowNativeBrowseMessages(quick)} onChange={(showNativeBrowseMessages) => update('quickToolbarSettings', { showNativeBrowseMessages })} hint="Keep the native List button on the chat top bar." />
+      </div>
+    </section>}
+
     {hasLumiverseSuite && <>
     <section className={styles.card} aria-labelledby="productivity-quick-title" data-spindle-mount="settings_section" data-spindle-scope="settings-section:productivity:quick"><CardHeader id="productivity-quick-title" cardId="quick" title={labels.quickToolbarSettings} description="Choose a confirmed variant and persist its layout." action={<Toggle.Switch checked={quick.enabled !== false} onChange={(enabled) => update('quickToolbarSettings', { enabled })} aria-label="Enable Quick Toolbar" title="Enable Quick Toolbar" />} /><div className={styles.cardBody}>
       <div className={styles.quickToolbarControls} data-productivity-layout="quick-toolbar-controls">
@@ -384,13 +393,13 @@ export default function ProductivitySettings() {
             ? 'Stretch across remaining chat top bar'
             : 'Stretch across window top'}
         />
-        {readQuickToolbarPlacement(quick) === 'chat_top_dock' && (
-          <>
-            <CheckField className={styles.quickToolbarCheck} id="quick-show-native-select-messages" label="Show select-messages on chat top bar" checked={isShowNativeSelectMessages(quick)} onChange={(showNativeSelectMessages) => update('quickToolbarSettings', { showNativeSelectMessages })} hint="Keep the native ListChecks button on the chat top bar." />
-            <CheckField className={styles.quickToolbarCheck} id="quick-show-native-scroll-to-top" label="Show go to oldest message on chat top bar" checked={isShowNativeScrollToTop(quick)} onChange={(showNativeScrollToTop) => update('quickToolbarSettings', { showNativeScrollToTop })} hint="Keep the native ArrowUp button on the chat top bar." />
-            <CheckField className={styles.quickToolbarCheck} id="quick-show-native-browse-messages" label="Show browse messages on chat top bar" checked={isShowNativeBrowseMessages(quick)} onChange={(showNativeBrowseMessages) => update('quickToolbarSettings', { showNativeBrowseMessages })} hint="Keep the native List button on the chat top bar." />
-          </>
-        )}
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-select-messages" label="Show select-messages on chat top bar" checked={isShowNativeSelectMessages(quick)} onChange={(showNativeSelectMessages) => update('quickToolbarSettings', { showNativeSelectMessages })} hint="Keep the native ListChecks button on the chat top bar." />
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-scroll-to-top" label="Show go to oldest message on chat top bar" checked={isShowNativeScrollToTop(quick)} onChange={(showNativeScrollToTop) => update('quickToolbarSettings', { showNativeScrollToTop })} hint="Keep the native ArrowUp button on the chat top bar." />
+        <CheckField className={styles.quickToolbarCheck} id="quick-show-native-browse-messages" label="Show browse messages on chat top bar" checked={isShowNativeBrowseMessages(quick)} onChange={(showNativeBrowseMessages) => update('quickToolbarSettings', { showNativeBrowseMessages })} hint="Keep the native List button on the chat top bar." />
+        <SegmentedField label="Native chat-top actions" value={quick.nativeDockActionSide ?? 'right'} options={[['left', 'Left'], ['right', 'Right']]} onChange={(nativeDockActionSide) => update('quickToolbarSettings', { nativeDockActionSide })} />
+        <SegmentedField label="Edit and Send position" value={quick.editAndSendSide ?? 'right'} options={[['left', 'Left'], ['right', 'Right']]} onChange={(editAndSendSide) => update('quickToolbarSettings', { editAndSendSide })} />
+        <CheckField className={styles.quickToolbarCheck} id="quick-branch-edit-and-send" label="Branch chat when using Edit and Send" checked={quick.branchChatOnEditAndSend !== false} onChange={(branchChatOnEditAndSend) => update('quickToolbarSettings', { branchChatOnEditAndSend })} hint="When off, edit-and-send keeps the current conversation." />
+        <CheckField className={styles.quickToolbarCheck} id="quick-edit-and-send-always-active-connection" label="Edit and Send always uses the active connection" checked={quick.editAndSendAlwaysUseActiveConnection === true} onChange={(editAndSendAlwaysUseActiveConnection) => update('quickToolbarSettings', { editAndSendAlwaysUseActiveConnection })} hint="Overrides a per-chat connection pin for Edit and Send only. Other actions keep using the pinned connection." />
         <CheckField className={styles.quickToolbarCheck} id="quick-opaque-toolbar-backdrop" label="Opaque toolbar backdrop" checked={isOpaqueToolbarBackdrop(quick)} onChange={(opaqueToolbarBackdrop) => update('quickToolbarSettings', { opaqueToolbarBackdrop })} hint="Paint a solid plate behind the Quick Toolbar so chat text does not show through." />
         <Field id="quick-toolbar-backdrop-color" label="Toolbar backdrop color"><input id="quick-toolbar-backdrop-color" type="color" value={normalizeColor(quick.backdropColor, DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR)} onChange={(event) => update('quickToolbarSettings', { backdropColor: normalizeColor(event.target.value, DEFAULT_QUICK_TOOLBAR_BACKDROP_COLOR) })} aria-label="Toolbar backdrop color" /></Field>
         <CheckField className={styles.quickToolbarCheck} id="quick-auto-fit-bounds" label="Auto-fit toolbar bounds to content" checked={isAutoFitToolbarBounds(quick)} onChange={(autoFitBounds) => update('quickToolbarSettings', { autoFitBounds })} />
