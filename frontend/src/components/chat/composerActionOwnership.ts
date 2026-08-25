@@ -1,5 +1,6 @@
 const SUITE_OWNED_COMPOSER_ACTION_IDS = new Set([
   'chat.authors-note',
+  'chat.customize-composer',
   'chat.manage',
   'chat.settings',
   'settings',
