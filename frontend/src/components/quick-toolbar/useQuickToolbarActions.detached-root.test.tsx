@@ -40,7 +40,7 @@ const state = {
   user: null,
   drawerTabs: [],
   extensionCommands: [],
-  extensions: [{ id: 'lumiverse_suite', enabled: true, has_frontend: true }],
+  extensions: [{ id: 'lumiverse_suite', identifier: 'lumiverse_suite', enabled: true, has_frontend: true }],
   inputBarActions: [] as InputBarActionState[],
   drawerOpen: false,
   drawerTab: '',
@@ -243,6 +243,11 @@ describe('useQuickToolbarActions detached host root', () => {
       visibleTabIds: ['settings', 'command:action-home'],
       iconOrder: ['settings', 'command:action-home'],
     }
+  })
+  test('catalog source gates Suite-owned composer actions when the extension is unavailable', async () => {
+    const source = await Bun.file(new URL('./useQuickToolbarActions.ts', import.meta.url)).text()
+    expect(source).toContain("hasEnabledFrontendExtension(extensions, 'lumiverse_suite')")
+    expect(source).toContain('catalog.filter((action) => !isExtensionComposerActionId(action.id))')
   })
 })
 
