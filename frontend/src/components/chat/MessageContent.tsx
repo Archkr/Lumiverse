@@ -1160,14 +1160,33 @@ function notifyMessageContentLayout(el: HTMLElement): void {
   dispatchMessageContentLayout(el)
 }
 
-function IsolatedHtml({ html, isStreaming }: { html: string; isStreaming: boolean }) {
+function replaceHtmlPreservingImages(root: HTMLElement | ShadowRoot, html: string): void {
+  const stableImgs = new Map<string, HTMLImageElement>()
+  for (const img of root.querySelectorAll<HTMLImageElement>('img[src]')) {
+    const src = img.getAttribute('src')
+    if (src && !stableImgs.has(src)) stableImgs.set(src, img)
+  }
+
+  root.innerHTML = html
+
+  for (const newImg of root.querySelectorAll<HTMLImageElement>('img[src]')) {
+    const src = newImg.getAttribute('src')
+    if (!src) continue
+    const preserved = stableImgs.get(src)
+    if (preserved && newImg.parentNode) {
+      newImg.replaceWith(preserved)
+      stableImgs.delete(src)
+    }
+  }
+}
+export function IsolatedHtml({ html, isStreaming }: { html: string; isStreaming: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
     const shadow = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
-    shadow.innerHTML = `<style data-lumi-island-base>${ISLAND_BASE_CSS}</style>${html}`
+    replaceHtmlPreservingImages(shadow, `<style data-lumi-island-base>${ISLAND_BASE_CSS}</style>${html}`)
     for (const actionEl of shadow.querySelectorAll<HTMLElement>('[data-lumiverse-regex-action]')) {
       actionEl.style.cursor = 'pointer'
     }
@@ -1312,7 +1331,7 @@ function getChatFindHighlightRoots(container: HTMLElement): ChatFindHighlightRoo
  * src across innerHTML replacements, so images don't redo the cache lookup,
  * decode, paint cycle on every chat re-render.
  */
-function ProseHtml({ html, className }: { html: string; className?: string }) {
+export function ProseHtml({ html, className }: { html: string; className?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const lastHtmlRef = useRef<string | null>(null)
 
@@ -1321,35 +1340,13 @@ function ProseHtml({ html, className }: { html: string; className?: string }) {
     if (!el) return
     if (lastHtmlRef.current === html) return
 
-    const stableImgs = new Map<string, HTMLImageElement>()
-    if (lastHtmlRef.current !== null) {
-      for (const img of el.querySelectorAll<HTMLImageElement>('img[src]')) {
-        const src = img.getAttribute('src')
-        if (src && !stableImgs.has(src)) stableImgs.set(src, img)
-      }
-    }
-
-    el.innerHTML = html
+    replaceHtmlPreservingImages(el, html)
     lastHtmlRef.current = html
-
-    if (stableImgs.size > 0) {
-      for (const newImg of el.querySelectorAll<HTMLImageElement>('img[src]')) {
-        const src = newImg.getAttribute('src')
-        if (!src) continue
-        const preserved = stableImgs.get(src)
-        if (preserved && newImg.parentNode) {
-          newImg.replaceWith(preserved)
-          stableImgs.delete(src)
-        }
-      }
-    }
-
     notifyMessageContentLayout(el)
   }, [html])
 
   return <div ref={ref} className={className} />
 }
-
 function TrustedYouTubeEmbed({ embed }: { embed: TrustedYouTubeEmbed }) {
   return (
     <div className={styles.youtubeEmbedWrap}>
@@ -1516,11 +1513,11 @@ export default function MessageContent({
   const macroCtx = useMemo(() => ({ charName, userName }), [charName, userName])
   const preprocessOpts = useMemo(
     () => (messageId
-      ? { messageId, role: (isUser ? 'user' : 'assistant') as 'user' | 'assistant' }
+      ? { messageId, chatId, role: (isUser ? 'user' : 'assistant') as 'user' | 'assistant' }
       : undefined),
-    [messageId, isUser],
+    [messageId, chatId, isUser],
   )
-  const regexAppliedContent = useDisplayRegex(interceptorCleanedContent, isUser, depth, macroCtx, preprocessOpts)
+  const regexAppliedContent = useDisplayRegex(interceptorCleanedContent, isUser, depth, macroCtx, preprocessOpts, isStreaming)
 
   const risuResolvedContent = useMemo(
     () => {
