@@ -34,7 +34,7 @@ import {
 } from "@/api/memory-cortex";
 import SidecarConnectionPicker from "@/components/shared/SidecarConnectionPicker";
 import { getReasoningBindingSummary } from "@/lib/reasoning-binding";
-import { readProductivityFlag } from "@/lib/spindle/productivity-feature-toggles";
+import { readProductivityFeature } from "@/lib/spindle/productivity-feature-toggles";
 import { wsClient } from "@/ws/client";
 import { EventType } from "@/ws/events";
 import styles from "./MemoryCortexSettings.module.css";
@@ -222,7 +222,7 @@ export default function MemoryCortexSettings() {
   const { t } = useTranslation("settings");
   const addToast = useStore((s) => s.addToast);
   const openModal = useStore((s) => s.openModal);
-  const showCortexSecondaryUi = useStore((s) => readProductivityFlag(s, "showCortexSecondaryUi"));
+  const showCortexSecondaryUi = useStore((s) => readProductivityFeature(s, "showCortexSecondaryUi"));
 
   const presetDescriptions = useMemo((): Record<PresetMode, { label: string; desc: string; icon: typeof Zap }> => ({
     simple: {

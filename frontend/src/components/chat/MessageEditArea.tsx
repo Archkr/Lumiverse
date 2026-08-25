@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Mutable
 import { useTranslation } from 'react-i18next'
 import ExpandedTextEditor from '@/components/shared/ExpandedTextEditor'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
-import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { useStore } from '@/store'
 import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import styles from './MessageEditArea.module.css'
@@ -88,7 +88,7 @@ function MessageEditAreaNative({
   const { t } = useTranslation('chat')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('shared', { keyPrefix: 'expandedTextEditor' })
-  const showEditAndSend = useStore((state) => readProductivityFlag(state, 'showEditAndSend'))
+  const showEditAndSend = useStore((state) => readProductivityFeature(state, 'showEditAndSend'))
   const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
   const configuredEditAndSendSide = useStore((state) => state.quickToolbarSettings?.editAndSendSide)
   // Only an explicit left preference opts into the alternate order. Missing,

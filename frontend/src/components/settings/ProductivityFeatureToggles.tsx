@@ -3,6 +3,7 @@ import { useStore } from '@/store'
 import { persistKey } from '@/store/slices/settings'
 import {
   PRODUCTIVITY_FEATURE_FLAGS,
+  SUITE_OWNED_PRODUCTIVITY_FLAGS,
   readProductivityFlag,
   type ProductivityFeatureFlag,
 } from '@/lib/spindle/productivity-feature-toggles'
@@ -41,12 +42,6 @@ const TAB_LOCATION_OPTIONS = [
   })),
   { value: 'bottom', label: 'Bottom (End of list)' },
 ] as const
-
-const SUITE_FEATURE_FLAGS = new Set<ProductivityFeatureFlag>([
-  'showEditAndSend',
-  'enableToolbarIconReorder',
-  'showComposerCustomizeGear',
-])
 
 export default function ProductivityFeatureToggles({ hasLumiverseSuite = false }: { hasLumiverseSuite?: boolean }) {
   const showEmbeddingFallbackUi = useStore((state) => readProductivityFlag(state, 'showEmbeddingFallbackUi'))
@@ -95,7 +90,7 @@ export default function ProductivityFeatureToggles({ hasLumiverseSuite = false }
           </select>
           <small>Choose where the Productivity tab appears in the settings sidebar (defaults to behind Display &amp; Layout).</small>
         </div>
-        {PRODUCTIVITY_FEATURE_FLAGS.filter((key) => hasLumiverseSuite || !SUITE_FEATURE_FLAGS.has(key)).map((key) => {
+        {PRODUCTIVITY_FEATURE_FLAGS.filter((key) => hasLumiverseSuite || !SUITE_OWNED_PRODUCTIVITY_FLAGS.has(key)).map((key) => {
           const copy = FLAG_COPY[key]
           return (
             <div className={styles.checkField} key={key} data-productivity-feature-flag={key}>
