@@ -438,7 +438,7 @@ export async function applyUpdate(
       const summary = changedFiles ? summarizeFrontendChanges(changedFiles) : "change list unavailable";
       reportProgress?.(`Waiting for Vite build to finish${summary ? ` (${summary})` : ""}...`);
       log(`Frontend changes detected in update; waiting for Vite build (${summary}).`);
-      await rebuildFrontend(frontendDir);
+      await rebuildFrontend(frontendDir, reportProgress);
     } else {
       reportProgress?.("No frontend changes detected; restarting server...");
       log("No frontend source/config changes detected in pulled files; skipping local Vite rebuild.");
@@ -493,7 +493,7 @@ export async function switchBranch(
       const summary = changedFiles ? summarizeFrontendChanges(changedFiles) : "change list unavailable";
       reportProgress?.(`Waiting for Vite build to finish${summary ? ` (${summary})` : ""}...`);
       log(`Frontend changes detected after branch switch; waiting for Vite build (${summary}).`);
-      await rebuildFrontend(frontendDir);
+      await rebuildFrontend(frontendDir, reportProgress);
     } else {
       reportProgress?.("No frontend changes detected; restarting server...");
       log("No frontend source/config changes detected after branch switch; skipping local Vite rebuild.");
@@ -723,12 +723,46 @@ async function ensureChangedDependencies(
   }
 }
 
-export async function rebuildFrontend(frontendDir: string): Promise<void> {
+export const FRONTEND_BUILD_STEPS = [
+  {
+    label: "frontend component metadata extraction",
+    progress: "Extracting frontend component metadata...",
+    command: ["bun", "run", "extract-props"],
+  },
+  {
+    label: "frontend CSS variable extraction",
+    progress: "Extracting frontend CSS variables...",
+    command: ["bun", "run", "extract-css-vars"],
+  },
+  {
+    label: "frontend Vite bundling",
+    progress: "Building the frontend bundle with Vite...",
+    command: ["bun", "run", "scripts/build-frontend.ts"],
+  },
+] as const;
+
+export async function rebuildFrontend(
+  frontendDir: string,
+  reportProgress?: ProgressReporter,
+): Promise<void> {
   log("Rebuilding frontend...");
-  await runCommandOrThrow(["bun", "run", "build"], {
-    cwd: frontendDir,
-    timeoutMs: TIMEOUT_BUN_BUILD_MS,
-    label: "frontend build",
-  });
+  const deadline = Date.now() + TIMEOUT_BUN_BUILD_MS;
+
+  for (const step of FRONTEND_BUILD_STEPS) {
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) {
+      throw new Error(
+        `${step.label} did not start because the frontend build exceeded its ${TIMEOUT_BUN_BUILD_MS / 1000}s timeout`,
+      );
+    }
+
+    reportProgress?.(step.progress);
+    log(step.progress);
+    await runCommandOrThrow([...step.command], {
+      cwd: frontendDir,
+      timeoutMs,
+      label: step.label,
+    });
+  }
   log("Frontend rebuilt successfully.");
 }

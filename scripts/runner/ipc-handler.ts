@@ -300,8 +300,7 @@ export async function handleIPCMessage(msg: any, sink?: ResponseSink): Promise<v
             progress(id, "rebuild", "Installing frontend dependencies...");
             await ensureFrontendDependencies(frontendDir);
 
-            progress(id, "rebuild", "Waiting for Vite build to finish...");
-            await rebuildFrontend(frontendDir);
+            await rebuildFrontend(frontendDir, (message) => progress(id, "rebuild", message));
           },
         );
       } catch (err) {

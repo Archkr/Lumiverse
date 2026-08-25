@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import {
+  FRONTEND_BUILD_STEPS,
   bunInstallCmd,
   inspectDependencyTree,
   packageInstallInputsChanged,
@@ -78,6 +79,23 @@ test("treats an empty direct package directory as an incomplete install", () => 
 test("uses copyfile installs on Windows", () => {
   expect(bunInstallCmd("win32")).toEqual(["bun", "install", "--backend=copyfile"]);
   expect(bunInstallCmd("linux")).toEqual(["bun", "install"]);
+});
+
+test("reports frontend build phases separately while preserving their order", () => {
+  expect(FRONTEND_BUILD_STEPS.map(({ label, command }) => ({ label, command }))).toEqual([
+    {
+      label: "frontend component metadata extraction",
+      command: ["bun", "run", "extract-props"],
+    },
+    {
+      label: "frontend CSS variable extraction",
+      command: ["bun", "run", "extract-css-vars"],
+    },
+    {
+      label: "frontend Vite bundling",
+      command: ["bun", "run", "scripts/build-frontend.ts"],
+    },
+  ]);
 });
 
 test("restores the previous dependency tree after a failed repair attempt", () => {
