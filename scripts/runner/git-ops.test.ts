@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import {
   FRONTEND_BUILD_STEPS,
   bunInstallCmd,
+  hardSyncRefusalMessage,
   inspectDependencyTree,
   packageInstallInputsChanged,
   planChangedDependencies,
@@ -96,6 +97,13 @@ test("reports frontend build phases separately while preserving their order", ()
       command: ["bun", "run", "scripts/build-frontend.ts"],
     },
   ]);
+});
+
+test("explains how to resolve a hard-sync refusal without losing local commits", () => {
+  expect(hardSyncRefusalMessage("staging", "origin/staging", 3)).toBe(
+    "Cannot update 'staging' because it has 3 local commits not present on origin/staging. Push them or move them to another branch before retrying; automatic updates will not discard local commits.",
+  );
+  expect(hardSyncRefusalMessage("main", "origin/main", 1)).toContain("1 local commit not present");
 });
 
 test("restores the previous dependency tree after a failed repair attempt", () => {

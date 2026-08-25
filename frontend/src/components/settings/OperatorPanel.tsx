@@ -292,7 +292,7 @@ function vectorTuningProfileHint(profile: VectorStoreTuningProfile): string {
   }
 }
 
-function vectorStoreErrorMessage(err: unknown, fallback: string): string {
+function apiErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     const body = err.body as { error?: unknown; message?: unknown } | undefined
     if (typeof body?.error === 'string' && body.error.trim()) return body.error
@@ -816,7 +816,7 @@ export default function OperatorPanel() {
       addToast({ type: result.ok ? 'success' : 'error', message: result.ok ? 'Vector store connection OK' : (result.error || 'Vector store connection failed') })
     } catch (err) {
       const result = vectorStoreTestResultFromError(err, vectorDraft.provider)
-      const message = result?.error || vectorStoreErrorMessage(err, 'Vector store connection failed')
+      const message = result?.error || apiErrorMessage(err, 'Vector store connection failed')
       setVectorTestResult(result ?? { ok: false, provider: vectorDraft.provider, error: message })
       addToast({ type: 'error', message })
     } finally {
@@ -842,7 +842,7 @@ export default function OperatorPanel() {
           : 'Vector store switched.',
       })
     } catch (err) {
-      const message = vectorStoreErrorMessage(err, 'Failed to switch vector store')
+      const message = apiErrorMessage(err, 'Failed to switch vector store')
       addToast({ type: 'error', message })
     } finally {
       setVectorConfigBusy(null)
@@ -870,7 +870,7 @@ export default function OperatorPanel() {
       await refreshVectorHealth()
       addToast({ type: 'success', message: 'Vector store runtime tuning saved.' })
     } catch (err) {
-      const message = vectorStoreErrorMessage(err, 'Failed to save vector store runtime tuning')
+      const message = apiErrorMessage(err, 'Failed to save vector store runtime tuning')
       addToast({ type: 'error', message })
     } finally {
       setVectorConfigBusy(null)
@@ -1017,6 +1017,15 @@ export default function OperatorPanel() {
     setBusy(opName)
   }, [])
 
+  const failRestartPreflight = useCallback((err: unknown, fallback: string) => {
+    pendingRestartOp.current = null
+    setReconnecting(false)
+    setBusy(null)
+    useStore.getState().setOperatorBusy(null)
+    useStore.getState().setOperatorProgressMessage(null)
+    addToast({ type: 'error', message: apiErrorMessage(err, fallback) })
+  }, [addToast])
+
   const handleCheckUpdate = useCallback(async () => {
     setBusy('checking')
     try {
@@ -1039,10 +1048,12 @@ export default function OperatorPanel() {
         startRestartOperation('updating')
         try {
           await operatorApi.applyUpdate()
-        } catch { /* server will restart */ }
+        } catch (err) {
+          failRestartPreflight(err, 'Update could not start')
+        }
       },
     })
-  }, [status?.commitsBehind, startRestartOperation, t])
+  }, [failRestartPreflight, status?.commitsBehind, startRestartOperation, t])
 
   const handleSwitchBranch = useCallback((target: string) => {
     setConfirm({
@@ -1055,10 +1066,12 @@ export default function OperatorPanel() {
         startRestartOperation('switching branch')
         try {
           await operatorApi.switchBranch(target)
-        } catch { /* server will restart */ }
+        } catch (err) {
+          failRestartPreflight(err, 'Branch switch could not start')
+        }
       },
     })
-  }, [startRestartOperation, t])
+  }, [failRestartPreflight, startRestartOperation, t])
 
   const handleRestart = useCallback(() => {
     setConfirm({

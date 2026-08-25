@@ -308,13 +308,34 @@ function getUpstreamRefForSync(branchName: string): string {
   return getUpstreamRef(branchName) || `origin/${branchName}`;
 }
 
+export function hardSyncRefusalMessage(branchName: string, upstreamRef: string, ahead: number): string {
+  return `Cannot update '${branchName}' because it has ${ahead} local commit${ahead === 1 ? "" : "s"} not present on ${upstreamRef}. Push them or move them to another branch before retrying; automatic updates will not discard local commits.`;
+}
+
 function assertNoLocalCommitsBeforeHardSync(branchRef: string, branchName: string, upstreamRef: string): void {
   const ahead = getCommitsAhead(branchRef, upstreamRef);
   if (ahead > 0) {
-    throw new Error(
-      `Refusing to hard-sync '${branchName}': it is ${ahead} commit${ahead === 1 ? "" : "s"} ahead of ${upstreamRef}`
-    );
+    throw new Error(hardSyncRefusalMessage(branchName, upstreamRef, ahead));
   }
+}
+
+/** Validate an update before the runner acknowledges it and stops the server. */
+export function assertUpdateCanHardSync(): void {
+  const currentBranch = getCurrentBranch();
+  if (!currentBranch || currentBranch === "HEAD") {
+    throw new Error("Unable to resolve current git branch");
+  }
+  const currentUpstream = getUpstreamRefForSync(currentBranch);
+  assertNoLocalCommitsBeforeHardSync("HEAD", currentBranch, currentUpstream);
+}
+
+/** Validate a branch switch before the runner acknowledges it and stops the server. */
+export function assertBranchCanHardSync(target: string): void {
+  if (!AVAILABLE_BRANCHES.includes(target as any)) {
+    throw new Error(`Invalid branch: ${target}. Available: ${AVAILABLE_BRANCHES.join(", ")}`);
+  }
+  const targetUpstream = getUpstreamRefForSync(target);
+  assertNoLocalCommitsBeforeHardSync(target, target, targetUpstream);
 }
 
 async function stashLocalChanges(label: string): Promise<void> {
@@ -409,6 +430,7 @@ export async function applyUpdate(
 ): Promise<void> {
   log("Preparing update...");
   const frontendDir = join(PROJECT_ROOT, "frontend");
+  assertUpdateCanHardSync();
 
   await runWithServerStopped("Update", stopServer, startServer, async () => {
     const previousHead = getHeadRef();
@@ -463,6 +485,7 @@ export async function switchBranch(
   if (!AVAILABLE_BRANCHES.includes(target as any)) {
     throw new Error(`Invalid branch: ${target}. Available: ${AVAILABLE_BRANCHES.join(", ")}`);
   }
+  assertBranchCanHardSync(target);
 
   const frontendDir = join(PROJECT_ROOT, "frontend");
 
