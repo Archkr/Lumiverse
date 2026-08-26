@@ -10,9 +10,10 @@ import * as wbSvc from "../services/world-books.service";
 import * as regexSvc from "../services/regex-scripts.service";
 import * as gallerySvc from "../services/character-gallery.service";
 import { fetchChubGalleryUrls, fetchChubJson } from "../services/chub-api.service";
+import { fetchBotBooruGalleryUrls } from "../services/botbooru-api.service";
 import { parsePagination } from "../services/pagination";
 import { safeFetch, SSRFError, validateHost } from "../utils/safe-fetch";
-import { rewriteBotBooruUrl } from "../utils/botbooru";
+import { parseBotBooruId, rewriteBotBooruUrl } from "../utils/botbooru";
 import { createAvatarResolverResponse } from "../utils/avatar-cache";
 import { buildSlug } from "../lumihub/manifest";
 import { applyCharxModulesAndAssets, autoImportEmbeddedWorldbook } from "../services/charx-import.service";
@@ -222,7 +223,7 @@ async function importGalleryFromUrls(userId: string, characterId: string, urls: 
       const buf = await res.arrayBuffer();
       const contentType = res.headers.get("content-type") || "image/webp";
       const ext = contentType.includes("png") ? "png" : contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : "webp";
-      return new File([buf], `chub_gallery_${crypto.randomUUID()}.${ext}`, { type: contentType });
+      return new File([buf], `remote_gallery_${crypto.randomUUID()}.${ext}`, { type: contentType });
     } catch {
       return null;
     }
@@ -607,9 +608,18 @@ app.post("/import-url", async (c) => {
 
     // Check for BotBooru URL → rewrite to the PNG download, which embeds a
     // SillyTavern-compatible card *and* an avatar, then reuse the generic importer.
+    const botBooruId = parseBotBooruId(url);
     const botBooruPngUrl = rewriteBotBooruUrl(url, "png");
-    if (botBooruPngUrl) {
+    if (botBooruId && botBooruPngUrl) {
       character = await fetchGenericCharacter(botBooruPngUrl, userId, libraryScope || "mine");
+      try {
+        const galleryUrls = await fetchBotBooruGalleryUrls(botBooruId);
+        if (galleryUrls.length > 0) {
+          await importGalleryFromUrls(userId, character.id, galleryUrls);
+        }
+      } catch (err) {
+        console.warn("[character import] BotBooru gallery import failed:", err);
+      }
       return c.json({ character, ...loraSurface(character) }, 201);
     }
 

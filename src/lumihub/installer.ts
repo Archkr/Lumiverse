@@ -7,9 +7,10 @@ import * as cardSvc from "../services/character-card.service";
 import * as images from "../services/images.service";
 import * as gallerySvc from "../services/character-gallery.service";
 import { fetchChubGalleryUrls, fetchChubJson } from "../services/chub-api.service";
+import { fetchBotBooruGalleryUrls } from "../services/botbooru-api.service";
 import { safeFetch } from "../utils/safe-fetch";
 import { mapWithConcurrency } from "../utils/concurrency";
-import { rewriteBotBooruUrl } from "../utils/botbooru";
+import { parseBotBooruId, rewriteBotBooruUrl } from "../utils/botbooru";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import * as wbSvc from "../services/world-books.service";
@@ -72,13 +73,29 @@ export async function installCharacter(
 
     // Stamp install source metadata for manifest tracking
     if (result.success && result.characterId) {
-      stampInstallSource(userId, result.characterId, payload);
+      const characterId = result.characterId;
+      stampInstallSource(userId, characterId, payload);
 
-      // Download and import gallery images (best-effort, non-blocking)
-      if (payload.source !== "chub" && payload.galleryImageUrls && payload.galleryImageUrls.length > 0) {
-        importGalleryFromUrls(userId, result.characterId, payload.galleryImageUrls).catch((err) => {
-          console.warn("[LumiHub Installer] Gallery import failed:", err);
-        });
+      // Download and import gallery images (best-effort, non-blocking). When
+      // LumiHub points at BotBooru but does not supply images itself, discover
+      // the post's public mini-gallery directly from BotBooru.
+      if (payload.source !== "chub") {
+        const suppliedUrls = payload.galleryImageUrls ?? [];
+        const botBooruId = payload.importUrl ? parseBotBooruId(payload.importUrl) : null;
+        if (suppliedUrls.length > 0 || botBooruId) {
+          void (async () => {
+            const galleryUrls = suppliedUrls.length > 0
+              ? suppliedUrls
+              : botBooruId
+                ? await fetchBotBooruGalleryUrls(botBooruId)
+                : [];
+            if (galleryUrls.length > 0) {
+              await importGalleryFromUrls(userId, characterId, galleryUrls);
+            }
+          })().catch((err) => {
+            console.warn("[LumiHub Installer] Gallery import failed:", err);
+          });
+        }
       }
     }
 
