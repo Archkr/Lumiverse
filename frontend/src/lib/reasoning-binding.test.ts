@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   areReasoningSettingsEqual,
   captureReasoningBindings,
+  getEffortOptions,
   normalizeReasoningSettingsForProvider,
 } from './reasoning-binding'
 import type { ReasoningSettings } from '@/types/store'
@@ -54,5 +55,14 @@ describe('captureReasoningBindings', () => {
       normalizeReasoningSettingsForProvider(legacySnapshot, 'google', 'gemini-2.5-pro'),
     ).toEqual(expectedCurrentSettings)
     expect(areReasoningSettingsEqual(legacySnapshot, expectedCurrentSettings)).toBe(true)
+  })
+
+  test('exposes GLM 5.3 reasoning efforts for GLM 5.3 Flash', () => {
+    expect(getEffortOptions('zai', 'glm-5.3-flash').map(({ value }) => value)).toEqual([
+      'auto',
+      'low',
+      'high',
+      'max',
+    ])
   })
 })

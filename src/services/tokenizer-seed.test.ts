@@ -42,6 +42,7 @@ describe("built-in tokenizer defaults", () => {
     expect(getTokenizerIdForModel("moonshotai/kimi-k3")).toBe("kimi-k3");
     expect(getTokenizerIdForModel("glm-5.2")).toBe("glm-5-2");
     expect(getTokenizerIdForModel("z-ai/glm-5.3")).toBe("glm-5-2");
+    expect(getTokenizerIdForModel("glm-5.3-flash")).toBe("glm-5-2");
   });
 
   test("continues to resolve dated DeepSeek V4 release identifiers", () => {

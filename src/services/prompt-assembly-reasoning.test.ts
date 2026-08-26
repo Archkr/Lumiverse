@@ -179,15 +179,17 @@ describe("injectReasoningParams (zai)", () => {
   });
 
   test("limits GLM-5.3 to its documented low, high, and max effort levels", () => {
-    for (const effort of ["low", "high", "max"] as const) {
-      const params: Record<string, any> = {};
-      injectReasoningParams(params, "zai", effort, "glm-5.3");
-      expect(params.reasoning_effort).toBe(effort);
-    }
+    for (const model of ["glm-5.3", "glm-5.3-flash"]) {
+      for (const effort of ["low", "high", "max"] as const) {
+        const params: Record<string, any> = {};
+        injectReasoningParams(params, "zai", effort, model);
+        expect(params.reasoning_effort).toBe(effort);
+      }
 
-    const unsupported: Record<string, any> = {};
-    injectReasoningParams(unsupported, "zai", "medium", "glm-5.3");
-    expect(unsupported.reasoning_effort).toBe("max");
+      const unsupported: Record<string, any> = {};
+      injectReasoningParams(unsupported, "zai", "medium", model);
+      expect(unsupported.reasoning_effort).toBe("max");
+    }
   });
 
   test("uses Z.AI's default clear-thinking behaviour for GLM-4.5+ unless configured", () => {
@@ -259,6 +261,18 @@ describe("applyProviderReasoningOffSwitch (zai & moonshot)", () => {
     applyProviderReasoningOffSwitch(params, "zai", "glm-5.2");
     expect(params.thinking).toEqual({ type: "disabled" });
     expect(params.reasoning_effort).toBeUndefined();
+  });
+
+  test("maps the GLM-5.3 family's off switch to its lightest forced-thinking mode", () => {
+    for (const model of ["glm-5.3", "glm-5.3-flash"]) {
+      const params: Record<string, any> = {
+        thinking: { type: "enabled", clear_thinking: false },
+        reasoning_effort: "max",
+      };
+      applyProviderReasoningOffSwitch(params, "zai", model);
+      expect(params.thinking).toEqual({ type: "enabled" });
+      expect(params.reasoning_effort).toBe("low");
+    }
   });
 
   test("disables Moonshot K2.6 reasoning via thinking disabled", () => {

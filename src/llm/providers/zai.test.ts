@@ -92,10 +92,11 @@ describe("ZAIProvider interleaved thinking", () => {
     ]);
   });
 
-  test("offers GLM-5.3 alongside the GLM-4.5 models that support interleaved thinking", async () => {
+  test("offers the GLM-5.3 family alongside the GLM-4.5 models that support interleaved thinking", async () => {
     const models = await provider.listModels("", "");
 
     expect(models).toEqual(expect.arrayContaining([
+      "glm-5.3-flash",
       "glm-5.3",
       "glm-5.2",
       "glm-4.5",

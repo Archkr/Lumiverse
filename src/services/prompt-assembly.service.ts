@@ -7733,6 +7733,14 @@ export function applyProviderReasoningOffSwitch(
   }
 
   if (providerName === "zai") {
+    if (/^glm-5\.3(?:$|[\[.:@-])/i.test(modelName || "")) {
+      // GLM-5.3 and GLM-5.3-Flash use forced thinking. Keep the request valid
+      // and map the user's "off" preference to the lightest supported effort.
+      params.thinking = { type: "enabled" };
+      params.reasoning_effort = "low";
+      return;
+    }
+
     params.thinking = { type: "disabled" };
     return;
   }
