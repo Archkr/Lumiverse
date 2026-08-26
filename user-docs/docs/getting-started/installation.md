@@ -184,6 +184,11 @@ Switching between tags is just a matter of editing the `image:` line in `docker-
 docker-compose up -d
 ```
 
+To use a different backend port, set `PORT` in the `.env` file beside
+`docker-compose.yml` before starting the container (for example, `PORT=8080`).
+Compose uses that value for both the backend listener and the published host
+port; when it is unset, both default to `7860`.
+
 Edit `docker-compose.yml` to set your owner password and any other configuration. Any supported application `.env` value can also be passed here through Docker `environment:` entries:
 
 ```yaml
@@ -192,11 +197,11 @@ services:
     image: ghcr.io/prolix-oc/lumiverse:latest
     container_name: lumiverse
     ports:
-      - "7860:7860"
+      - "${PORT:-7860}:${PORT:-7860}"
     environment:
       - OWNER_PASSWORD=changeme123    # Required — minimum 8 characters
       - OWNER_USERNAME=admin          # Optional
-      - PORT=7860
+      - PORT=${PORT:-7860}            # Set PORT in .env to customize
       - TRUST_ANY_ORIGIN=true
 
       # Optional app-level env values
