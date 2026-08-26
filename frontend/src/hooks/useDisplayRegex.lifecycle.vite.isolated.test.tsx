@@ -42,6 +42,7 @@ const pendingResults = new Map<string, (outcome: PipelineOutcome) => void>()
 const applyDisplayRegexTiered = mock((content: string) => new Promise<PipelineOutcome>((resolve) => {
   pendingResults.set(content, resolve)
 }))
+const trackInitialDisplayResolve = mock(<T,>(promise: Promise<T>) => promise)
 const storeState = {
   regexScripts: [{
     id: 'resolver-lifecycle-regex',
@@ -72,7 +73,7 @@ mock.module('@/store', () => ({
   useStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }))
 mock.module('@/lib/chatDisplaySettle', () => ({
-  trackInitialDisplayResolve: <T,>(promise: Promise<T>) => promise,
+  trackInitialDisplayResolve,
 }))
 mock.module('@/lib/regex/pipeline', () => ({ applyDisplayRegexTiered }))
 mock.module('@/api/macros', () => ({
@@ -217,6 +218,7 @@ afterEach(() => {
   heldPreprocess.clear()
   pendingPreprocess.clear()
   applyDisplayRegexTiered.mockClear()
+  trackInitialDisplayResolve.mockClear()
   document.body.replaceChildren()
   resetDisplayRegexCachesForTests()
   resetDisplayCoalesceForTests()
@@ -227,6 +229,27 @@ afterAll(() => {
 })
 
 describe('useDisplayRegex resolver lifecycle', () => {
+  test('tracks only the first preprocess and regex keys of an active stream', async () => {
+    const { host, root } = await createHarness()
+    const identity = { chatId: 'chat-recovery-stream', messageId: 'message-recovery-stream' }
+
+    try {
+      await render(root, { content: 'chunk recovery one', identity, isStreaming: true })
+      expect(trackInitialDisplayResolve).toHaveBeenCalledTimes(2)
+      await settle('chunk recovery one', 'resolved recovery one')
+
+      await render(root, { content: 'chunk recovery one two', identity, isStreaming: true })
+      expect(trackInitialDisplayResolve).toHaveBeenCalledTimes(2)
+      await settle('chunk recovery one two', 'resolved recovery two')
+
+      await render(root, { content: 'chunk recovery final', identity, isStreaming: false })
+      expect(trackInitialDisplayResolve).toHaveBeenCalledTimes(4)
+      await settle('chunk recovery final', 'resolved recovery final')
+    } finally {
+      await destroyHarness(host, root)
+    }
+  })
+
   /** **Validates: Requirements 2.5, 2.7, 3.6, 3.8** */
   test('generated same-message settlement orderings carry only the newest resolved value and finalize the latest key', async () => {
     const settlementOrders = [

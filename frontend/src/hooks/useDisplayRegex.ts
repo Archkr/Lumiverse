@@ -195,6 +195,44 @@ export function scheduleCoalescedDisplayResolve(key: string | null, run: () => v
   }
 }
 
+/**
+ * The chat reveal gate only needs the first display pass for a live message.
+ * Every later streaming flush has a distinct cache key, but treating each of
+ * those keys as another "initial" resolve keeps recovery chats hidden for as
+ * long as tokens continue to arrive. Keep idle/finalized resolves fully
+ * tracked, while registering exactly one key for each message stream.
+ *
+ * Preprocessing and regex application each use their own instance so the
+ * reveal still waits for both stages of the first recovered frame.
+ */
+function useDisplaySettleTracker(
+  chatId: string | null,
+  messageId: string | null,
+  isStreaming: boolean,
+) {
+  const identity = chatId && messageId ? `${chatId}\u0000${messageId}` : null
+  const stateRef = useRef({
+    identity,
+    wasStreaming: isStreaming,
+    trackedCurrentStream: false,
+  })
+  const state = stateRef.current
+
+  if (state.identity !== identity || (!state.wasStreaming && isStreaming)) {
+    state.identity = identity
+    state.trackedCurrentStream = false
+  }
+  state.wasStreaming = isStreaming
+
+  return useCallback(<T,>(promise: Promise<T>): Promise<T> => {
+    if (isStreaming) {
+      if (stateRef.current.trackedCurrentStream) return promise
+      stateRef.current.trackedCurrentStream = true
+    }
+    return trackInitialDisplayResolve(promise, chatId)
+  }, [chatId, isStreaming])
+}
+
 function bumpGlobalCv(): void {
   displayRegexGlobalCv += 1
   for (const listener of displayRegexCacheListeners) listener()
@@ -404,6 +442,11 @@ function useDisplayPreprocessedState(
   isStreaming = false,
 ): DisplayPreprocessedState {
   const messageIdForSnapshot = opts?.messageId ?? null
+  const trackForDisplaySettle = useDisplaySettleTracker(
+    chatId,
+    messageIdForSnapshot,
+    isStreaming,
+  )
   const getSnapshotForThisMessage = useCallback(
     () => getDisplayRegexCacheSnapshot(messageIdForSnapshot),
     [messageIdForSnapshot],
@@ -520,12 +563,10 @@ function useDisplayPreprocessedState(
             }
             return { content, ok: false }
           })
-        // Scope the pending count to THIS chat. Omitting the id files the work
-        // under `__global__`, and `hasPending` in `chatDisplaySettle` treats the
-        // global bucket as blocking for every chat — so a hung preprocess in one
-        // chat would hold another chat's reveal closed until the settle cap.
-        // `chatId` is non-null here: the effect returns early above when it isn't.
-        assignedPromise = trackInitialDisplayResolve(promise, chatId)
+        // Scope the pending count to THIS chat, and only count the first key of
+        // an active stream. Recovery can commit a new content key every 32ms;
+        // those continuity updates must not indefinitely postpone chat reveal.
+        assignedPromise = trackForDisplaySettle(promise)
         displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
       }
       displayPreprocessCache.get(key)?.promise?.then(apply)
@@ -543,6 +584,7 @@ function useDisplayPreprocessedState(
     chatId,
     content,
     cvSnapshot,
+    trackForDisplaySettle,
   ])
 
   if (!key) return { value: content, ready: true, settled: true }
@@ -794,6 +836,11 @@ export function useDisplayRegex(
     return getMessageIndex(s.messages, preprocessOpts.messageId)
   })
   const messageIdForSnapshot = preprocessOpts?.messageId ?? null
+  const trackContentForDisplaySettle = useDisplaySettleTracker(
+    scopedChatId,
+    messageIdForSnapshot,
+    isStreaming,
+  )
   const getSnapshotForThisMessage = useCallback(
     () => getDisplayRegexCacheSnapshot(messageIdForSnapshot),
     [messageIdForSnapshot],
@@ -1175,7 +1222,7 @@ export function useDisplayRegex(
             }
             return fallbackContent
           })
-        assignedPromise = trackInitialDisplayResolve(promise, scopedChatId)
+        assignedPromise = trackContentForDisplaySettle(promise)
         displayRegexContentCache.set(contentCacheKey, {
           promise: assignedPromise,
           ...(preprocessOpts?.messageId ? { messageId: preprocessOpts.messageId } : {}),
@@ -1210,6 +1257,7 @@ export function useDisplayRegex(
     cvSnapshot,
     preprocessOpts?.messageId,
     preprocessOpts?.role,
+    trackContentForDisplaySettle,
   ])
 
   // Carry the previous resolved value forward across cv-bumps and per-chunk
