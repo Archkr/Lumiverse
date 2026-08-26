@@ -108,7 +108,7 @@ function resolveWorkerScript(
 
 interface WorkerBatchAttempt {
   ok: boolean
-  result?: string
+  outcome?: DisplayRegexBackendResult
 }
 
 async function applyBatchInWorker(
@@ -117,28 +117,66 @@ async function applyBatchInWorker(
   context: ApplyDisplayRegexContext,
 ): Promise<WorkerBatchAttempt> {
   let remaining = scripts
+  let currentContent = content
   while (remaining.length > 0) {
     const resolved: Array<{ script: RegexScript; worker: ApplyWorkerScript }> = []
     for (const script of remaining) {
       const worker = resolveWorkerScript(script, context)
       if (worker) resolved.push({ script, worker })
     }
-    if (resolved.length === 0) return { ok: true, result: content }
+    if (resolved.length === 0) return { ok: true, outcome: { result: currentContent } }
 
     try {
       const outcome = await runRegexJobInWorker({
         op: 'apply',
-        body: content,
+        body: currentContent,
         scripts: resolved.map((entry) => entry.worker),
       })
-      return { ok: true, result: outcome.result }
+      return { ok: true, outcome: { result: outcome.result } }
     } catch (error) {
-      if (error instanceof RegexWorkerTimeoutError && error.scriptId) {
-        const timedOut = remaining.find((script) => script.id === error.scriptId)
-        if (!timedOut) return { ok: false }
-        quarantineRegexScript(timedOut)
-        announceSkippedOnce(timedOut, 'worker deadline exceeded')
-        remaining = remaining.filter((script) => script.id !== timedOut.id)
+      if (error instanceof RegexWorkerTimeoutError) {
+        const completedCount = Math.min(
+          Math.max(error.completedScriptCount, 0),
+          resolved.length,
+        )
+        const checkpoint = error.checkpointResult
+        const unresolved = resolved.slice(completedCount)
+
+        // A local wall-clock deadline cannot distinguish catastrophic
+        // backtracking from an innocent worker starved by tab throttling or
+        // machine load. Ask the independently scheduled backend sandbox to run
+        // only the uncompleted suffix. Its response both resumes from the last
+        // checkpoint and identifies regexes it independently had to stop.
+        const confirmed = await applyDisplayRegexOnBackend(
+          checkpoint,
+          unresolved.map((entry) => entry.script),
+          context,
+        )
+        if (confirmed !== null) {
+          for (const scriptId of confirmed.timedOutScriptIds ?? []) {
+            const timedOut = unresolved.find((entry) => entry.script.id === scriptId)?.script
+            if (!timedOut) continue
+            quarantineRegexScript(timedOut)
+            announceSkippedOnce(timedOut, 'worker and backend deadlines exceeded')
+          }
+          return { ok: true, outcome: confirmed }
+        }
+
+        // If confirmation itself is unavailable, preserve the completed prefix
+        // and skip the locally active script for this render only. It must not
+        // become durable evidence: the timeout may have been pure congestion.
+        const localTimedOutIndex = unresolved.findIndex(({ script }) => script.id === error.scriptId)
+        if (localTimedOutIndex < 0) return { ok: false }
+        console.warn(
+          '[display] regex worker deadline exceeded without backend confirmation; skipping once '
+          + `(script=${error.scriptId}, phase=${error.phase}, wall=${Math.round(error.wallElapsedMs)}ms, `
+          + `schedulerLag=${Number.isFinite(error.schedulerLagMs) ? `${Math.round(error.schedulerLagMs)}ms` : 'unknown'}, `
+          + `visible=${error.pageVisible})`,
+        )
+        currentContent = checkpoint
+        remaining = unresolved
+          .filter((_, index) => index !== localTimedOutIndex)
+          .map((entry) => entry.script)
         continue
       }
       if (
@@ -151,7 +189,7 @@ async function applyBatchInWorker(
       return { ok: false }
     }
   }
-  return { ok: true, result: content }
+  return { ok: true, outcome: { result: currentContent } }
 }
 
 async function backendThenRaw(
@@ -226,7 +264,10 @@ export async function applyDisplayRegexTiered(
     if (workerUsable) {
       const attempt = await applyBatchInWorker(result, batch, context)
       if (attempt.ok) {
-        result = attempt.result ?? result
+        if (attempt.outcome) {
+          mergeProvenance(provenance, attempt.outcome)
+          result = attempt.outcome.result
+        }
         index = end
         continue
       }

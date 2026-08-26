@@ -19,6 +19,7 @@ export interface ApplyWorkerJob {
 
 export type ApplyWorkerResponse =
   | { type: 'progress'; jobId: number; scriptIndex: number; scriptId?: string; scriptName?: string }
+  | { type: 'checkpoint'; jobId: number; scriptIndex: number; result: string; elapsedMs: number }
   | { type: 'result'; jobId: number; op: 'apply'; result: string; elapsedMs: number; scriptElapsedMs: number[] }
   | { type: 'error'; jobId: number; error: string; elapsedMs: number }
 
@@ -82,14 +83,27 @@ workerSelf.onmessage = (event) => {
       })
       const scriptStartedAt = performance.now()
       result = applyOne(result, script)
-      scriptElapsedMs.push(Math.round(performance.now() - scriptStartedAt))
+      // Preserve the browser's available sub-millisecond resolution. Rounding
+      // here made very fast regexes indistinguishable from one another at 0ms.
+      const scriptElapsed = performance.now() - scriptStartedAt
+      scriptElapsedMs.push(scriptElapsed)
+      // Keep the parent abreast of the last durable prefix. If a later script
+      // wedges this worker, the replacement work before it does not need to be
+      // executed a second time in the replacement worker/backend sandbox.
+      workerSelf.postMessage({
+        type: 'checkpoint',
+        jobId: job.jobId,
+        scriptIndex,
+        result,
+        elapsedMs: scriptElapsed,
+      })
     }
     workerSelf.postMessage({
       type: 'result',
       jobId: job.jobId,
       op: 'apply',
       result,
-      elapsedMs: Math.round(performance.now() - startedAt),
+      elapsedMs: performance.now() - startedAt,
       scriptElapsedMs,
     })
   } catch (error) {
@@ -97,7 +111,7 @@ workerSelf.onmessage = (event) => {
       type: 'error',
       jobId: job?.jobId ?? -1,
       error: error instanceof Error ? error.message : String(error),
-      elapsedMs: Math.round(performance.now() - startedAt),
+      elapsedMs: performance.now() - startedAt,
     })
   }
 }

@@ -64,7 +64,7 @@ class FakeWorker implements RegexWorkerLike {
   respond(message: ApplyWorkerResponse): void { this.messageHandler?.(message) }
 }
 
-interface ManualTimer { fn: () => void; cancelled: boolean }
+interface ManualTimer { fn: () => void; cancelled: boolean; ms: number }
 
 function makeHarness(options?: { spawnThrows?: boolean }) {
   resetRegexWorkerForTests()
@@ -78,16 +78,26 @@ function makeHarness(options?: { spawnThrows?: boolean }) {
       spawned.push(worker)
       return worker
     },
-    scheduleTimer: (fn) => {
-      const timer = { fn, cancelled: false }
+    scheduleTimer: (fn, ms) => {
+      const timer = { fn, cancelled: false, ms }
       timers.push(timer)
       return () => { timer.cancelled = true }
     },
     isSupported: () => true,
+    isPageVisible: () => true,
+    schedulerLagMs: () => 0,
   })
   const fireLatestTimer = () => {
-    const timer = [...timers].reverse().find((entry) => !entry.cancelled)
-    timer?.fn()
+    const primary = [...timers].reverse().find((entry) => !entry.cancelled)
+    if (primary) {
+      primary.cancelled = true
+      primary.fn()
+    }
+    const grace = [...timers].reverse().find((entry) => !entry.cancelled)
+    if (grace) {
+      grace.cancelled = true
+      grace.fn()
+    }
   }
   return { spawned, timers, fireLatestTimer }
 }
@@ -105,6 +115,7 @@ function echoWorker(worker: FakeWorker): void {
       result = result.replace(new RegExp(script.pattern, script.flags), script.replaceString)
       for (const trim of script.trimStrings) result = trim ? result.replaceAll(trim, '') : result
       scriptElapsedMs.push(2)
+      worker.respond({ type: 'checkpoint', jobId: job.jobId, scriptIndex: index, result, elapsedMs: 2 })
     }
     worker.respond({ type: 'result', jobId: job.jobId, op: 'apply', result, elapsedMs: scriptElapsedMs.length * 2, scriptElapsedMs })
   }
@@ -176,7 +187,7 @@ describe('isolated regex pipeline', () => {
     expect(spawned[0].sent[0].scripts).toHaveLength(2)
   })
 
-  test('a timed-out script is quarantined and the safe remainder is retried', async () => {
+  test('an unconfirmed local timeout is skipped once without durable quarantine', async () => {
     const { spawned, fireLatestTimer } = makeHarness()
     const slow = script('slow', { find_regex: 'a' })
     const safe = script('safe', { find_regex: 'b', replace_string: 'B' })
@@ -193,9 +204,102 @@ describe('isolated regex pipeline', () => {
     expect(spawned).toHaveLength(2)
     echoWorker(spawned[1])
     expect((await promise).result).toBe('aB')
-    expect(getRegexExecTier(slow).tier).toBe('quarantined')
+    expect(getRegexExecTier(slow).tier).toBe('worker')
     expect(getRegexExecTier(safe).tier).toBe('worker')
-    expect(evidenceReports).toContainEqual({ id: 'slow', payload: { quarantined: true } })
+    expect(evidenceReports).toEqual([])
+  })
+
+  describe('worst-case congestion and backtracking regressions', () => {
+    test('worker starvation before start cannot randomly quarantine the first innocent regex', async () => {
+      const { spawned, fireLatestTimer } = makeHarness()
+      const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        result: 'AB',
+        touched_vars: [],
+        cacheable: true,
+        timed_out_script_ids: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      try {
+        const innocent = script('innocent-literal', { find_regex: 'a', replace_string: 'A' })
+        const safe = script('safe-suffix', { find_regex: 'b', replace_string: 'B' })
+        const promise = applyDisplayRegexTiered('ab', [innocent, safe], context, resolveRawTemplates)
+        await flush()
+
+        // No progress message: the browser scheduled the watchdog while the
+        // worker itself never received enough CPU to acknowledge the job.
+        fireLatestTimer()
+        expect((await promise).result).toBe('AB')
+        expect(spawned[0].terminated).toBe(true)
+        expect(getRegexExecTier(innocent).tier).toBe('worker')
+        expect(evidenceReports).toEqual([])
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+
+    test('a mid-batch timeout resumes at its checkpoint and never reruns the completed prefix', async () => {
+      const { spawned, fireLatestTimer } = makeHarness()
+      const backendBodies: Array<{ content: string; scripts: RegexScript[] }> = []
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (_url, init) => {
+        backendBodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify({
+          result: 'AbC',
+          touched_vars: [],
+          cacheable: false,
+          timed_out_script_ids: ['catastrophic'],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }) as typeof fetch)
+      try {
+        const prefix = script('prefix', { find_regex: 'a', replace_string: 'A' })
+        const catastrophic = script('catastrophic', { find_regex: '(b+)+$', replace_string: 'B' })
+        const suffix = script('suffix', { find_regex: 'c', replace_string: 'C' })
+        const promise = applyDisplayRegexTiered('abc', [prefix, catastrophic, suffix], context, resolveRawTemplates)
+        await flush()
+
+        const firstWorker = spawned[0]
+        const firstJob = firstWorker.sent[0]
+        firstWorker.respond({ type: 'progress', jobId: firstJob.jobId, scriptIndex: 0, scriptId: 'prefix' })
+        firstWorker.respond({ type: 'checkpoint', jobId: firstJob.jobId, scriptIndex: 0, result: 'Abc', elapsedMs: 1 })
+        firstWorker.respond({ type: 'progress', jobId: firstJob.jobId, scriptIndex: 1, scriptId: 'catastrophic' })
+        fireLatestTimer()
+
+        expect((await promise).result).toBe('AbC')
+        expect(backendBodies).toHaveLength(1)
+        expect(backendBodies[0].content).toBe('Abc')
+        expect(backendBodies[0].scripts.map((entry) => entry.id)).toEqual(['catastrophic', 'suffix'])
+        expect(getRegexExecTier(prefix).tier).toBe('worker')
+        expect(getRegexExecTier(catastrophic).tier).toBe('quarantined')
+        expect(getRegexExecTier(suffix).tier).toBe('worker')
+        expect(evidenceReports).toEqual([
+          { id: 'catastrophic', payload: { quarantined: true } },
+        ])
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
+
+    test('a started innocent regex remains active when only the congested browser times out', async () => {
+      const { spawned, fireLatestTimer } = makeHarness()
+      const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        result: 'ok',
+        touched_vars: [],
+        cacheable: true,
+        timed_out_script_ids: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      try {
+        const innocent = script('started-innocent', { find_regex: '^ok$', replace_string: 'ok' })
+        const promise = applyDisplayRegexTiered('ok', [innocent], context, resolveRawTemplates)
+        await flush()
+        const job = spawned[0].sent[0]
+        spawned[0].respond({ type: 'progress', jobId: job.jobId, scriptIndex: 0, scriptId: innocent.id })
+        fireLatestTimer()
+
+        expect((await promise).result).toBe('ok')
+        expect(getRegexExecTier(innocent).tier).toBe('worker')
+        expect(evidenceReports).toEqual([])
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    })
   })
 
   test('failed worker and backend boundaries return raw text without synchronous execution', async () => {

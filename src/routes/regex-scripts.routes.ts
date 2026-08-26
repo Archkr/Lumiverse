@@ -204,6 +204,7 @@ app.post("/apply", async (c) => {
     result: applied.result,
     touched_vars: Array.from(applied.touchedVars),
     cacheable: applied.cacheable,
+    timed_out_script_ids: Array.from(applied.timedOutScriptIds),
   });
 });
 

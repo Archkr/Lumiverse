@@ -44,6 +44,7 @@ class FakeWorker implements RegexWorkerLike {
 interface ManualTimer {
   fn: () => void
   cancelled: boolean
+  ms: number
 }
 
 function makeHarness() {
@@ -57,16 +58,21 @@ function makeHarness() {
       spawned.push(worker)
       return worker
     },
-    scheduleTimer: (fn) => {
-      const timer = { fn, cancelled: false }
+    scheduleTimer: (fn, ms) => {
+      const timer = { fn, cancelled: false, ms }
       timers.push(timer)
       return () => { timer.cancelled = true }
     },
     isSupported: () => true,
+    isPageVisible: () => true,
+    schedulerLagMs: () => 0,
   })
   const fireTimer = (index: number) => {
     const timer = timers[index]
-    if (timer && !timer.cancelled) timer.fn()
+    if (timer && !timer.cancelled) {
+      timer.cancelled = true
+      timer.fn()
+    }
   }
   return { spawned, timers, fireTimer }
 }
@@ -105,6 +111,7 @@ function echoWorker(fake: FakeWorker): void {
         fake.respond({ type: 'progress', jobId: job.jobId, scriptIndex, scriptId: script.scriptId, scriptName: script.scriptName })
         result = applyScript(result, script)
         scriptElapsedMs.push(3)
+        fake.respond({ type: 'checkpoint', jobId: job.jobId, scriptIndex, result, elapsedMs: 3 })
       })
       fake.respond({ type: 'result', jobId: job.jobId, op: 'apply', result, elapsedMs: scriptElapsedMs.length * 3, scriptElapsedMs })
     } catch (error) {
@@ -125,7 +132,7 @@ function workerScript(pattern: string, replaceString = '', id = pattern): ApplyW
 }
 
 describe('regex worker client', () => {
-  test('a timeout rejects only the active script and preserves queued work', async () => {
+  test('dispatch starvation blames no script and preserves queued work', async () => {
     const { spawned, fireTimer } = makeHarness()
     try {
       const first = runRegexJobInWorker({ op: 'apply', body: 'aaa', scripts: [workerScript('a', 'b', 'slow')] })
@@ -133,9 +140,12 @@ describe('regex worker client', () => {
       expect(spawned[0].sent).toHaveLength(1)
 
       fireTimer(0)
+      fireTimer(1)
       const timeout = await first.catch((error) => error)
       expect(timeout).toBeInstanceOf(RegexWorkerTimeoutError)
-      expect(timeout.scriptId).toBe('slow')
+      expect(timeout.scriptId).toBeUndefined()
+      expect(timeout.completedScriptCount).toBe(0)
+      expect(timeout.checkpointResult).toBe('aaa')
       expect(spawned[0].terminated).toBe(true)
       expect(spawned).toHaveLength(2)
 
@@ -158,12 +168,19 @@ describe('regex worker client', () => {
       const job = fake.sent[0]
       fake.respond({ type: 'progress', jobId: job.jobId, scriptIndex: 0, scriptId: 'first' })
       expect(timers[0].cancelled).toBe(true)
+      fake.respond({ type: 'checkpoint', jobId: job.jobId, scriptIndex: 0, result: 'Ab', elapsedMs: 3 })
       fake.respond({ type: 'progress', jobId: job.jobId, scriptIndex: 1, scriptId: 'second' })
       expect(timers[1].cancelled).toBe(true)
 
       fireTimer(2)
+      fireTimer(3)
       const timeout = await promise.catch((error) => error)
       expect(timeout.scriptId).toBe('second')
+      expect(timeout.scriptIndex).toBe(1)
+      expect(timeout.completedScriptCount).toBe(1)
+      expect(timeout.checkpointResult).toBe('Ab')
+      expect(timeout.phase).toBe('execution')
+      expect(timeout.environmentCongested).toBe(false)
     } finally {
       resetRegexWorkerForTests()
     }
@@ -182,6 +199,60 @@ describe('regex worker client', () => {
       expect(spawned[0].sent).toHaveLength(1)
       expect(outcome.result).toBe('bar b<oo>')
       expect(outcome.scriptElapsedMs).toEqual([3, 3])
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('the post-deadline grace lets an already-finished innocent regex win the task race', async () => {
+    const { spawned, timers, fireTimer } = makeHarness()
+    try {
+      const promise = runRegexJobInWorker({
+        op: 'apply',
+        body: 'a',
+        scripts: [workerScript('a', 'A', 'instant')],
+      })
+      const worker = spawned[0]
+      const job = worker.sent[0]
+      worker.respond({ type: 'progress', jobId: job.jobId, scriptIndex: 0, scriptId: 'instant' })
+
+      // The primary timer happened to win against the queued worker result.
+      fireTimer(1)
+      expect(timers[2].ms).toBe(50)
+      worker.respond({ type: 'checkpoint', jobId: job.jobId, scriptIndex: 0, result: 'A', elapsedMs: 0 })
+      worker.respond({ type: 'result', jobId: job.jobId, op: 'apply', result: 'A', elapsedMs: 0, scriptElapsedMs: [0] })
+
+      expect((await promise).result).toBe('A')
+      expect(worker.terminated).toBe(false)
+      expect(timers[2].cancelled).toBe(true)
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('hidden or globally starved workers receive the extended grace and diagnostic attribution', async () => {
+    const { spawned, timers, fireTimer } = makeHarness()
+    try {
+      setRegexWorkerDepsForTests({
+        isPageVisible: () => false,
+        schedulerLagMs: () => 900,
+      })
+      const promise = runRegexJobInWorker({
+        op: 'apply',
+        body: 'a',
+        scripts: [workerScript('a', 'A', 'innocent')],
+      })
+      const job = spawned[0].sent[0]
+      spawned[0].respond({ type: 'progress', jobId: job.jobId, scriptIndex: 0, scriptId: 'innocent' })
+
+      fireTimer(1)
+      expect(timers[2].ms).toBe(1_000)
+      fireTimer(2)
+      const timeout = await promise.catch((error) => error)
+      expect(timeout).toBeInstanceOf(RegexWorkerTimeoutError)
+      expect(timeout.pageVisible).toBe(false)
+      expect(timeout.schedulerLagMs).toBe(900)
+      expect(timeout.environmentCongested).toBe(true)
     } finally {
       resetRegexWorkerForTests()
     }

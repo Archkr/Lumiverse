@@ -448,6 +448,7 @@ export interface DisplayRegexBackendResult {
   result: string
   touchedVars?: ReadonlySet<string>
   cacheable?: boolean
+  timedOutScriptIds?: ReadonlySet<string>
 }
 
 export async function applyDisplayRegexOnBackend(
@@ -479,12 +480,20 @@ export async function applyDisplayRegexOnBackend(
       }),
     })
     if (!res.ok) return null
-    const body = await res.json() as { result?: string; touched_vars?: string[]; cacheable?: boolean }
+    const body = await res.json() as {
+      result?: string
+      touched_vars?: string[]
+      cacheable?: boolean
+      timed_out_script_ids?: string[]
+    }
     if (typeof body.result !== 'string') return null
     return {
       result: body.result,
       touchedVars: Array.isArray(body.touched_vars) ? new Set(body.touched_vars) : undefined,
       cacheable: typeof body.cacheable === 'boolean' ? body.cacheable : undefined,
+      timedOutScriptIds: Array.isArray(body.timed_out_script_ids)
+        ? new Set(body.timed_out_script_ids)
+        : undefined,
     }
   } catch {
     return null
