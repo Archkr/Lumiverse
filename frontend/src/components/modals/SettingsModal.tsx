@@ -3937,33 +3937,33 @@ function IllarinSettings() {
   const isLocalOrigin = ['127.0.0.1', 'localhost', '::1'].includes(window.location.hostname)
   const pollRef = useRef<{ timer?: ReturnType<typeof setInterval>; timeout?: ReturnType<typeof setTimeout> }>({})
 
-  const stopPolling = () => {
+  const stopPolling = useCallback(() => {
     clearInterval(pollRef.current.timer)
     clearTimeout(pollRef.current.timeout)
-  }
-  useEffect(() => stopPolling, [])
+  }, [])
+  useEffect(() => stopPolling, [stopPolling])
 
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/illarin/status', { credentials: 'include' })
       if (res.ok) {
         const data = await res.json()
         setStatus(data)
         if (data.illarin_url) setIllarinUrl(data.illarin_url)
-        if (data.instance_name && !instanceName) setInstanceName(data.instance_name)
+        if (data.instance_name) setInstanceName((current) => current || data.instance_name)
       }
     } catch {
       // ignore
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     fetchStatus()
     const interval = setInterval(fetchStatus, 10_000)
     return () => clearInterval(interval)
-  }, [])
+  }, [fetchStatus])
 
   const finishLinking = () => {
     stopPolling()

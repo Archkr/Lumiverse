@@ -579,6 +579,8 @@ function QuickToolbarNative() {
   const [draggingActionId, setDraggingActionId] = useState<string | null>(null)
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [overflowQuery, setOverflowQuery] = useState('')
+  const configuredGap = readOptionalToolbarNumber(settings, 'gap')
+  const configuredPadding = readOptionalToolbarNumber(settings, 'padding')
   const [overflowPlacement, setOverflowPlacement] = useState<{
     left: number
     top: number
@@ -619,12 +621,10 @@ function QuickToolbarNative() {
     const customizeWidth = toLayoutWidth(customizeButtonRef.current, 36)
     const overflowWidth = toLayoutWidth(overflowButtonRef.current, 56)
     const toolbarStyles = toolbarRef.current ? window.getComputedStyle(toolbarRef.current) : null
-    const configuredGap = readOptionalToolbarNumber(settings, 'gap')
     const fallbackGap = Number.isFinite(configuredGap) ? configuredGap : 6
     const gap = toolbarStyles
       ? (Number.parseFloat(toolbarStyles.columnGap || toolbarStyles.gap) || fallbackGap)
       : fallbackGap
-    const configuredPadding = readOptionalToolbarNumber(settings, 'padding')
     const fallbackPadding = Number.isFinite(configuredPadding) ? configuredPadding : 10
     const toolbarChromeWidth = toolbarStyles
       ? [
@@ -712,7 +712,7 @@ function QuickToolbarNative() {
     if (nextPaintWidth > 0) {
       setV2FitPaintWidth((previous) => previous === nextPaintWidth ? previous : nextPaintWidth)
     }
-  }, [actions, anchored, autoFitBounds, fillFloatingScreen, freePosition, persistentRect.rect.width, v2IconOnly])
+  }, [actions, anchored, autoFitBounds, configuredGap, configuredPadding, fillFloatingScreen, freePosition, persistentRect.rect.width, v2IconOnly])
   measureV2FitRef.current = measureV2Fit
 
   useLayoutEffect(() => {
@@ -947,8 +947,6 @@ function QuickToolbarNative() {
   const labelTextSize = anchored ? settings.v2LabelTextSize : settings.labelTextSize
   const labelVisible = v2IconOnly ? false : anchored ? settings.v2LabelVisible !== false : settings.labelVisible
   const showProfilePortrait = profilePortraitUrl !== null && profilePortraitUrl !== failedProfilePortraitUrl
-  const configuredGap = readOptionalToolbarNumber(settings, 'gap')
-  const configuredPadding = readOptionalToolbarNumber(settings, 'padding')
   const backdropColor = readOptionalToolbarColor(settings)
   const gripGlyph = Math.round(GRIP_GLYPH * scale)
   const chevronGlyph = Math.round(CHEVRON_GLYPH * scale)

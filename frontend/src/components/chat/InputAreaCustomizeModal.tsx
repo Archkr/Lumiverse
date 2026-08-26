@@ -344,7 +344,6 @@ export default function InputAreaCustomizeModal({
   const [query, setQuery] = useState('')
   const { actionCatalog } = useQuickToolbarActions()
   const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
-  const availableQuickToolbarActions = hasLumiverseSuite ? actionCatalog : []
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -356,12 +355,13 @@ export default function InputAreaCustomizeModal({
     [actionCatalog, hasLumiverseSuite],
   )
   const listedOrder = useMemo(() => {
+    const availableQuickToolbarActions = hasLumiverseSuite ? actionCatalog : []
     const seen = new Set(order)
     const extras = availableQuickToolbarActions
       .map((action) => toComposerExtraId(action.id))
       .filter((id) => !seen.has(id) && actionById.has(id))
     return [...order, ...extras]
-  }, [actionById, availableQuickToolbarActions, order])
+  }, [actionById, actionCatalog, hasLumiverseSuite, order])
   const rows = useMemo(
     () => listedOrder
       .map((id) => actionById.get(id))

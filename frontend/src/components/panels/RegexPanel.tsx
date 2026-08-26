@@ -1197,12 +1197,12 @@ function ScriptRow({
   // store write, so the row subscribes to the evidence module instead of
   // reading script.metadata. The overlay is the source of truth: it also
   // reflects a clear that has not been refetched from the server yet.
-  const evidenceVersion = useSyncExternalStore(
+  useSyncExternalStore(
     subscribeRegexEvidence,
     getRegexEvidenceVersion,
     getRegexEvidenceVersion,
   )
-  const quarantined = useMemo(() => isRegexScriptQuarantined(script), [script, evidenceVersion])
+  const quarantined = isRegexScriptQuarantined(script)
   const [clearingQuarantine, setClearingQuarantine] = useState(false)
   const loadRegexScripts = useStore((s) => s.loadRegexScripts)
 
