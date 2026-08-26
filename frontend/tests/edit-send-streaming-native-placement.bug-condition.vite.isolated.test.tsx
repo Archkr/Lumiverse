@@ -512,15 +512,15 @@ test('Property 1 streaming matrix: pending same-message resolutions never expose
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
-  let rendered = ''
   function Harness({ content, isStreaming }: { content: string; isStreaming: boolean }) {
-    rendered = useDisplayRegex(content, false, 0, undefined, {
+    const rendered = useDisplayRegex(content, false, 0, undefined, {
       chatId: 'property-stream-chat',
       messageId: 'property-stream-message',
       role: 'assistant',
     }, isStreaming)
-    return null
+    return createElement('output', null, rendered)
   }
+  const readRendered = () => host.textContent ?? ''
   const flushUntilPending = async (content: string) => {
     for (let attempt = 0; attempt < 20 && !pendingRegexResults.has(content); attempt++) {
       await act(async () => {
@@ -541,7 +541,7 @@ test('Property 1 streaming matrix: pending same-message resolutions never expose
 
     await act(async () => { root.render(createElement(Harness, { content: 'chunk two', isStreaming: true })) })
     await flushUntilPending('chunk two')
-    const pendingStreamingRender = rendered
+    const pendingStreamingRender = readRendered()
     await act(async () => {
       pendingRegexResults.get('chunk two')?.({ result: 'resolved two', touchedVars: new Set(), cacheable: true })
       await Promise.resolve()
@@ -549,12 +549,12 @@ test('Property 1 streaming matrix: pending same-message resolutions never expose
 
     await act(async () => { root.render(createElement(Harness, { content: 'chunk final', isStreaming: false })) })
     await flushUntilPending('chunk final')
-    const pendingFinalRender = rendered
+    const pendingFinalRender = readRendered()
     await act(async () => {
       pendingRegexResults.get('chunk final')?.({ result: 'resolved final', touchedVars: new Set(), cacheable: true })
       await Promise.resolve()
     })
-    const finalRender = rendered
+    const finalRender = readRendered()
     const noTransientFallback = pendingStreamingRender === 'resolved one' && pendingFinalRender === 'resolved two'
     const input: StreamingRenderInput = {
       type: 'streaming-render',

@@ -113,10 +113,8 @@ const {
 const { act, createElement } = await import('react')
 const { createRoot } = await import('react-dom/client')
 
-let rendered = ''
-
 function Harness({ content, identity, isStreaming }: HarnessProps) {
-  rendered = useDisplayRegex(
+  const rendered = useDisplayRegex(
     content,
     false,
     0,
@@ -130,7 +128,11 @@ function Harness({ content, identity, isStreaming }: HarnessProps) {
       : undefined,
     isStreaming,
   )
-  return null
+  return createElement('output', null, rendered)
+}
+
+function readRendered(host: HTMLDivElement): string {
+  return host.textContent ?? ''
 }
 
 function configureImmediateCoalescing(): void {
@@ -243,28 +245,28 @@ describe('useDisplayRegex resolver lifecycle', () => {
       try {
         await render(root, { content: seed, identity, isStreaming: true })
         await settle(seed, `resolved seed ${caseIndex}`)
-        expect(rendered).toBe(`resolved seed ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved seed ${caseIndex}`)
 
         await render(root, { content: middle, identity, isStreaming: true })
-        expect(rendered).toBe(`resolved seed ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved seed ${caseIndex}`)
         await render(root, { content: latest, identity, isStreaming: true })
-        expect(rendered).toBe(`resolved seed ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved seed ${caseIndex}`)
 
         let latestSettled = false
         for (const key of settlementOrder) {
           const content = key === 'middle' ? middle : latest
           await settle(content, `resolved ${key} ${caseIndex}`)
           if (key === 'latest') latestSettled = true
-          expect(rendered).toBe(
+          expect(readRendered(host)).toBe(
             latestSettled ? `resolved latest ${caseIndex}` : `resolved seed ${caseIndex}`,
           )
         }
 
-        expect(rendered).toBe(`resolved latest ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved latest ${caseIndex}`)
         await render(root, { content: final, identity, isStreaming: false })
-        expect(rendered).toBe(`resolved latest ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved latest ${caseIndex}`)
         await settle(final, `resolved final ${caseIndex}`)
-        expect(rendered).toBe(`resolved final ${caseIndex}`)
+        expect(readRendered(host)).toBe(`resolved final ${caseIndex}`)
       } finally {
         await destroyHarness(host, root)
       }
@@ -322,16 +324,16 @@ describe('useDisplayRegex resolver lifecycle', () => {
           isStreaming: resetCase.initialStreaming,
         })
         await settle(initial, `resolved ${resetCase.name} initial`)
-        expect(rendered).toBe(`resolved ${resetCase.name} initial`)
+        expect(readRendered(host)).toBe(`resolved ${resetCase.name} initial`)
 
         await render(root, {
           content: next,
           identity: resetCase.nextIdentity,
           isStreaming: resetCase.nextStreaming,
         })
-        expect(rendered).toBe(next)
+        expect(readRendered(host)).toBe(next)
         await settle(next, `resolved ${resetCase.name} next`)
-        expect(rendered).toBe(`resolved ${resetCase.name} next`)
+        expect(readRendered(host)).toBe(`resolved ${resetCase.name} next`)
       } finally {
         await destroyHarness(host, root)
       }
@@ -349,30 +351,30 @@ describe('useDisplayRegex resolver lifecycle', () => {
     try {
       await render(root, { content: first, identity, isStreaming: true })
       await settle(first, 'resolved carry one')
-      expect(rendered).toBe('resolved carry one')
+      expect(readRendered(host)).toBe('resolved carry one')
 
       // Mid-stream flush: the newest preprocess key is in flight, so the
       // unpreprocessed source must never reach the render.
       holdPreprocess(second)
       await renderWhilePreprocessPending(root, { content: second, identity, isStreaming: true })
-      expect(rendered).toBe('resolved carry one')
+      expect(readRendered(host)).toBe('resolved carry one')
       await releasePreprocess(second)
       await waitForPending(second)
-      expect(rendered).toBe('resolved carry one')
+      expect(readRendered(host)).toBe('resolved carry one')
       await settle(second, 'resolved carry two')
-      expect(rendered).toBe('resolved carry two')
+      expect(readRendered(host)).toBe('resolved carry two')
 
       // Finalization commits a DIFFERENT key than the last streamed chunk, and
       // resolves in two stages (preprocess, then regex). Neither stage may
       // expose unpreprocessed source.
       holdPreprocess(authoritative)
       await renderWhilePreprocessPending(root, { content: authoritative, identity, isStreaming: false })
-      expect(rendered).toBe('resolved carry two')
+      expect(readRendered(host)).toBe('resolved carry two')
       await releasePreprocess(authoritative)
       await waitForPending(authoritative)
-      expect(rendered).toBe('resolved carry two')
+      expect(readRendered(host)).toBe('resolved carry two')
       await settle(authoritative, 'resolved carry final')
-      expect(rendered).toBe('resolved carry final')
+      expect(readRendered(host)).toBe('resolved carry final')
     } finally {
       await destroyHarness(host, root)
     }
@@ -422,7 +424,7 @@ describe('useDisplayRegex resolver lifecycle', () => {
           isStreaming: leakCase.initialStreaming,
         })
         await settle(initial, `resolved ${leakCase.name} initial`)
-        expect(rendered).toBe(`resolved ${leakCase.name} initial`)
+        expect(readRendered(host)).toBe(`resolved ${leakCase.name} initial`)
 
         holdPreprocess(next)
         await renderWhilePreprocessPending(root, {
@@ -430,13 +432,13 @@ describe('useDisplayRegex resolver lifecycle', () => {
           identity: leakCase.nextIdentity,
           isStreaming: leakCase.nextStreaming,
         })
-        expect(rendered).toBe(next)
-        expect(rendered).not.toBe(`resolved ${leakCase.name} initial`)
+        expect(readRendered(host)).toBe(next)
+        expect(readRendered(host)).not.toBe(`resolved ${leakCase.name} initial`)
 
         await releasePreprocess(next)
         await waitForPending(next)
         await settle(next, `resolved ${leakCase.name} next`)
-        expect(rendered).toBe(`resolved ${leakCase.name} next`)
+        expect(readRendered(host)).toBe(`resolved ${leakCase.name} next`)
       } finally {
         await destroyHarness(host, root)
       }
