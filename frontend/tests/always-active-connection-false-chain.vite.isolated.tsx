@@ -43,19 +43,19 @@ import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
 import { Hono } from 'hono'
 
-import { closeDatabase, getDb, initDatabase } from '../../../../src/db/connection'
-import { chatsRoutes } from '../../../../src/routes/chats.routes'
-import { settingsRoutes } from '../../../../src/routes/settings.routes'
-import * as chatsSvc from '../../../../src/services/chats.service'
-import * as chatBackground from '../../../../src/services/chat-background.service'
-import * as councilProfilesSvc from '../../../../src/services/council/council-profiles.service'
-import * as pool from '../../../../src/services/generation-pool.service'
-import * as generateSvc from '../../../../src/services/generate.service'
+import { closeDatabase, getDb, initDatabase } from '../../src/db/connection'
+import { chatsRoutes } from '../../src/routes/chats.routes'
+import { settingsRoutes } from '../../src/routes/settings.routes'
+import * as chatsSvc from '../../src/services/chats.service'
+import * as chatBackground from '../../src/services/chat-background.service'
+import * as councilProfilesSvc from '../../src/services/council/council-profiles.service'
+import * as pool from '../../src/services/generation-pool.service'
+import * as generateSvc from '../../src/services/generate.service'
 import {
   dispatchEditAndSendRequest,
   resetEditAndSendDispatcherForTests,
   setEditAndSendStartGeneration,
-} from '../../../../src/services/edit-and-send-dispatcher.service'
+} from '../../src/services/edit-and-send-dispatcher.service'
 
 const USER_ID = 'user-1'
 const CHAT_ID = 'chat-1'
@@ -202,7 +202,11 @@ function initBackendDb(): void {
     status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'running', 'completed', 'failed', 'cancelled')),
     lease_owner TEXT, lease_expires_at INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER,
     last_error_code TEXT, terminal_reason TEXT, dispatched_at INTEGER, completed_at INTEGER, cancelled_at INTEGER,
-    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored LAST to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`)
   // Needed by the backend half of the chain (boundary 4). Keyless `custom`
   // profiles, so the credential preflight is not what this harness exercises.
@@ -327,7 +331,7 @@ let runtimePromise: Promise<Runtime> | null = null
 
 async function createRuntime(): Promise<Runtime> {
   const server = await createServer({
-    root: fileURLToPath(new URL('../../..', import.meta.url)),
+    root: fileURLToPath(new URL('../', import.meta.url)),
     server: { middlewareMode: true },
     appType: 'custom',
     logLevel: 'silent',
@@ -335,7 +339,13 @@ async function createRuntime(): Promise<Runtime> {
       alias: [{
         find: /^react-router$/,
         // The sibling's stub, reused by alias. Neither sibling file is modified.
-        replacement: fileURLToPath(new URL('./edit-and-send-false-chain.5-3.router-stub.ts', import.meta.url)),
+        // The stub stays under `frontend/src` because the Vite server rooted at
+        // `frontend/` also loads it by `/src/...` path; the alias must resolve to
+        // that same absolute file so both routes share one module instance.
+        replacement: fileURLToPath(new URL(
+          '../src/components/settings/edit-and-send-false-chain.5-3.router-stub.ts',
+          import.meta.url,
+        )),
       }],
     },
   })

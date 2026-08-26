@@ -42,15 +42,15 @@ import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
 
-import { closeDatabase, getDb, initDatabase } from '../../../../src/db/connection'
-import { chatsRoutes } from '../../../../src/routes/chats.routes'
-import { settingsRoutes } from '../../../../src/routes/settings.routes'
+import { closeDatabase, getDb, initDatabase } from '../../src/db/connection'
+import { chatsRoutes } from '../../src/routes/chats.routes'
+import { settingsRoutes } from '../../src/routes/settings.routes'
 import {
   getGenerationOutboxByRequest,
   resetEditAndSendDispatcherForTests,
   setEditAndSendStartGeneration,
   type StartEditAndSendGenerationInput,
-} from '../../../../src/services/edit-and-send-dispatcher.service'
+} from '../../src/services/edit-and-send-dispatcher.service'
 import { Hono } from 'hono'
 
 // ── Identities shared by the frontend store and the backend database ──────
@@ -259,7 +259,11 @@ function initBackendDb(): void {
     completed_at INTEGER,
     cancelled_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored last to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`)
 }
 
@@ -374,14 +378,20 @@ let runtimePromise: Promise<Runtime> | null = null
 
 async function createRuntime(): Promise<Runtime> {
   const server = await createServer({
-    root: fileURLToPath(new URL('../../..', import.meta.url)),
+    root: fileURLToPath(new URL('../', import.meta.url)),
     server: { middlewareMode: true },
     appType: 'custom',
     logLevel: 'silent',
     resolve: {
       alias: [{
         find: /^react-router$/,
-        replacement: fileURLToPath(new URL('./edit-and-send-false-chain.5-3.router-stub.ts', import.meta.url)),
+        // The stub stays under `frontend/src` because the Vite server rooted at
+        // `frontend/` also loads it by `/src/...` path below; the alias must
+        // resolve to that same absolute file so both routes share one instance.
+        replacement: fileURLToPath(new URL(
+          '../src/components/settings/edit-and-send-false-chain.5-3.router-stub.ts',
+          import.meta.url,
+        )),
       }],
     },
   })

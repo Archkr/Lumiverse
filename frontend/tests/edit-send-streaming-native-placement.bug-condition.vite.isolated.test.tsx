@@ -5,9 +5,9 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { createServer } from 'vite'
-import { closeDatabase, getDb, initDatabase } from '../../../../src/db/connection'
-import { editAndSend, getChat, getMessage, getMessages } from '../../../../src/services/chats.service'
-import { getGenerationOutboxByRequest } from '../../../../src/services/edit-and-send-dispatcher.service'
+import { closeDatabase, getDb, initDatabase } from '../../src/db/connection'
+import { editAndSend, getChat, getMessage, getMessages } from '../../src/services/chats.service'
+import { getGenerationOutboxByRequest } from '../../src/services/edit-and-send-dispatcher.service'
 
 type RestorationInput = {
   type: 'restoration'
@@ -118,7 +118,7 @@ function assertNever(value: never): never {
   throw new Error(`Unexpected property input: ${JSON.stringify(value)}`)
 }
 
-const FRONTEND_ROOT = fileURLToPath(new URL('../../..', import.meta.url))
+const FRONTEND_ROOT = fileURLToPath(new URL('../', import.meta.url))
 const REQUIRED_RESTORATION_FILES = new Set([
   'src/types/store.ts',
   'src/lib/uiProductivityDefaults.ts',
@@ -242,7 +242,11 @@ function initEditAndSendTestDb(): void {
     status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'running', 'completed', 'failed', 'cancelled')),
     lease_owner TEXT, lease_expires_at INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER,
     last_error_code TEXT, terminal_reason TEXT, dispatched_at INTEGER, completed_at INTEGER, cancelled_at INTEGER,
-    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored LAST to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`)
   db.query('INSERT INTO characters (id, user_id, name) VALUES (?, ?, ?)').run('property-char', USER, 'Property')
 }
@@ -494,7 +498,7 @@ test('Property 1 streaming matrix: pending same-message resolutions never expose
     resetDisplayCoalesceForTests,
     setDisplayCoalesceDepsForTests,
     useDisplayRegex,
-  } = await import('../../hooks/useDisplayRegex')
+  } = await import('../src/hooks/useDisplayRegex')
   let now = 1_000
   setDisplayCoalesceDepsForTests({
     now: () => (now += 1_000),
