@@ -483,25 +483,45 @@ export default function ChatView() {
     }
   }, [])
 
+  const completeNavigateHome = useCallback(() => {
+    // Detach the visible chat before committing the route. In particular this
+    // cancels the closure-owned 32ms stream flush; leaving it for passive
+    // unmount cleanup gives that timer a window to write the streaming buffer
+    // into the newly mounted landing page.
+    const state = useStore.getState()
+    if (state.activeChatId === chatId) {
+      state.setActiveChat(null)
+      state.clearGroupChat()
+    }
+    markLandingPageChatReturn()
+    navigate('/')
+  }, [chatId, navigate])
+
   const handleNavigateHome = useCallback(() => {
     if (chromeLeaveTimerRef.current !== null) return
 
     const landingImageUrls = peekLandingPageSnapshot()?.imageUrls ?? []
     if (landingImageUrls.length > 0) holdImagesForTransition(landingImageUrls)
 
+    // Freeze the local stream on its newest frame before animating it out.
+    // Standalone WebKit can terminate the page when the opacity/transform
+    // transition and streaming subtree remeasurement run concurrently. The
+    // backend generation and chat head continue normally during this pause.
+    const state = useStore.getState()
+    const isActivelyStreamingThisChat = state.activeChatId === chatId && state.isStreaming
+    if (isActivelyStreamingThisChat) state.pauseStreamingForNavigation()
+
     if (prefersReducedMotion()) {
-      markLandingPageChatReturn()
-      navigate('/')
+      completeNavigateHome()
       return
     }
 
     setChatChromeLeaving(true)
     chromeLeaveTimerRef.current = window.setTimeout(() => {
       chromeLeaveTimerRef.current = null
-      markLandingPageChatReturn()
-      navigate('/')
+      completeNavigateHome()
     }, CHAT_CHROME_LEAVE_MS)
-  }, [navigate])
+  }, [chatId, completeNavigateHome])
 
   const cortexNotice = useMemo(() => buildCortexNotice(ingestionStatus, rebuildStatus, t), [ingestionStatus, rebuildStatus, t])
 
@@ -996,10 +1016,15 @@ export default function ChatView() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      setActiveChat(null)
-      useStore.getState().clearGroupChat()
+      const state = useStore.getState()
+      // A home navigation now detaches synchronously. Avoid repeating that
+      // reset (or letting a stale cleanup clear a newer active chat).
+      if (state.activeChatId === chatId) {
+        state.setActiveChat(null)
+        state.clearGroupChat()
+      }
     }
-  }, [setActiveChat])
+  }, [chatId])
 
   const activeChatWallpaper = useStore((s) => s.activeChatWallpaper)
   const activeCharacterId = useStore((s) => s.activeCharacterId)

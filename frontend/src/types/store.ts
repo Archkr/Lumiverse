@@ -20,6 +20,9 @@ export interface ChatSlice {
   activeChatName: string | null
   messages: Message[]
   isStreaming: boolean
+  /** True while the chat is fading out to another route. The last rendered
+   * stream frame stays visible, but live/recovery writes are paused. */
+  streamingNavigationPaused: boolean
   streamingContent: string
   streamingReasoning: string
   streamingReasoningDuration: number | null
@@ -73,6 +76,7 @@ export interface ChatSlice {
   removeMessage: (id: string) => void
   beginStreaming: (regeneratingMessageId?: string, generationType?: string) => void
   startStreaming: (generationId: string, regeneratingMessageId?: string, generationType?: string) => void
+  pauseStreamingForNavigation: () => void
   /** Append a live stream segment. When `offset` (char position of the segment
    *  start in the server's cumulative buffer) is provided, overlap with already-
    *  rendered content is sliced off exactly; returns 'gap' when the segment

@@ -679,7 +679,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.MESSAGE_SENT, (payload: MessageSentPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           if (payload.message?.id) invalidateDisplayRegexCacheForMessage(payload.message.id)
 
           // Suppress completed assistant messages while streaming — the streaming
@@ -721,7 +721,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.MESSAGE_EDITED, (payload: MessageEditedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           if (payload.message?.id) invalidateDisplayRegexCacheForMessage(payload.message.id)
 
           // During a continue, the backend updates the target message with combined
@@ -741,7 +741,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.MESSAGE_DELETED, (payload: MessageDeletedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           state.removeMessage(payload.messageId)
           if (payload.messageId) invalidateDisplayRegexCacheForMessage(payload.messageId)
         }
@@ -749,7 +749,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.MESSAGE_SWIPED, (payload: MessageSwipedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           state.updateMessage(payload.message.id, payload.message)
           // Deleting a swipe shifts indices, so a pending "new swipe" pointer is
           // no longer trustworthy — drop it.
@@ -764,6 +764,7 @@ export function useWebSocket() {
         const state = store.getState()
         const changedChatId = payload.chat?.id ?? payload.chatId
         if (changedChatId !== state.activeChatId) return
+        if (state.streamingNavigationPaused) return
 
         if (payload.chat) {
           state.setActiveChatName(payload.chat.name ?? null)
@@ -791,7 +792,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GENERATION_STARTED, (payload: GenerationStartedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           if (state.isGroupChat && payload.characterId) {
             state.setActiveGroupCharacter(payload.characterId)
             state.setRespondingCharacterId(payload.characterId)
@@ -828,7 +829,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GENERATION_IN_PROGRESS, (payload: GenerationInProgressPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           if (state.activeGenerationId !== payload.generationId) {
             state.startStreaming(payload.generationId, payload.targetMessageId, payload.generationType)
           } else if (payload.targetMessageId && state.regeneratingMessageId !== payload.targetMessageId) {
@@ -902,7 +903,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.STREAM_TOKEN_RECEIVED, (payload: StreamTokenPayload) => {
         const state = store.getState()
-        if (payload.generationId === state.activeGenerationId) {
+        if (!state.streamingNavigationPaused && payload.generationId === state.activeGenerationId) {
           // `offset` (char position of the segment in the server's cumulative
           // buffer) gives exact reconciliation: overlap with recovery-backfilled
           // content is sliced off inside the append, and a segment starting
@@ -922,7 +923,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GENERATION_ENDED, (payload: GenerationEndedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId) {
+        if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
           // Guard: ignore events from stale generations that were replaced by a newer one
           if (state.activeGenerationId && payload.generationId && payload.generationId !== state.activeGenerationId) return
           // Mark this generation as ended BEFORE calling endStreaming/setStreamingError,
@@ -1232,7 +1233,7 @@ export function useWebSocket() {
         // If the user is currently viewing this chat, dismiss & acknowledge instead —
         // otherwise the persisted 'completed' head would spawn the moment they navigate away.
         if (payload.chatId && payload.generationId) {
-          if (payload.chatId === state.activeChatId) {
+          if (payload.chatId === state.activeChatId && !state.streamingNavigationPaused) {
             state.deleteChatHead(payload.chatId)
             generateApi.acknowledge(payload.chatId).catch(() => {})
           } else {
@@ -1276,6 +1277,11 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GENERATION_STOPPED, (payload: { generationId?: string; chatId?: string }) => {
         const state = store.getState()
+        if (state.streamingNavigationPaused && payload.chatId === state.activeChatId) {
+          if (payload.generationId) state.updateChatHead(payload.generationId, { status: 'stopped' })
+          if (state.mpChatId === payload.chatId) syncMultiplayerChatHeadFromStore()
+          return
+        }
         // Guard: only stop streaming if this event matches the active generation
         // (a newer generation may have already replaced it)
         if (state.activeGenerationId && payload.generationId && payload.generationId !== state.activeGenerationId) return
@@ -1343,6 +1349,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GENERATION_ERROR, () => {
         const state = store.getState()
+        if (state.streamingNavigationPaused) return
         const regenId = state.regeneratingMessageId
         if (isLocalStreamPlaceholderId(regenId)) {
           state.removeMessage(regenId)
@@ -1353,7 +1360,7 @@ export function useWebSocket() {
       // Group chat events
       wsClient.on(EventType.GROUP_TURN_STARTED, (payload: GroupTurnStartedPayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId && state.isGroupChat) {
+        if (payload.chatId === state.activeChatId && state.isGroupChat && !state.streamingNavigationPaused) {
           state.setActiveGroupCharacter(payload.characterId)
           state.setNudgeLoopActive(true)
           state.startStreaming(payload.generationId)
@@ -1368,7 +1375,7 @@ export function useWebSocket() {
 
       wsClient.on(EventType.GROUP_ROUND_COMPLETE, (payload: GroupRoundCompletePayload) => {
         const state = store.getState()
-        if (payload.chatId === state.activeChatId && state.isGroupChat) {
+        if (payload.chatId === state.activeChatId && state.isGroupChat && !state.streamingNavigationPaused) {
           state.setNudgeLoopActive(false)
           state.setActiveGroupCharacter(null)
           // Mark all spoken characters

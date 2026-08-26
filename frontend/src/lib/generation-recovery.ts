@@ -24,6 +24,9 @@ export async function recoverPooledGeneration(chatId: string): Promise<void> {
   if (!chatId) return
   const state = useStore.getState()
   if (state.activeChatId !== chatId) return
+  // Chat exit keeps one frozen stream frame mounted for its short animation.
+  // Recovery must not resume writes into that fading subtree.
+  if (state.streamingNavigationPaused) return
 
   // Multiplayer peers don't own the host's generation pool — they reconcile
   // purely from the re-broadcast WS event stream. Polling the pool would either

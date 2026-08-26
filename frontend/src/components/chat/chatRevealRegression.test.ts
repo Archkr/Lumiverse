@@ -38,4 +38,27 @@ describe('staging chat reveal regression contracts', () => {
     expect(revealEffect).toMatch(/return \(\) => \{\s*cancelled = true/)
     expect(revealEffect).toMatch(/\}, \[chatId, hasPopulated\]\)$/)
   })
+
+  test('freezes an active stream before animating it out on home navigation', async () => {
+    const source = await readSource('ChatView.tsx')
+    const completeNavigation = source.match(
+      /const completeNavigateHome = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[chatId, navigate\]\)/,
+    )?.[0] ?? ''
+    const homeHandler = source.match(
+      /const handleNavigateHome = useCallback\(\(\) => \{[\s\S]*?\n  \}, \[chatId, completeNavigateHome\]\)/,
+    )?.[0] ?? ''
+
+    expect(completeNavigation).toMatch(/state\.activeChatId === chatId/)
+    expect(completeNavigation).toContain('state.setActiveChat(null)')
+    expect(completeNavigation.indexOf('state.setActiveChat(null)')).toBeLessThan(
+      completeNavigation.indexOf("navigate('/')"),
+    )
+    expect(homeHandler).toContain('state.activeChatId === chatId && state.isStreaming')
+    expect(homeHandler).toContain('if (isActivelyStreamingThisChat) state.pauseStreamingForNavigation()')
+    expect(homeHandler.indexOf('state.pauseStreamingForNavigation()')).toBeLessThan(
+      homeHandler.indexOf('setChatChromeLeaving(true)'),
+    )
+    expect(homeHandler).toContain('setChatChromeLeaving(true)')
+    expect(homeHandler).toContain('}, CHAT_CHROME_LEAVE_MS)')
+  })
 })

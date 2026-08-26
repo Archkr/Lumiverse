@@ -100,6 +100,31 @@ describe('chat navigation during streaming', () => {
     }
   })
 
+  test('freezes the latest stream frame while a chat navigation animates', () => {
+    jest.useFakeTimers()
+    const state = createStore()
+
+    try {
+      state.setActiveChat('chat-1')
+      state.startStreaming('generation-1')
+      state.appendStreamToken('latest frame')
+
+      state.pauseStreamingForNavigation()
+      expect(state.streamingNavigationPaused).toBe(true)
+      expect(state.streamingContent).toBe('latest frame')
+      expect(state.appendStreamToken(' ignored')).toBe('stale')
+
+      jest.runAllTimers()
+      expect(state.streamingContent).toBe('latest frame')
+      expect(state.getStreamBuffers().content).toBe('latest frame')
+
+      state.setActiveChat(null)
+      expect(state.streamingNavigationPaused).toBe(false)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test('clears reasoning timer state when switching chats', () => {
     const state = createStore()
 
