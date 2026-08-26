@@ -163,8 +163,11 @@ describe('canonical Productivity settings renderer', () => {
     expect(floating).toContain('Fill the entire top of the screen')
     expect(floating).toContain('quick-fill-top-dock-width')
     expect(floating).toContain('Stretch across window top')
-    expect(floating).not.toContain('Show select-messages on chat top bar')
-    expect(floating).not.toContain('quick-show-native-select-messages')
+    expect(floating).toContain('Show select-messages on chat top bar')
+    expect(floating).toContain('quick-show-native-select-messages')
+    expect(floating).toContain('Native chat-top actions')
+    expect(floating).toContain('Edit and Send position')
+    expect(floating).toContain('Branch chat when using Edit and Send')
     expect(floating).toContain('Opaque toolbar backdrop')
     expect(floating).toContain('quick-opaque-toolbar-backdrop')
 
@@ -182,6 +185,9 @@ describe('canonical Productivity settings renderer', () => {
     expect(docked).toContain('Stretch across remaining chat top bar')
     expect(docked).toContain('Show select-messages on chat top bar')
     expect(docked).toContain('quick-show-native-select-messages')
+    expect(docked).toContain('Native chat-top actions')
+    expect(docked).toContain('Edit and Send position')
+    expect(docked).toContain('Branch chat when using Edit and Send')
     expect(docked).toContain('quick-opaque-toolbar-backdrop')
     expect(docked).toContain('id="quick-toolbar-backdrop-color"')
     expect(docked).toContain('aria-label="Toolbar backdrop color"')
@@ -354,8 +360,11 @@ describe('canonical Productivity settings renderer', () => {
     expect(markup).not.toContain('Lorebook Editor')
     expect(markup).not.toContain('Drag to reorder toolbar icons')
     expect(markup).not.toContain('Customize composer gear')
-    expect(markup).toContain('Embedding fallback profiles')
-    expect(markup).toContain('Edit and Send')
+    // Every Suite-owned feature toggle goes with the Suite, so a persisted
+    // true cannot leave a Suite-only surface mounted or an inert checkbox behind.
+    expect(markup).not.toContain('Embedding fallback profiles')
+    expect(markup).not.toContain('Cortex secondary connections')
+    expect(markup).not.toContain('Edit and Send')
   })
 
   test('uses the selected character avatar and metadata in the homepage preview', () => {

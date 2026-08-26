@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
+import { isExtensionComposerActionId } from './composerActionOwnership'
+
 import { ListChecks } from 'lucide-react'
 
 const storeState = {
@@ -54,6 +56,7 @@ describe('composer selectMessages catalog and migration', () => {
   test('gates every Suite and Quick Toolbar item from the presented composer catalog', () => {
     const quickToolbarCatalog = [
       { id: 'connections', label: 'Connections menu', description: 'Open connections', icon: ListChecks, surface: { kind: 'command' as const }, run: () => undefined },
+      { id: 'chat.customize-composer', label: 'Customize composer', description: 'Customize composer actions', icon: ListChecks, surface: { kind: 'command' as const }, run: () => undefined },
       { id: 'lumiverse_suite.lorebook.open_half', label: 'Half-Screen Lorebook Editor', description: 'Open half editor', icon: ListChecks, surface: { kind: 'command' as const }, run: () => undefined },
       { id: 'lumiverse_suite.lorebook.open_enhanced', label: 'Full-Screen Lorebook Editor', description: 'Open full editor', icon: ListChecks, surface: { kind: 'command' as const }, run: () => undefined },
       { id: 'lumiverse_suite.connections_picker.open', label: 'Connections Picker', description: 'Open picker', icon: ListChecks, surface: { kind: 'command' as const }, run: () => undefined },
@@ -61,6 +64,7 @@ describe('composer selectMessages catalog and migration', () => {
 
     const withoutSuite = buildComposerActionMap(quickToolbarCatalog, false)
     expect(withoutSuite.has('connections')).toBe(true)
+    expect(withoutSuite.has('chat.customize-composer')).toBe(false)
     expect(withoutSuite.has('connectionsPicker')).toBe(false)
     expect(withoutSuite.has('qt:connections')).toBe(false)
     expect(withoutSuite.has('lumiverse_suite.lorebook.open_half')).toBe(false)
@@ -70,10 +74,16 @@ describe('composer selectMessages catalog and migration', () => {
     const withSuite = buildComposerActionMap(quickToolbarCatalog, true)
     expect(withSuite.has('connectionsPicker')).toBe(true)
     expect(withSuite.has('qt:connections')).toBe(true)
+    expect(withSuite.has('chat.customize-composer')).toBe(true)
     expect(withSuite.has('lumiverse_suite.lorebook.open_half')).toBe(true)
     expect(withSuite.has('lumiverse_suite.lorebook.open_enhanced')).toBe(true)
     // The extension contribution is represented by the stable native launcher.
     expect(withSuite.has('lumiverse_suite.connections_picker.open')).toBe(false)
+  })
+  test('retains native composer actions when Suite-owned persisted actions are gated', () => {
+    expect(isExtensionComposerActionId('chat.customize-composer')).toBe(true)
+    expect(isExtensionComposerActionId('home')).toBe(false)
+    expect(isExtensionComposerActionId('selectMessages')).toBe(false)
   })
 
   test('pre-feature persisted blobs append and hide selectMessages', () => {

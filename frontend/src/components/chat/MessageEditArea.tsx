@@ -3,8 +3,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Mutable
 import { useTranslation } from 'react-i18next'
 import ExpandedTextEditor from '@/components/shared/ExpandedTextEditor'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
-import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { useStore } from '@/store'
+import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import styles from './MessageEditArea.module.css'
 
 interface MessageEditAreaProps {
@@ -87,7 +88,12 @@ function MessageEditAreaNative({
   const { t } = useTranslation('chat')
   const { t: tc } = useTranslation('common')
   const { t: ts } = useTranslation('shared', { keyPrefix: 'expandedTextEditor' })
-  const showEditAndSend = useStore((state) => readProductivityFlag(state, 'showEditAndSend'))
+  const showEditAndSend = useStore((state) => readProductivityFeature(state, 'showEditAndSend'))
+  const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
+  const configuredEditAndSendSide = useStore((state) => state.quickToolbarSettings?.editAndSendSide)
+  // Only an explicit left preference opts into the alternate order. Missing,
+  // reset, invalid, and suite-unavailable values retain native right placement.
+  const editAndSendSide = hasLumiverseSuite && configuredEditAndSendSide === 'left' ? 'left' : 'right'
   const hasReasoning = editReasoning != null && onChangeReasoning != null
   const contentRef = useRef<HTMLTextAreaElement>(null)
   const reasoningRef = useRef<HTMLTextAreaElement>(null)
@@ -261,26 +267,40 @@ function MessageEditAreaNative({
       </div>
       <div
         className={styles.editActions}
+        data-edit-and-send-side={editAndSendSide}
         data-spindle-mount="message_edit_actions"
         data-spindle-scope-key={messageId ? `message:${messageId}:edit-actions` : undefined}
       >
+        {editAndSendSide === 'left' && hasLumiverseSuite && showEditAndSend && Boolean(onEditAndSend) && (
+          <button
+            type="button"
+            onClick={onEditAndSend}
+            className={styles.editSaveBtn}
+            data-edit-and-send-action="true"
+            aria-label={t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
+            disabled={editAndSendDisabled || !editContent.trim()}
+          >
+            {t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
+          </button>
+        )}
         <button type="button" onClick={onCancel} className={styles.editCancelBtn} disabled={editAndSendDisabled}>
           {tc('actions.cancel')}
         </button>
-        {showEditAndSend && Boolean(onEditAndSend) && (
-        <button
-          type="button"
-          onClick={onEditAndSend}
-          className={styles.editSaveBtn}
-          aria-label={t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
-          disabled={editAndSendDisabled || !editContent.trim()}
-        >
-          {t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
-        </button>
-        )}
         <button type="button" onClick={onSave} className={styles.editSaveBtn} disabled={editAndSendDisabled}>
           {tc('actions.save')}
         </button>
+        {editAndSendSide === 'right' && hasLumiverseSuite && showEditAndSend && Boolean(onEditAndSend) && (
+          <button
+            type="button"
+            onClick={onEditAndSend}
+            className={styles.editSaveBtn}
+            data-edit-and-send-action="true"
+            aria-label={t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
+            disabled={editAndSendDisabled || !editContent.trim()}
+          >
+            {t('messageEdit.editAndSend', { defaultValue: 'Edit and Send' })}
+          </button>
+        )}
       </div>
       {expandedField === 'content' && (
         <ExpandedTextEditor

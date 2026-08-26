@@ -305,6 +305,43 @@ export function reportRegexScriptPerformance(
   return { script: getRegexScript(userId, id), newlyFlagged: true, cleared: false };
 }
 
+// Client-side evidence persistence for the display-regex execution tiers
+// (metadata.regex_evidence.quarantined). Quarantine deliberately survives a
+// script edit: a pattern that hung the executor stays skipped until the user
+// clears it from the panel, which sends `quarantined: false` and deletes the
+// key here. Timing evidence used to live alongside it and was removed — no
+// consumer read it, so it could never affect tier selection.
+export function reportRegexScriptEvidence(
+  userId: string,
+  id: string,
+  patch: { quarantined?: boolean },
+): RegexScript | null {
+  const script = getRegexScript(userId, id);
+  if (!script) return null;
+
+  const metadata: Record<string, any> =
+    script.metadata && typeof script.metadata === "object" ? { ...script.metadata } : {};
+  const evidence =
+    metadata.regex_evidence && typeof metadata.regex_evidence === "object" ? { ...metadata.regex_evidence } : {};
+
+  if (patch.quarantined !== undefined) {
+    if (patch.quarantined) {
+      evidence.quarantined = true;
+    } else {
+      delete evidence.quarantined;
+    }
+  }
+
+  metadata.regex_evidence = evidence;
+  getDb().query("UPDATE regex_scripts SET metadata = ? WHERE id = ? AND user_id = ?").run(
+    JSON.stringify(metadata),
+    id,
+    userId,
+  );
+  emitRegexChanged(userId, id);
+  return getRegexScript(userId, id);
+}
+
 function resolveCreateDisabledState(input: CreateRegexScriptInput, activePresetId: string | null): boolean {
   const requestedDisabled = !!input.disabled;
   const presetId = normalizeOptionalId(input.preset_id);
@@ -971,6 +1008,10 @@ export function updateRegexScript(
       nextInput.scope_id = existing.scope === nextInput.scope ? existing.scope_id : null;
     }
   }
+  // A pattern-affecting edit clears the slow/timed-out warning, since the
+  // measurement described the old shape. The quarantine flag under
+  // metadata.regex_evidence is intentionally left untouched: a script that hung
+  // the executor stays skipped until the user clears it from the panel.
   if (shouldResetRegexPerformance(nextInput)) {
     nextInput.metadata = withoutRegexPerformanceMetadata(nextInput.metadata ?? existing.metadata);
   }

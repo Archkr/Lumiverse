@@ -697,6 +697,7 @@ app.post("/:chatId/edit-and-send", async (c) => {
   const content = (body as { content?: unknown }).content;
   const expectedVersion = (body as { expectedVersion?: unknown }).expectedVersion;
   const requestId = (body as { requestId?: unknown }).requestId;
+  const branchChatOnEditAndSend = (body as { branchChatOnEditAndSend?: unknown }).branchChatOnEditAndSend;
 
   if (typeof messageId !== "string" || !messageId.trim()) {
     return c.json({ error: "messageId is required" }, 400);
@@ -710,12 +711,16 @@ app.post("/:chatId/edit-and-send", async (c) => {
   if (typeof expectedVersion !== "number" || !Number.isInteger(expectedVersion) || expectedVersion < 1) {
     return c.json({ error: "expectedVersion must be a positive integer" }, 400);
   }
+  if (branchChatOnEditAndSend !== undefined && typeof branchChatOnEditAndSend !== "boolean") {
+    return c.json({ error: "branchChatOnEditAndSend must be a boolean" }, 400);
+  }
 
   const result = svc.editAndSend(userId, chatId, {
     messageId,
     content,
     expectedVersion,
     requestId,
+    branchChatOnEditAndSend: branchChatOnEditAndSend ?? true,
   });
   if (result.status === "not_found") return c.json({ error: result.error }, 404);
   if (result.status === "conflict") return c.json({ error: result.error }, 409);

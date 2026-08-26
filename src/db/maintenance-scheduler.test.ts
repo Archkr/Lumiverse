@@ -36,7 +36,12 @@ function initSchedulerDb(): void {
     completed_at INTEGER,
     cancelled_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. This fixture builds the
+    -- schema by hand instead of running migrations, so the column has to be
+    -- mirrored here (last, matching the ALTER TABLE append order) or every
+    -- edit-and-send write fails with "no such column: connection_id".
+    connection_id TEXT
   )`);
   getDb().run(`CREATE TABLE messages (
     id TEXT PRIMARY KEY,

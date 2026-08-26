@@ -73,6 +73,20 @@ describe('chatsApi.editAndSend', () => {
     })).resolves.toEqual(response)
   })
 
+  test('forwards in-place mode in the request body', async () => {
+    const input = {
+      messageId: 'msg-1',
+      content: 'rewritten in place',
+      expectedVersion: 7,
+      requestId: 'req-in-place',
+      branchChatOnEditAndSend: false,
+    }
+    post.mockResolvedValueOnce(serverEditAndSend({ branchChatId: 'chat-1' }))
+
+    await expect(chatsApi.editAndSend('chat-1', input)).resolves.toMatchObject({ branchChatId: 'chat-1' })
+    expect(post).toHaveBeenCalledWith('/chats/chat-1/edit-and-send', input, undefined)
+  })
+
   test('forwards AbortSignal so the caller can cancel', async () => {
     const signal = new AbortController().signal
     post.mockResolvedValueOnce(serverEditAndSend())

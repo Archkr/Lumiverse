@@ -30,7 +30,7 @@ import { Toggle } from '@/components/shared/Toggle'
 import { spinClass } from '@/components/shared/Spinner'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
 import { useStore } from '@/store'
-import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { spindleApi } from '@/api/spindle'
 import { connectionsApi } from '@/api/connections'
 import {
@@ -2115,7 +2115,7 @@ function embeddingErrorCode(err: { body?: { code?: unknown }; code?: unknown } |
 
 function EmbeddingsSettings() {
   const { t } = useTranslation('settings')
-  const showEmbeddingFallbackUi = useStore((s) => readProductivityFlag(s, 'showEmbeddingFallbackUi'))
+  const showEmbeddingFallbackUi = useStore((s) => readProductivityFeature(s, 'showEmbeddingFallbackUi'))
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

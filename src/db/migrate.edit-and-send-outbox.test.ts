@@ -6,6 +6,19 @@ import { join } from "node:path";
 import { runMigrations } from "./migrate";
 
 const MIGRATION_103 = "103_edit_and_send_outbox.sql";
+/**
+ * `generation_outbox.connection_id` arrives in a SEPARATE post-103 migration, so
+ * the `pre` database below has to apply it too in order to reach the same schema
+ * as a fully migrated `fresh` database.
+ *
+ * Read from disk rather than inlined: `MIGRATION_103_SQL` below is byte-compared
+ * against its file by "keeps the canonical migration identity and body", and
+ * duplicating a second migration body as a literal would create a second thing to
+ * keep in sync for no benefit. Migration 103 itself is deliberately left
+ * untouched — editing a shipped migration would silently change the schema of
+ * every database that already ran it.
+ */
+const MIGRATION_111 = "111_generation_outbox_connection_id.sql";
 const MIGRATION_103_SQL = `-- Edit-and-send: message OCC revision, durable request log, generation outbox.
 -- Post-baseline. The runner records this filename in _migrations so it runs once.
 
@@ -177,6 +190,11 @@ describe("103 edit and send outbox migration", () => {
       `);
       createPre103MessagesDb(pre);
       pre.run(MIGRATION_103_SQL);
+      // 103 created the outbox WITHOUT connection_id; 111 appends it. A pre-103
+      // database that stopped at 103 would otherwise be one column short of the
+      // fully migrated `fresh` database, and this test's whole point is that the
+      // two converge.
+      pre.run(await Bun.file(join(import.meta.dir, "migrations", MIGRATION_111)).text());
 
       const freshSchema = editAndSendSchema(fresh);
       const preSchema = editAndSendSchema(pre);
@@ -210,6 +228,7 @@ describe("103 edit and send outbox migration", () => {
         "cancelled_at",
         "chat_id",
         "completed_at",
+        "connection_id",
         "created_at",
         "dispatched_at",
         "edited_message_id",
@@ -320,6 +339,7 @@ describe("103 edit and send outbox migration", () => {
           "cancelled_at",
           "chat_id",
           "completed_at",
+          "connection_id",
           "created_at",
           "dispatched_at",
           "edited_message_id",

@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { getCharacterAvatarThumbUrl } from '@/lib/avatarUrls'
 import { isMobileViewportOrDevice, shouldHideQuickToolbarWhenOverlaid } from '@/lib/uiProductivityDefaults'
-import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { useLorebookWorkspaceOverlayOpen } from '@/lib/lorebookWorkspaceVisibility'
 import { usePersistentRect, type DragMode } from '@/hooks/usePersistentRect'
 import {
@@ -302,7 +302,7 @@ function QuickToolbarNative() {
     || characterEditorOpen
     || lorebookHalfEditorOpen
     || lorebookWorkspaceOpen
-  const enableToolbarIconReorder = useStore((state) => readProductivityFlag(state, 'enableToolbarIconReorder'))
+  const enableToolbarIconReorder = useStore((state) => readProductivityFeature(state, 'enableToolbarIconReorder'))
   /**
    * Whether the user pressed the edge tab to bring the toolbar back over the
    * overlay that is currently up. Deliberately not persisted, and reset below

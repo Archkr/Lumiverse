@@ -21,8 +21,10 @@ import type { InputBarActionState } from '@/store/slices/spindle-placement'
 import { nextToolbarIconOrder } from './toolbarPointerHold'
 import {
   filterEnabledFrontendContributions,
+  hasEnabledFrontendExtension,
   hasEnabledFrontendExtensionId,
 } from '@/lib/spindle/frontend-extension-availability'
+import { isExtensionComposerActionId } from '@/components/chat/composerActionOwnership'
 
 export type ToolbarActionIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
 
@@ -185,7 +187,16 @@ export function useQuickToolbarActions() {
   const activeLoomPresetId = useStore((s) => s.activeLoomPresetId)
   const messageSelectMode = useStore((s) => s.messageSelectMode)
   const openModal = useStore((s) => s.openModal)
-  useSyncExternalStore(subscribeChatDockerActionOwners, getChatDockerActionOwners, getChatDockerActionOwners)
+  // The snapshot is a *value*, not just a re-render trigger. ChatView registers
+  // `navigateToOldestMessage` / `openMessageNavigator` in an effect, i.e. after
+  // the toolbar in the same commit has already rendered — so a catalog memo that
+  // read the owners imperatively kept the empty registration forever and
+  // rendered chat actions whose `run` did nothing.
+  const chatDockerActionOwners = useSyncExternalStore(
+    subscribeChatDockerActionOwners,
+    getChatDockerActionOwners,
+    getChatDockerActionOwners,
+  )
   const openDrawer = useStore((s) => s.openDrawer)
   const closeDrawer = useStore((s) => s.closeDrawer)
   const setDrawerTab = useStore((s) => s.setDrawerTab)
@@ -302,7 +313,7 @@ export function useQuickToolbarActions() {
           ),
         }
       })
-    const owners = getChatDockerActionOwners()
+    const owners = chatDockerActionOwners
     const chatDockerActions: ToolbarAction[] = buildChatDockerActionCatalog({
       owners: {
         ...owners,
@@ -349,11 +360,15 @@ export function useQuickToolbarActions() {
       ...registeredActions,
       ...extensionInputActions,
     ]
-    return [...new Map(catalog.map((action) => [action.id, action])).values()]
+    const availableCatalog = hasEnabledFrontendExtension(extensions, 'lumiverse_suite')
+      ? catalog
+      : catalog.filter((action) => !isExtensionComposerActionId(action.id))
+    return [...new Map(availableCatalog.map((action) => [action.id, action])).values()]
   }, [
     activeCharacterId,
     activeChatId,
     activeLoomPresetId,
+    chatDockerActionOwners,
     extensionCommands,
     extensionDrawerTabs,
     extensions,

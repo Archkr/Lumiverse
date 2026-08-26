@@ -11,6 +11,7 @@ export interface EditAndSendInput {
   content: string
   expectedVersion: number
   requestId: string
+  branchChatOnEditAndSend?: boolean
 }
 
 export interface EditAndSendResult {
@@ -204,9 +205,10 @@ export const chatsApi = {
   },
 
   /**
-   * Branch at a user message, apply its edit, and durably dispatch generation.
-   * The client must navigate to the returned branch and recover its generation;
-   * it must not update the source message or start a second generation itself.
+   * Apply an edit and durably dispatch generation, either in a new branch or
+   * in place according to branchChatOnEditAndSend. When a branch is returned,
+   * the client must navigate to it and recover its generation; it must not
+   * update the source message or start a second generation itself.
    */
   editAndSend(chatId: string, input: EditAndSendInput, options?: RequestOptions) {
     return post<EditAndSendResult>(`/chats/${chatId}/edit-and-send`, input, options)

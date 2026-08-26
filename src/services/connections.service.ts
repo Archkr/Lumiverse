@@ -359,6 +359,103 @@ export function resolveConnection(userId: string, id?: string): ConnectionProfil
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+/**
+ * The user's explicitly selected connection profile — the STRICT first rung of
+ * the acting chain: the persisted `activeProfileId` setting, validated with
+ * `getConnection`, or `undefined` when it is absent, empty, not a string, or
+ * names a profile that no longer exists.
+ *
+ * Exported separately from `resolveActingConnectionId` on purpose: this is the
+ * only rung that expresses an explicit user selection, so it is the only rung
+ * permitted to override a chat-scoped `connection_profile_id` pin (the
+ * `editAndSendAlwaysUseActiveConnection` opt-in). `resolveActingConnectionId`
+ * ends in "any profile you own", and "any profile you own" is a weaker signal
+ * than an explicit pin.
+ */
+export function resolveActiveConnectionId(userId: string): string | undefined {
+  const active = settingsSvc.getSetting(userId, "activeProfileId");
+  if (
+    typeof active?.value === "string" &&
+    active.value &&
+    getConnection(userId, active.value)
+  ) {
+    return active.value;
+  }
+  return undefined;
+}
+
+/**
+ * Pick the connection profile a generation triggered SERVER-SIDE with no
+ * caller-supplied `connection_id` should run on.
+ *
+ * A user's own sends pass `connection_id: activeProfileId` from the UI, but
+ * server-triggered generations (Edit-and-Send outbox dispatch, room peer
+ * message / freeform deadline / "End now", spindle sends that forward an
+ * `undefined` id) have no such context. `resolveConnection` then falls back to
+ * `getDefaultConnection`, which ONLY matches `is_default = 1` — so a user whose
+ * active profile is not their default silently runs on a connection they never
+ * selected, and a user with several profiles but no explicit default hard-fails
+ * with "No connection profile found". Mirror the user's actual selection
+ * instead, with safe fallbacks: their active profile → the DB default → any
+ * profile they own.
+ *
+ * Returns `undefined` when the user owns no connections at all, preserving the
+ * caller's existing "no connection profile found" error.
+ *
+ * This is the single owner of that chain; `multiplayer.resolveHostConnectionId`
+ * delegates here so the room path and the Edit-and-Send path cannot drift.
+ */
+export function resolveActingConnectionId(userId: string): string | undefined {
+  return resolveActiveConnectionId(userId)
+    ?? getDefaultConnection(userId)?.id
+    ?? listConnections(userId, { limit: 1, offset: 0 }).data[0]?.id;
+}
+
+/**
+ * The connection an Edit-and-Send request is COMMITTED against, resolved once at
+ * enqueue time and then persisted on `generation_outbox.connection_id`.
+ *
+ * This exists because connection selection used to be re-read at dispatch time.
+ * The outbox is durable and its dispatch is not: the same row can be dispatched
+ * from the POST handler, again from the periodic retry tick after a backoff, and
+ * again from startup crash recovery — potentially hours apart. Re-reading
+ * `activeProfileId` (or the chat's `connection_profile_id` pin) on each of those
+ * ticks means switching profiles retargets a request the user already committed.
+ * Resolving here and storing the answer makes the choice immutable for the life
+ * of the request, which is the whole point of an outbox.
+ *
+ * Mirrors `generate.service.resolveChatGenerationConnection` rung for rung:
+ *   1. the `editAndSendAlwaysUseActiveConnection` opt-in → STRICT active profile
+ *   2. a live chat-scoped `connection_profile_id` pin
+ *   3. the acting chain (active → `is_default` → any owned profile)
+ *
+ * Returns `undefined` when nothing resolves — including when the `settings` or
+ * `connection_profiles` tables are absent, which is the case in several
+ * edit-and-send test fixtures that build a minimal schema by hand. A `NULL`
+ * column is a first-class value here: the dispatcher falls back to the existing
+ * resolve-at-dispatch ladder, which is also what rows committed before this
+ * column existed must do. Never throws: a connection lookup failure must not be
+ * able to fail the user's edit.
+ */
+export function resolveEditAndSendConnectionId(
+  userId: string,
+  chatMetadata: Record<string, any> | null | undefined,
+): string | undefined {
+  try {
+    if (settingsSvc.readEditAndSendAlwaysUseActiveConnection(userId)) {
+      const activeId = resolveActiveConnectionId(userId);
+      if (activeId) return activeId;
+    }
+    const boundId = typeof chatMetadata?.connection_profile_id === "string"
+      ? chatMetadata.connection_profile_id.trim()
+      : "";
+    if (boundId && getConnection(userId, boundId)) return boundId;
+    return resolveActingConnectionId(userId);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function createConnection(userId: string, input: CreateConnectionProfileInput): Promise<ConnectionProfile> {
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);

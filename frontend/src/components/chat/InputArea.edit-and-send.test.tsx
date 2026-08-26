@@ -46,4 +46,14 @@ describe('InputArea edit-and-send contract', () => {
     expect(api).toContain('edit-and-send')
     expect(inputArea).not.toMatch(/editAndSend|edit-and-send/)
   })
+
+  test('Suite-owned composer actions and Edit and Send are availability-gated', () => {
+    const editArea = readFileSync(join(here, 'MessageEditArea.tsx'), 'utf8')
+    expect(inputAreaSource()).toContain('enableReorder={hasLumiverseSuite && enableToolbarIconReorder}')
+    expect(editArea).toContain('hasLumiverseSuite && showEditAndSend && Boolean(onEditAndSend)')
+  })
 })
+
+function inputAreaSource() {
+  return readFileSync(join(here, 'InputArea.tsx'), 'utf8')
+}

@@ -99,6 +99,7 @@ export function useMessageCard(message: Message, chatId: string) {
   const activeChatMetadata = useStore((s) => s.activeChatMetadata)
   const setActiveChatMetadata = useStore((s) => s.setActiveChatMetadata)
   const isBubbleMode = useStore((s) => s.chatDisplayMode) === 'bubble'
+  const branchChatOnEditAndSend = useStore((s) => s.quickToolbarSettings?.branchChatOnEditAndSend ?? true)
 
   const regeneratingMessageId = useStore((s) => s.regeneratingMessageId)
   const streamingSwipeId = useStore((s) => s.streamingSwipeId)
@@ -420,7 +421,7 @@ export function useMessageCard(message: Message, chatId: string) {
     }
 
     const expectedVersion = message.revision ?? 1
-    const fingerprint = `${message.id}\0${expectedVersion}\0${cleanContent}`
+    const fingerprint = `${message.id}\0${expectedVersion}\0${cleanContent}\0${branchChatOnEditAndSend ? '1' : '0'}`
     if (editAndSendRequestRef.current?.fingerprint !== fingerprint) {
       editAndSendRequestRef.current = { fingerprint, requestId: generateUUID() }
     }
@@ -433,14 +434,17 @@ export function useMessageCard(message: Message, chatId: string) {
         content: cleanContent,
         expectedVersion,
         requestId,
+        branchChatOnEditAndSend,
       })
-      const messageLimit = useStore.getState().messagesPerPage || 50
-      await preloadChatNavigationSnapshotById(result.branchChatId, messageLimit).catch((err) => {
-        console.warn('[MessageCard] Failed to preload edit-and-send branch:', err)
-      })
+      if (branchChatOnEditAndSend) {
+        const messageLimit = useStore.getState().messagesPerPage || 50
+        await preloadChatNavigationSnapshotById(result.branchChatId, messageLimit).catch((err) => {
+          console.warn('[MessageCard] Failed to preload edit-and-send branch:', err)
+        })
+      }
       editAndSendRequestRef.current = null
       clearMessageEdit()
-      navigate(`/chat/${result.branchChatId}`)
+      if (branchChatOnEditAndSend) navigate(`/chat/${result.branchChatId}`)
     } catch (err: any) {
       console.error('[MessageCard] Failed to edit and send:', err)
       addToast({
@@ -450,7 +454,7 @@ export function useMessageCard(message: Message, chatId: string) {
     } finally {
       setEditAndSendPending(false)
     }
-  }, [chatId, editAndSendPending, editContent, isStreaming, message, t, addToast, clearMessageEdit, navigate])
+  }, [branchChatOnEditAndSend, chatId, editAndSendPending, editContent, isStreaming, message, t, addToast, clearMessageEdit, navigate])
 
   const doDeleteMessage = useCallback(async () => {
     try {

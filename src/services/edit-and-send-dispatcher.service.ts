@@ -1,5 +1,8 @@
 import { getDb } from "../db/connection";
 import type { SQLQueryBindings } from "bun:sqlite";
+import { clampErrorMessage, ConnectionCredentialError } from "../utils/provider-errors";
+import { eventBus } from "../ws/bus";
+import { EventType } from "../ws/events";
 
 export type EditAndSendOutboxStatus =
   | "pending"
@@ -35,6 +38,14 @@ export interface GenerationOutboxRow {
   cancelled_at: number | null;
   created_at: number;
   updated_at: number;
+  /**
+   * The connection profile this request was COMMITTED against, resolved once by
+   * `chats.service.editAndSend` and never re-resolved. `null` for rows written
+   * before `migrations/111_generation_outbox_connection_id.sql`, and for the
+   * rare commit where nothing resolved; both cases fall back to the unchanged
+   * resolve-at-dispatch ladder in `generate.service`.
+   */
+  connection_id: string | null;
 }
 
 export interface StartEditAndSendGenerationInput {
@@ -45,8 +56,38 @@ export interface StartEditAndSendGenerationInput {
   message_id?: string;
 }
 
+/**
+ * Out-of-band declaration that a generation start came from the Edit-and-Send
+ * outbox dispatch. Passed as a SECOND POSITIONAL ARGUMENT to `startGeneration`,
+ * never as a field on `StartEditAndSendGenerationInput` or `GenerateInput`:
+ * `chatRoute` in `src/routes/generate.routes.ts` builds its service input as
+ * `handler({ ...body, userId, signal, ...extras })`, so an in-band field would
+ * be settable by any client on `POST /generate`, `/regenerate`, and `/continue`,
+ * handing a forged interactive send the Edit-and-Send connection override. A
+ * second positional argument is structurally unreachable from body spreading,
+ * because `chatRoute` calls `handler(inputObject)` with exactly one argument.
+ *
+ * `origin` is a compile-time constant at the single call site
+ * (`dispatchClaimedEditAndSendOutbox` is only ever invoked for Edit-and-Send
+ * rows), so the dispatcher performs no query and gains no table dependency.
+ */
+export interface StartGenerationOptions {
+  origin: "edit_and_send";
+  /**
+   * The connection recorded on the outbox row at commit time, forwarded verbatim
+   * and authoritatively. Travels in this out-of-band options bag for the exact
+   * same reason `origin` does: an in-band field on
+   * `StartEditAndSendGenerationInput` would be spread out of the request body by
+   * `chatRoute`, letting any client forge a connection override on
+   * `POST /generate`. `undefined` for pre-migration rows, which then take the
+   * unchanged legacy ladder.
+   */
+  connectionId?: string;
+}
+
 export type StartEditAndSendGenerationFn = (
   input: StartEditAndSendGenerationInput,
+  options?: StartGenerationOptions,
 ) => Promise<{ generationId: string; status: string }>;
 
 export type StopEditAndSendGenerationFn = (userId: string, generationId: string) => boolean;
@@ -129,6 +170,7 @@ function rowToOutbox(row: any): GenerationOutboxRow {
     cancelled_at: row.cancelled_at ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    connection_id: row.connection_id ?? null,
   };
 }
 
@@ -233,10 +275,21 @@ export function claimNextEditAndSendOutbox(now = nowMs()): GenerationOutboxRow |
   });
 }
 
-async function invokeStartGeneration(input: StartEditAndSendGenerationInput) {
-  if (startGenerationFn) return startGenerationFn(input);
+/**
+ * `options` used to be a shared module-level constant (`EDIT_AND_SEND_ORIGIN`)
+ * because `origin` was its only field and was the same for every row. The
+ * committed connection is PER-ROW, so the bag is now built per dispatch by
+ * `dispatchClaimedEditAndSendOutbox` and threaded through here. A mutable shared
+ * object was the rejected alternative: two concurrent dispatches (the retry tick
+ * overlapping a POST) would stomp each other's connection id.
+ */
+async function invokeStartGeneration(
+  input: StartEditAndSendGenerationInput,
+  options: StartGenerationOptions,
+) {
+  if (startGenerationFn) return startGenerationFn(input, options);
   const { startGeneration } = await import("./generate.service");
-  return startGeneration(input);
+  return startGeneration(input, options);
 }
 
 function invokeStopGeneration(userId: string, generationId: string): boolean {
@@ -272,8 +325,28 @@ function toSqlBinding(value: unknown): SQLQueryBindings {
   return String(value);
 }
 
-function markDispatchFailure(row: GenerationOutboxRow, errorCode: string): void {
+function markDispatchFailure(
+  row: GenerationOutboxRow,
+  errorCode: string,
+  terminalReason?: string,
+): void {
   const now = nowMs();
+  // A terminal reason bypasses the backoff/attempt path entirely: the row is
+  // closed with no `next_attempt_at`, so it is never re-claimed and never
+  // re-dispatched with the identical (unusable) credentials. `terminal_reason`
+  // is an unconstrained column, exactly like the existing 'max_attempts' and
+  // 'duplicate_generation_id' values, so no schema/CHECK change is involved.
+  if (terminalReason) {
+    markOutbox(row.id, {
+      status: "failed",
+      last_error_code: errorCode,
+      terminal_reason: terminalReason,
+      completed_at: now,
+      lease_owner: null,
+      lease_expires_at: null,
+    });
+    return;
+  }
   if (row.attempt_count >= MAX_ATTEMPTS) {
     markOutbox(row.id, {
       status: "failed",
@@ -322,8 +395,22 @@ export async function dispatchClaimedEditAndSendOutbox(row: GenerationOutboxRow)
       : {}),
   };
 
+  // Strictly out of band. `connection_id` must NOT become a field on `input`:
+  // `chatRoute` in `src/routes/generate.routes.ts` builds its service input as
+  // `handler({ ...body, userId, signal, ...extras })`, so an in-band field is
+  // client-settable on `POST /generate`, `/regenerate` and `/continue`, which
+  // would hand a forged interactive send an arbitrary connection override.
+  // `chatRoute` calls `handler(inputObject)` with exactly ONE argument, so a
+  // second positional argument is structurally unreachable from body spreading.
+  // `??  undefined` rather than passing `null`: `StartGenerationOptions.connectionId`
+  // is optional, and "absent" is what the legacy ladder keys off.
+  const options: StartGenerationOptions = {
+    origin: "edit_and_send",
+    connectionId: row.connection_id ?? undefined,
+  };
+
   try {
-    const started = await invokeStartGeneration(input);
+    const started = await invokeStartGeneration(input, options);
     const now = nowMs();
     withImmediateTransaction(() => {
       const current = getGenerationOutboxById(row.id);
@@ -349,6 +436,28 @@ export async function dispatchClaimedEditAndSendOutbox(row: GenerationOutboxRow)
     return getGenerationOutboxById(row.id);
   } catch (err) {
     const code = err instanceof Error ? err.message.slice(0, 200) : "dispatch_failed";
+    // Classify by CLASS, not by message text: the `slice(0, 200)` truncation
+    // above could otherwise change the outcome. A credential that cannot be
+    // resolved will not resolve on a later tick either, so it is terminal.
+    if (err instanceof ConnectionCredentialError) {
+      markDispatchFailure(row, err.code, "credential_unresolved");
+      // Dispatches from the periodic retry tick and from startup recovery have
+      // never had a user-facing error path. This is it — the same channel the
+      // frontend already handles for interactive failures. `src/ws/bus` is
+      // DB-free, and with no server attached (as in the dispatcher's own tests)
+      // the emit is inert.
+      eventBus.emit(
+        EventType.GENERATION_ENDED,
+        {
+          generationId: row.generation_id,
+          chatId: row.branch_chat_id,
+          error: clampErrorMessage(err.message),
+          generationType: row.mode,
+        },
+        row.user_id,
+      );
+      return getGenerationOutboxById(row.id);
+    }
     markDispatchFailure(row, code || "dispatch_failed");
     return getGenerationOutboxById(row.id);
   }

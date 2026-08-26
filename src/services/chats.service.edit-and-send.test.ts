@@ -121,7 +121,11 @@ function initEditAndSendTestDb(): void {
     completed_at INTEGER,
     cancelled_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored last to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`);
 }
 
@@ -259,7 +263,7 @@ describe("edit-and-send branching", () => {
     const branchChat = getChat(USER, historical.payload.branchChatId);
     expect(branchChat?.metadata.branched_from).toBe("hist-chat");
     expect(historical.payload.generationCursor.mode).toBe("swipe");
-    expect(getMessage(USER, "hist-user-1")).toMatchObject({ content: "one", revision: 2 });
+    expect(getMessage(USER, "hist-user-1")).toMatchObject({ content: "one", revision: 1 });
   });
 
   test("rejects stale expectedVersion and replays identical requestId", () => {
@@ -303,5 +307,264 @@ describe("edit-and-send branching", () => {
     expect(clash.status).toBe("conflict");
     expect(getDb().query("SELECT COUNT(*) AS count FROM chats").get()).toEqual({ count: 2 });
     expect(getDb().query("SELECT COUNT(*) AS count FROM generation_outbox").get()).toEqual({ count: 1 });
+  });
+
+  test("in-place mode edits the source chat and queues generation there", () => {
+    seedChat("in-place");
+    seedMessage("in-place-user", "in-place", "old", { index: 0, isUser: true, revision: 2 });
+    const result = editAndSend(USER, "in-place", {
+      messageId: "in-place-user",
+      content: "new",
+      expectedVersion: 2,
+      requestId: "in-place-req",
+      branchChatOnEditAndSend: false,
+    });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.payload.branchChatId).toBe("in-place");
+    expect(getMessages(USER, "in-place")[0]).toMatchObject({ id: "in-place-user", content: "new", revision: 3 });
+    expect(getDb().query("SELECT COUNT(*) AS count FROM chats").get()).toEqual({ count: 1 });
+    expect(getGenerationOutboxByRequest(USER, "in-place", "in-place-req")?.branch_chat_id).toBe("in-place");
+  });
+
+  test("includes branch mode in request idempotency", () => {
+    seedChat("mode-chat");
+    seedMessage("mode-user", "mode-chat", "old", { index: 0, isUser: true });
+    const base = {
+      messageId: "mode-user",
+      content: "new",
+      expectedVersion: 1,
+      requestId: "same-request",
+    };
+    const first = editAndSend(USER, "mode-chat", { ...base, branchChatOnEditAndSend: false });
+    expect(first.status).toBe("ok");
+    const clash = editAndSend(USER, "mode-chat", { ...base, branchChatOnEditAndSend: true });
+    expect(clash).toEqual({ status: "conflict", error: "requestId already used with a different payload" });
+  });
+
+  test("branch-enabled generated histories preserve complete source rows and use only branch-owned targets", () => {
+    for (const earlierTurnCount of [0, 1, 2]) {
+      for (const hasImmediateAssistant of [false, true]) {
+        const suffix = `${earlierTurnCount}-${hasImmediateAssistant ? "historical" : "tail"}`;
+        const chatId = `isolated-${suffix}`;
+        const selectedUserId = `selected-user-${suffix}`;
+        const sourceAssistantId = hasImmediateAssistant ? `source-assistant-${suffix}` : null;
+        const requestId = `isolated-request-${suffix}`;
+        seedChat(chatId);
+        seedMessage(`greeting-${suffix}`, chatId, "Greeting", { index: 0 });
+
+        let nextIndex = 1;
+        for (let turn = 0; turn < earlierTurnCount; turn += 1) {
+          seedMessage(`earlier-user-${suffix}-${turn}`, chatId, `Earlier user ${turn}`, {
+            index: nextIndex,
+            isUser: true,
+            revision: 2 + turn,
+          });
+          nextIndex += 1;
+          seedMessage(`earlier-assistant-${suffix}-${turn}`, chatId, `Earlier assistant ${turn}`, {
+            index: nextIndex,
+            revision: 3 + turn,
+          });
+          nextIndex += 1;
+        }
+
+        seedMessage(selectedUserId, chatId, "Original selected content", {
+          index: nextIndex,
+          isUser: true,
+          revision: 7,
+        });
+        if (sourceAssistantId) {
+          seedMessage(sourceAssistantId, chatId, "Historical assistant", { index: nextIndex + 1, revision: 9 });
+        }
+
+        const sourceBefore = {
+          chat: getDb().query("SELECT * FROM chats WHERE id = ?").get(chatId),
+          messages: getDb().query("SELECT * FROM messages WHERE chat_id = ? ORDER BY index_in_chat ASC").all(chatId),
+        };
+        const result = editAndSend(USER, chatId, {
+          messageId: selectedUserId,
+          content: "Rewritten selected content",
+          expectedVersion: 7,
+          requestId,
+          branchChatOnEditAndSend: true,
+        });
+
+        expect(result.status).toBe("ok");
+        if (result.status !== "ok") continue;
+        expect(result.payload.branchChatId).not.toBe(chatId);
+        expect(result.payload.generationCursor.chatId).toBe(result.payload.branchChatId);
+        expect({
+          chat: getDb().query("SELECT * FROM chats WHERE id = ?").get(chatId),
+          messages: getDb().query("SELECT * FROM messages WHERE chat_id = ? ORDER BY index_in_chat ASC").all(chatId),
+        }).toEqual(sourceBefore);
+
+        const requestRow = getDb().query(
+          `SELECT chat_id, branch_chat_id, edited_message_id, target_message_id
+           FROM edit_and_send_requests WHERE user_id = ? AND chat_id = ? AND request_id = ?`,
+        ).get(USER, chatId, requestId) as {
+          chat_id: string;
+          branch_chat_id: string;
+          edited_message_id: string;
+          target_message_id: string | null;
+        };
+        const outbox = getGenerationOutboxByRequest(USER, chatId, requestId);
+        expect(requestRow).toEqual({
+          chat_id: chatId,
+          branch_chat_id: result.payload.branchChatId,
+          edited_message_id: result.payload.editedMessageId,
+          target_message_id: result.payload.immediateAssistantId,
+        });
+        expect(outbox).toMatchObject({
+          chat_id: chatId,
+          branch_chat_id: result.payload.branchChatId,
+          edited_message_id: result.payload.editedMessageId,
+          target_message_id: result.payload.immediateAssistantId,
+        });
+
+        const persistedTargetIds = [
+          result.payload.editedMessageId,
+          result.payload.immediateAssistantId,
+          requestRow.edited_message_id,
+          requestRow.target_message_id,
+          outbox?.edited_message_id,
+          outbox?.target_message_id,
+        ].filter((id): id is string => typeof id === "string");
+        for (const targetId of persistedTargetIds) {
+          expect(getMessage(USER, targetId)?.chat_id).toBe(result.payload.branchChatId);
+        }
+
+        expect(result.payload.editedMessageId).not.toBe(selectedUserId);
+        expect(getMessage(USER, result.payload.editedMessageId)).toMatchObject({
+          chat_id: result.payload.branchChatId,
+          content: "Rewritten selected content",
+          revision: 2,
+        });
+        if (sourceAssistantId) {
+          expect(result.payload.immediateAssistantId).not.toBe(sourceAssistantId);
+          expect(result.payload.immediateAssistantId).toBeTruthy();
+          expect(outbox?.target_message_id).toBe(result.payload.immediateAssistantId);
+          expect(getMessage(USER, sourceAssistantId)).toMatchObject({
+            chat_id: chatId,
+            content: "Historical assistant",
+            revision: 9,
+          });
+        } else {
+          expect(result.payload.immediateAssistantId).toBeNull();
+          expect(outbox?.target_message_id).toBeNull();
+        }
+      }
+    }
+  });
+
+  test("missing required branch mappings roll back branch, request, outbox, and source changes", () => {
+    const cases = [
+      { missing: "edited-user", error: "Failed to copy edited message" },
+      { missing: "immediate-assistant", error: "Failed to copy immediate assistant message" },
+    ] as const;
+
+    for (const testCase of cases) {
+      const chatId = `missing-map-${testCase.missing}`;
+      const userMessageId = `${testCase.missing}-user`;
+      const assistantMessageId = testCase.missing === "edited-user"
+        ? `${testCase.missing}-assistant`
+        : testCase.missing;
+      const missingMessageId = testCase.missing === "edited-user" ? userMessageId : assistantMessageId;
+      const requestId = `${testCase.missing}-request`;
+      seedChat(chatId);
+      seedMessage(userMessageId, chatId, "Source user", { index: 0, isUser: true, revision: 4 });
+      seedMessage(assistantMessageId, chatId, "Source assistant", { index: 1, revision: 5 });
+
+      const sourceBefore = {
+        chat: getDb().query("SELECT * FROM chats WHERE id = ?").get(chatId),
+        messages: getDb().query("SELECT * FROM messages WHERE chat_id = ? ORDER BY index_in_chat ASC").all(chatId),
+        chatCount: getDb().query("SELECT COUNT(*) AS count FROM chats").get(),
+      };
+      const originalMapGet = Map.prototype.get;
+      Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+        if (key === missingMessageId) return undefined;
+        return originalMapGet.call(this, key);
+      } as typeof Map.prototype.get;
+
+      let result;
+      try {
+        result = editAndSend(USER, chatId, {
+          messageId: userMessageId,
+          content: "Attempted rewrite",
+          expectedVersion: 4,
+          requestId,
+          branchChatOnEditAndSend: true,
+        });
+      } finally {
+        Map.prototype.get = originalMapGet;
+      }
+
+      expect(result).toEqual({ status: "not_found", error: testCase.error });
+      expect({
+        chat: getDb().query("SELECT * FROM chats WHERE id = ?").get(chatId),
+        messages: getDb().query("SELECT * FROM messages WHERE chat_id = ? ORDER BY index_in_chat ASC").all(chatId),
+        chatCount: getDb().query("SELECT COUNT(*) AS count FROM chats").get(),
+      }).toEqual(sourceBefore);
+      expect(getDb().query(
+        "SELECT COUNT(*) AS count FROM edit_and_send_requests WHERE user_id = ? AND chat_id = ? AND request_id = ?",
+      ).get(USER, chatId, requestId)).toEqual({ count: 0 });
+      expect(getDb().query(
+        "SELECT COUNT(*) AS count FROM generation_outbox WHERE user_id = ? AND chat_id = ? AND request_id = ?",
+      ).get(USER, chatId, requestId)).toEqual({ count: 0 });
+    }
+  });
+
+  test("branch-disabled matrix stays in place and replays without creating a branch", () => {
+    for (const hasImmediateAssistant of [false, true]) {
+      const suffix = hasImmediateAssistant ? "historical" : "tail";
+      const chatId = `in-place-matrix-${suffix}`;
+      const userMessageId = `in-place-user-${suffix}`;
+      const assistantMessageId = hasImmediateAssistant ? `in-place-assistant-${suffix}` : null;
+      const requestId = `in-place-request-${suffix}`;
+      seedChat(chatId);
+      seedMessage("in-place-earlier-user-" + suffix, chatId, "Earlier user", { index: 0, isUser: true });
+      seedMessage("in-place-earlier-assistant-" + suffix, chatId, "Earlier assistant", { index: 1 });
+      seedMessage(userMessageId, chatId, "Old source", { index: 2, isUser: true, revision: 6 });
+      if (assistantMessageId) seedMessage(assistantMessageId, chatId, "Existing assistant", { index: 3, revision: 8 });
+      const chatCountBefore = getDb().query("SELECT COUNT(*) AS count FROM chats").get();
+
+      const input = {
+        messageId: userMessageId,
+        content: "New source",
+        expectedVersion: 6,
+        requestId,
+        branchChatOnEditAndSend: false,
+      } as const;
+      const result = editAndSend(USER, chatId, input);
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") continue;
+      expect(result.replayed).toBe(false);
+      expect(result.payload).toMatchObject({
+        branchChatId: chatId,
+        editedMessageId: userMessageId,
+        immediateAssistantId: assistantMessageId,
+        generationCursor: { chatId, requestId, mode: hasImmediateAssistant ? "swipe" : "normal" },
+      });
+      expect(getDb().query("SELECT COUNT(*) AS count FROM chats").get()).toEqual(chatCountBefore);
+      expect(getMessage(USER, userMessageId)).toMatchObject({ chat_id: chatId, content: "New source", revision: 7 });
+      if (assistantMessageId) {
+        expect(getMessage(USER, assistantMessageId)).toMatchObject({
+          chat_id: chatId,
+          content: "Existing assistant",
+          revision: 8,
+        });
+      }
+      expect(getGenerationOutboxByRequest(USER, chatId, requestId)).toMatchObject({
+        chat_id: chatId,
+        branch_chat_id: chatId,
+        edited_message_id: userMessageId,
+        target_message_id: assistantMessageId,
+      });
+
+      const replay = editAndSend(USER, chatId, input);
+      expect(replay).toEqual({ status: "ok", replayed: true, payload: result.payload });
+      expect(getDb().query(
+        "SELECT COUNT(*) AS count FROM generation_outbox WHERE user_id = ? AND chat_id = ? AND request_id = ?",
+      ).get(USER, chatId, requestId)).toEqual({ count: 1 });
+    }
   });
 });

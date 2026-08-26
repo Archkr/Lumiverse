@@ -42,7 +42,11 @@ function initDispatcherDb(): void {
     completed_at INTEGER,
     cancelled_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored last to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`);
   getDb().run(`CREATE TABLE messages (
     id TEXT PRIMARY KEY,

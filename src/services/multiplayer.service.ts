@@ -1384,19 +1384,13 @@ export function passTurn(roomId: string, participantId: string): void {
  * several profiles but no explicit default hard-fails with "No connection
  * profile found". Mirror the host's actual selection instead, with safe
  * fallbacks: their active profile → the DB default → any profile they own.
+ *
+ * That chain now lives in `connections.service.resolveActingConnectionId`, the
+ * single shared owner, so the room path and every other server-triggered
+ * generation (notably the Edit-and-Send outbox dispatch) cannot drift apart.
  */
 export function resolveHostConnectionId(userId: string): string | undefined {
-  const active = settingsSvc.getSetting(userId, "activeProfileId");
-  if (
-    typeof active?.value === "string" &&
-    active.value &&
-    connectionsSvc.getConnection(userId, active.value)
-  ) {
-    return active.value;
-  }
-  const def = connectionsSvc.getDefaultConnection(userId);
-  if (def) return def.id;
-  return connectionsSvc.listConnections(userId, { limit: 1, offset: 0 }).data[0]?.id;
+  return connectionsSvc.resolveActingConnectionId(userId);
 }
 
 async function triggerHostGeneration(room: Room): Promise<void> {

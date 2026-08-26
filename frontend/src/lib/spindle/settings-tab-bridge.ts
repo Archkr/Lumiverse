@@ -68,7 +68,11 @@ export interface SettingsTabRegistrationHandle {
 
 /** Public placement handle returned by ctx.ui.registerSettingsTab. */
 export interface SpindleSettingsTabHandle extends SettingsTabRegistrationHandle {
+  /** Stable public tab id required by newer spindle type declarations. */
+  readonly id: string
   readonly root: HTMLElement
+  /** Update supported tab metadata without replacing the registration. */
+  update(options?: Partial<SpindleSettingsTabOptions>): void
 }
 
 /** Return only extension roots owned by the currently active settings tab. */

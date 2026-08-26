@@ -5,6 +5,7 @@ import { act } from 'react'
 import type { Root, createRoot as CreateRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { QUICK_TOOLBAR_POINTER_HOLD_MS } from '@/components/quick-toolbar/quickToolbarDock'
+import { isExtensionComposerActionId } from './composerActionOwnership'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'https://lumiverse.test/',
@@ -235,5 +236,21 @@ describe('InputArea action bar live reorder', () => {
       'promptVariables',
     ])
     await act(async () => root2.unmount())
+  })
+
+  test('classifies persisted Suite actions without hiding native actions', () => {
+    expect(isExtensionComposerActionId('chat.customize-composer')).toBe(true)
+    expect(isExtensionComposerActionId('lumiverse_suite.connections_picker.open')).toBe(true)
+    expect(isExtensionComposerActionId('spindle:lumiverse_suite:open')).toBe(true)
+    expect(isExtensionComposerActionId('promptVariables')).toBe(false)
+    expect(isExtensionComposerActionId('continue')).toBe(false)
+  })
+
+  test('InputArea drops persisted Suite-owned extras while retaining native extras when Suite is off', async () => {
+    const source = await Bun.file(new URL('./InputArea.tsx', import.meta.url)).text()
+
+    expect(source).toContain("import { isExtensionComposerActionId } from './composerActionOwnership'")
+    expect(source).toMatch(/const extraId = fromComposerExtraId\(id\)[\s\S]*?if \(!hasLumiverseSuite && isExtensionComposerActionId\(extraId\)\) return null[\s\S]*?const action = qtActionById\.get\(extraId\)/)
+    expect(source).toContain('if (!hasLumiverseSuite && isExtensionComposerActionId(id)) return null')
   })
 })

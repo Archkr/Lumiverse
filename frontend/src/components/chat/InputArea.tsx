@@ -79,7 +79,7 @@ import {
 import { registerChatDockerActionOwners } from './chatDockerActionCatalog'
 import { acknowledgeConnectionProfileSelection } from '@/lib/uiProductivityDefaults'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
-import { readProductivityFlag } from '@/lib/spindle/productivity-feature-toggles'
+import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import { useQuickToolbarActions } from '@/components/quick-toolbar/useQuickToolbarActions'
 import InputAreaCustomizeModal, {
@@ -90,6 +90,7 @@ import InputAreaCustomizeModal, {
   type ComposerActionId,
 } from './InputAreaCustomizeModal'
 import { ComposerActionBarLive } from './InputAreaComposerBar'
+import { isExtensionComposerActionId } from './composerActionOwnership'
 
 interface InputAreaProps {
   chatId: string
@@ -289,8 +290,8 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
   const composerActionBar = useComposerActionBar()
   const { actionById: qtActionById } = useQuickToolbarActions()
   const messageSelectMode = useStore((s) => s.messageSelectMode)
-  const enableToolbarIconReorder = useStore((state) => readProductivityFlag(state, 'enableToolbarIconReorder'))
-  const showComposerCustomizeGear = useStore((state) => readProductivityFlag(state, 'showComposerCustomizeGear'))
+  const enableToolbarIconReorder = useStore((state) => readProductivityFeature(state, 'enableToolbarIconReorder'))
+  const showComposerCustomizeGear = useStore((state) => readProductivityFeature(state, 'showComposerCustomizeGear'))
   const hasLumiverseSuite = useStore((state) => hasEnabledFrontendExtension(state.extensions, 'lumiverse_suite'))
   const [openPopover, setOpenPopover] = useState<null | 'guides' | 'quick' | 'persona' | 'tools' | 'extras' | 'altFields' | 'addons' | 'databank' | 'groupMember' | 'connections'>(null)
   const openPopoverRef = useRef(openPopover)
@@ -3397,9 +3398,14 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
               reorder={composerActionBar.reorder}
               enableReorder={hasLumiverseSuite && enableToolbarIconReorder}
               renderUnit={(id) => {
-                if (isComposerActionId(id)) return composerActions[id]
-                if (fromComposerExtraId(id) === 'lumiverse_suite.connections_picker.open') return composerActions.connectionsPicker
-                const action = qtActionById.get(fromComposerExtraId(id))
+                if (isComposerActionId(id)) {
+                  if (!hasLumiverseSuite && isExtensionComposerActionId(id)) return null
+                  return composerActions[id]
+                }
+                const extraId = fromComposerExtraId(id)
+                if (!hasLumiverseSuite && isExtensionComposerActionId(extraId)) return null
+                if (extraId === 'lumiverse_suite.connections_picker.open') return composerActions.connectionsPicker
+                const action = qtActionById.get(extraId)
                 if (!action || action.hidden) return null
                 const Icon = action.icon
                 return (

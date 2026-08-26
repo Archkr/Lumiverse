@@ -558,12 +558,19 @@ export function createSettingsTabHandle(
 
     return {
       root,
+      id: metadata.tabId,
       registrationId,
       tabId: metadata.tabId,
       setTitle(title: string) {
         assertPlacementUsable(destroyed)
         registration?.setTitle(title)
         getStore().updateSettingsTab(registrationId, { title })
+      },
+      update(next: Partial<SpindleSettingsTabOptions> = {}) {
+        assertPlacementUsable(destroyed)
+        if (next.title !== undefined) {
+          this.setTitle(next.title)
+        }
       },
       activate() {
         assertPlacementUsable(destroyed)

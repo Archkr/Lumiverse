@@ -3350,6 +3350,7 @@ export interface EditAndSendInput {
   content: string;
   expectedVersion: number;
   requestId: string;
+  branchChatOnEditAndSend?: boolean;
 }
 
 export interface EditAndSendGenerationCursor {
@@ -3378,6 +3379,7 @@ function editAndSendFingerprint(input: EditAndSendInput): string {
       messageId: input.messageId,
       content: input.content,
       expectedVersion: input.expectedVersion,
+      branchChatOnEditAndSend: input.branchChatOnEditAndSend ?? true,
     }))
     .digest("hex");
 }
@@ -3413,6 +3415,8 @@ function messageRevision(row: { revision?: unknown }): number {
   return typeof row.revision === "number" && Number.isInteger(row.revision) ? row.revision : 1;
 }
 
+class EditAndSendBranchMappingError extends Error {}
+
 export function editAndSend(
   userId: string,
   chatId: string,
@@ -3433,6 +3437,7 @@ export function editAndSend(
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     return { status: "bad_request", error: "expectedVersion must be a positive integer" };
   }
+  const branchChatOnEditAndSend = input.branchChatOnEditAndSend ?? true;
 
   const fingerprint = editAndSendFingerprint(input);
   const now = Date.now();
@@ -3440,10 +3445,11 @@ export function editAndSend(
   // tracked by control-flow analysis on the bare `let`, which collapsed the
   // post-transaction guard to `never`.
   const branchRef: { current: CreatedChatBranch | null } = { current: null };
-  let created: CreatedChatBranch | null = null;
   let editedCopy: Message | null = null;
 
-  const outcome = withImmediateTransaction((): EditAndSendResult => {
+  let outcome: EditAndSendResult;
+  try {
+    outcome = withImmediateTransaction((): EditAndSendResult => {
     const db = getDb();
     const existingRequest = db.query(
       `SELECT request_fingerprint, response FROM edit_and_send_requests
@@ -3476,13 +3482,35 @@ export function editAndSend(
     const branchAt = subsequentAssistant ?? source;
     const mode: EditAndSendMode = subsequentAssistant ? "swipe" : "normal";
 
-    created = createChatBranchRows(userId, chat, branchAt);
-    branchRef.current = created;
-    const editedMessageId = created.idMap.get(source.id);
-    if (!editedMessageId) return { status: "not_found", error: "Failed to copy edited message" };
-    const targetMessageId = subsequentAssistant
-      ? created.idMap.get(subsequentAssistant.id) ?? null
-      : null;
+    let targetChatId: string;
+    let editedMessageId: string;
+    let targetMessageId: string | null;
+
+    if (branchChatOnEditAndSend) {
+      const createdBranch = createChatBranchRows(userId, chat, branchAt);
+      branchRef.current = createdBranch;
+
+      const copiedUserMessageId = createdBranch.idMap.get(source.id);
+      if (!copiedUserMessageId) {
+        throw new EditAndSendBranchMappingError("Failed to copy edited message");
+      }
+
+      targetChatId = createdBranch.newChatId;
+      editedMessageId = copiedUserMessageId;
+      if (subsequentAssistant) {
+        const copiedAssistantMessageId = createdBranch.idMap.get(subsequentAssistant.id);
+        if (!copiedAssistantMessageId) {
+          throw new EditAndSendBranchMappingError("Failed to copy immediate assistant message");
+        }
+        targetMessageId = copiedAssistantMessageId;
+      } else {
+        targetMessageId = null;
+      }
+    } else {
+      targetChatId = chatId;
+      editedMessageId = source.id;
+      targetMessageId = subsequentAssistant?.id ?? null;
+    }
     const targetSwipeIndex = subsequentAssistant ? subsequentAssistant.swipes.length : null;
 
     const copied = getMessage(userId, editedMessageId);
@@ -3509,23 +3537,18 @@ export function editAndSend(
       swipeSlot,
       JSON.stringify(nextDates),
       editedMessageId,
-      created.newChatId,
+      targetChatId,
     );
-    if (hasRevision) {
-      db.query(
-        `UPDATE messages SET revision = revision + 1 WHERE id = ? AND chat_id = ? AND revision = ?`,
-      ).run(source.id, chatId, input.expectedVersion);
-    }
 
     editedCopy = getMessage(userId, editedMessageId);
     const generationId = crypto.randomUUID();
     const payload: EditAndSendSuccess = {
-      branchChatId: created.newChatId,
+      branchChatId: targetChatId,
       editedMessageId,
       immediateAssistantId: targetMessageId,
       generationCursor: {
         generationId,
-        chatId: created.newChatId,
+        chatId: targetChatId,
         requestId: input.requestId,
         mode,
       },
@@ -3546,7 +3569,7 @@ export function editAndSend(
       chatId,
       input.requestId,
       fingerprint,
-      created.newChatId,
+      targetChatId,
       editedMessageId,
       targetMessageId,
       targetSwipeIndex,
@@ -3556,18 +3579,47 @@ export function editAndSend(
       now,
       now,
     );
+    // Resolve the connection ONCE, here, at COMMIT time, and store it on the
+    // row. The outbox is durable but its dispatch is not a single event: the
+    // same row can be dispatched from the POST handler, again from the periodic
+    // retry tick after a backoff, and again from startup crash recovery, hours
+    // apart. Re-reading `activeProfileId` / the opt-in / the chat pin on each of
+    // those ticks means switching the active profile retargets a request the
+    // user already committed. Recording the answer makes it immutable for the
+    // life of the request.
+    //
+    // Note the replay short-circuit at the top of this transaction: an existing
+    // `edit_and_send_requests` row returns the ORIGINAL stored payload and never
+    // reaches this INSERT, so the value recorded on the FIRST commit is
+    // automatically the one honored by every subsequent replay of the same
+    // requestId. There is no second resolution to keep in sync.
+    //
+    // Lazily required rather than statically imported (existing precedent in
+    // this file for `resolveConnection`): `chats.service` carries no static
+    // connections/settings import today, and it must never gain a static import
+    // of `generate.service`, which imports this module — that would be a cycle.
+    // `resolveEditAndSendConnectionId` never throws and returns `undefined` when
+    // nothing resolves (including in fixtures with no `settings` /
+    // `connection_profiles` tables), so a connection lookup can never fail the
+    // user's edit; a NULL column simply means "fall back to the legacy
+    // resolve-at-dispatch ladder", exactly like pre-migration rows.
+    const { resolveEditAndSendConnectionId } = require("./connections.service");
+    const committedConnectionId: string | undefined = resolveEditAndSendConnectionId(
+      userId,
+      chat.metadata,
+    );
     db.query(
       `INSERT INTO generation_outbox (
         id, request_id, user_id, chat_id, branch_chat_id, edited_message_id,
         target_message_id, target_swipe_index, expected_version, generation_id,
-        mode, status, attempt_count, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+        mode, status, attempt_count, created_at, updated_at, connection_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
     ).run(
       crypto.randomUUID(),
       input.requestId,
       userId,
       chatId,
-      created.newChatId,
+      targetChatId,
       editedMessageId,
       targetMessageId,
       targetSwipeIndex,
@@ -3576,16 +3628,24 @@ export function editAndSend(
       mode,
       now,
       now,
+      committedConnectionId ?? null,
     );
 
-    return { status: "ok", replayed: false, payload };
-  });
+      return { status: "ok", replayed: false, payload };
+    });
+  } catch (error) {
+    if (error instanceof EditAndSendBranchMappingError) {
+      return { status: "not_found", error: error.message };
+    }
+    throw error;
+  }
 
-  if (outcome.status === "ok" && !outcome.replayed && branchRef.current) {
-    emitCreatedChatBranch(userId, branchRef.current);
+  if (outcome.status === "ok" && !outcome.replayed) {
+    if (branchRef.current) emitCreatedChatBranch(userId, branchRef.current);
     if (editedCopy) {
-      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: branchRef.current.newChatId, message: editedCopy }, userId);
-      try { invalidateChatMemoryCache(branchRef.current.newChatId); } catch { /* optional in tests */ }
+      const targetChatId = branchRef.current?.newChatId ?? chatId;
+      eventBus.emit(EventType.MESSAGE_EDITED, { chatId: targetChatId, message: editedCopy }, userId);
+      try { invalidateChatMemoryCache(targetChatId); } catch { /* optional in tests */ }
     }
   }
 
