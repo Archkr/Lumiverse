@@ -1,5 +1,5 @@
 -- Lumiverse Database Baseline Schema
--- Generated from migrations 001 through 106.
+-- Generated from migrations 001 through 112.
 -- Fresh databases bootstrap from this file instead of replaying the full
 -- migration stack. All squashed migration names are recorded in _migrations
 -- so the runner treats them as already applied.
@@ -1037,6 +1037,7 @@ CREATE TABLE weaver_sessions (
   -- Output (set on finalize)
   character_id TEXT,
   launch_chat_id TEXT, interview_started_at INTEGER, interview_completed_at INTEGER, build_type TEXT NOT NULL DEFAULT 'character', narration_mode TEXT, persona_plan TEXT,
+  taste_profile TEXT NOT NULL DEFAULT '{}',
 
   FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE,
   FOREIGN KEY (persona_id) REFERENCES personas(id) ON DELETE SET NULL,
