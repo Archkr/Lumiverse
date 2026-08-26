@@ -9,6 +9,18 @@ import type { SettingsSlice } from '@/types/store'
  */
 export type ChatWidthMode = SettingsSlice['chatWidthMode'] // 'full' | 'comfortable' | 'compact' | 'custom'
 
+const CHAT_WIDTH_MODE_VALUES = Object.freeze({
+  full: true,
+  comfortable: true,
+  compact: true,
+  custom: true,
+} satisfies Record<ChatWidthMode, true>)
+
+function isChatWidthMode(value: unknown): value is ChatWidthMode {
+  return typeof value === 'string'
+    && Object.prototype.hasOwnProperty.call(CHAT_WIDTH_MODE_VALUES, value)
+}
+
 /** Fixed-width presets, in layout px. One entry per mode that has a literal width; keys are unique. */
 export const CHAT_CONTENT_WIDTH_PRESETS = Object.freeze({
   comfortable: 1000,
@@ -25,6 +37,11 @@ export const CHAT_CONTENT_WIDTH_PRESETS = Object.freeze({
  * corrupt settings row degrades to `full` behavior instead of a wrong margin.
  */
 export function resolveChatContentWidthPx(mode: ChatWidthMode, customWidth: number): number | null {
+  // Settings storage is opaque JSON and primitive rows are hydrated without runtime
+  // validation. Keep an invalid or forward-version mode from throwing during ChatView's
+  // render; the typed switch below remains exhaustive for modes this client understands.
+  if (!isChatWidthMode(mode)) return null
+
   switch (mode) {
     case 'full':
       return null

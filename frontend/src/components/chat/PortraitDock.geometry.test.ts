@@ -308,6 +308,16 @@ describe('chat content width authority', () => {
     expect(innerStyle).toContain('undefined')
     expect(innerStyle).toContain("'--lumiverse-chat-content-width': `${width}px`")
   })
+
+  test('treats a runtime-invalid persisted width mode as unconstrained', () => {
+    const invalidModes: unknown[] = ['future-mode', '', null, 1, { mode: 'compact' }]
+
+    for (const invalidMode of invalidModes) {
+      const mode = invalidMode as ChatWidthMode
+      expect(resolveChatContentWidthPx(mode, 1400)).toBeNull()
+      expect(resolveChatContentWidthForReclaim(mode, 1400, 1920)).toBe(1920)
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2295,6 +2305,10 @@ describe('portrait dock hydration convergence', () => {
     expect(component.match(/setLayoutReclaim\(0\)/g) ?? []).toHaveLength(1)
     expect(effectSource).toMatch(/if \(mobile \|\| isFloating\) \{\s*setLayoutReclaim\(0\)\s*return\s*\}/)
 
+    // A component that currently renders no dock has no node whose ancestors can resolve.
+    // Its ref change is already a dependency, so it must wait without observing the document.
+    expect(effectSource).toContain('if (!dockElement) return')
+
     // 2. `measure` holds rather than writing when the body box is not laid out yet, and the
     //    hold precedes the write.
     expect(effectSource).toContain('toLayoutBox(targets.bodyElement.getBoundingClientRect()).width')
@@ -2330,7 +2344,7 @@ describe('portrait dock hydration convergence', () => {
     // 4. The attach-failure branch is the retry path Requirement 1.5 needs: a MutationObserver
     //    on the owner document's body plus one animation frame, disconnecting on success.
     expect(effectSource).toContain('if (!attach()) {')
-    expect(effectSource).toContain("const ownerDocument = dockElement?.ownerDocument ?? document")
+    expect(effectSource).toContain('const ownerDocument = dockElement.ownerDocument')
     expect(effectSource).toContain('new MutationObserver(retry)')
     expect(effectSource).toContain('mutationObserver.observe(ownerDocument.body, { childList: true, subtree: true })')
     expect(effectSource).toContain('frame = requestAnimationFrame(retry)')
@@ -2387,13 +2401,16 @@ describe('portrait dock hydration convergence', () => {
     expect(effectSource).not.toContain('setTimeout')
     expect(effectSource).not.toContain('setInterval')
 
-    //    The `mobile || isFloating` early return precedes every registration site, so that run
-    //    registers NOTHING at all — which is what Property 11 asserts by holding the counters
-    //    fixed across a flip into that branch.
+    //    The floating/mobile and missing-dock early returns precede every registration site, so
+    //    those runs register NOTHING at all. A ref commit re-runs the latter through the existing
+    //    `dockElement` dependency.
     const earlyReturnIndex = effectSource.search(/if \(mobile \|\| isFloating\) \{/)
+    const missingDockReturnIndex = effectSource.indexOf('if (!dockElement) return')
     expect(earlyReturnIndex).toBeGreaterThanOrEqual(0)
+    expect(missingDockReturnIndex).toBeGreaterThan(earlyReturnIndex)
     for (const registrationSite of ['new ResizeObserver(', 'new MutationObserver(', 'requestAnimationFrame(']) {
       expect(effectSource.indexOf(registrationSite)).toBeGreaterThan(earlyReturnIndex)
+      expect(effectSource.indexOf(registrationSite)).toBeGreaterThan(missingDockReturnIndex)
     }
 
     //    One cleanup closure for the whole effect, and it nulls both observer bindings, so no

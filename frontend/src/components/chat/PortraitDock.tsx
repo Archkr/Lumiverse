@@ -636,6 +636,11 @@ export default function PortraitDock({ mobile = false, extensionOwned = false }:
       return
     }
 
+    // The ref state change re-runs this effect as soon as the dock is committed. Until
+    // then there is no node whose missing ancestors can become resolvable, so observing the
+    // whole document would only retry forever while the dock is closed or unavailable.
+    if (!dockElement) return
+
     let frame = 0
     let resizeObserver: ResizeObserver | null = null
     let mutationObserver: MutationObserver | null = null
@@ -690,7 +695,7 @@ export default function PortraitDock({ mobile = false, extensionOwned = false }:
         if (frame) cancelAnimationFrame(frame)
         frame = 0
       }
-      const ownerDocument = dockElement?.ownerDocument ?? document
+      const ownerDocument = dockElement.ownerDocument
       mutationObserver = new MutationObserver(retry)
       mutationObserver.observe(ownerDocument.body, { childList: true, subtree: true })
       frame = requestAnimationFrame(retry)
