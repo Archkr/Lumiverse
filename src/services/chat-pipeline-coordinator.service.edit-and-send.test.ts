@@ -128,7 +128,11 @@ function initEditAndSendTestDb(): void {
     completed_at INTEGER,
     cancelled_at INTEGER,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored last to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`);
 }
 
@@ -347,6 +351,11 @@ describe("chat pipeline coordinator edit-and-send", () => {
       cancelled_at: null,
       created_at: expect.any(Number),
       updated_at: expect.any(Number),
+      // This harness creates no `settings` / `connection_profiles` tables, so
+      // `resolveEditAndSendConnectionId` resolves nothing and the committed
+      // identity is NULL — the documented "fall back to the legacy
+      // resolve-at-dispatch ladder" value.
+      connection_id: null,
     });
     expect(getGenerationOutboxByRequest(USER, result.payload.branchChatId, "req-swipe")).toBeNull();
 

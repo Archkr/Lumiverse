@@ -411,6 +411,51 @@ export function resolveActingConnectionId(userId: string): string | undefined {
     ?? listConnections(userId, { limit: 1, offset: 0 }).data[0]?.id;
 }
 
+/**
+ * The connection an Edit-and-Send request is COMMITTED against, resolved once at
+ * enqueue time and then persisted on `generation_outbox.connection_id`.
+ *
+ * This exists because connection selection used to be re-read at dispatch time.
+ * The outbox is durable and its dispatch is not: the same row can be dispatched
+ * from the POST handler, again from the periodic retry tick after a backoff, and
+ * again from startup crash recovery — potentially hours apart. Re-reading
+ * `activeProfileId` (or the chat's `connection_profile_id` pin) on each of those
+ * ticks means switching profiles retargets a request the user already committed.
+ * Resolving here and storing the answer makes the choice immutable for the life
+ * of the request, which is the whole point of an outbox.
+ *
+ * Mirrors `generate.service.resolveChatGenerationConnection` rung for rung:
+ *   1. the `editAndSendAlwaysUseActiveConnection` opt-in → STRICT active profile
+ *   2. a live chat-scoped `connection_profile_id` pin
+ *   3. the acting chain (active → `is_default` → any owned profile)
+ *
+ * Returns `undefined` when nothing resolves — including when the `settings` or
+ * `connection_profiles` tables are absent, which is the case in several
+ * edit-and-send test fixtures that build a minimal schema by hand. A `NULL`
+ * column is a first-class value here: the dispatcher falls back to the existing
+ * resolve-at-dispatch ladder, which is also what rows committed before this
+ * column existed must do. Never throws: a connection lookup failure must not be
+ * able to fail the user's edit.
+ */
+export function resolveEditAndSendConnectionId(
+  userId: string,
+  chatMetadata: Record<string, any> | null | undefined,
+): string | undefined {
+  try {
+    if (settingsSvc.readEditAndSendAlwaysUseActiveConnection(userId)) {
+      const activeId = resolveActiveConnectionId(userId);
+      if (activeId) return activeId;
+    }
+    const boundId = typeof chatMetadata?.connection_profile_id === "string"
+      ? chatMetadata.connection_profile_id.trim()
+      : "";
+    if (boundId && getConnection(userId, boundId)) return boundId;
+    return resolveActingConnectionId(userId);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function createConnection(userId: string, input: CreateConnectionProfileInput): Promise<ConnectionProfile> {
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);

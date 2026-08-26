@@ -211,17 +211,79 @@ interface GenerateInput {
  *
  * `opts.preferActiveConnection` is the `editAndSendAlwaysUseActiveConnection`
  * opt-in, and it is set only for Edit-and-Send dispatches. See below.
+ *
+ * `opts.authoritativeConnectionId` is the connection an Edit-and-Send request was
+ * COMMITTED against, read off `generation_outbox.connection_id`. It is the FIRST
+ * rung, ahead of the opt-in and ahead of the chat pin, because the whole point of
+ * recording it is that no live state re-read may retarget a request the user
+ * already committed. See the rung itself.
  */
 function resolveChatGenerationConnection(
   userId: string,
   metadata: Record<string, any> | null | undefined,
   requestedConnectionId?: string,
-  opts?: { preferActiveConnection?: boolean },
+  opts?: { preferActiveConnection?: boolean; authoritativeConnectionId?: string },
 ): ConnectionProfile {
   // An empty/whitespace-only id already fell through to the default profile
   // today; normalizing here keeps that outcome while letting the acting
   // fallback below see "no id was supplied".
   const requestedId = requestedConnectionId?.trim() || undefined;
+
+  // Rung 0 — the durably COMMITTED connection. Set only for Edit-and-Send
+  // dispatches, and only for rows that actually recorded one.
+  //
+  // This rung exists because an outbox row's dispatch is not a single event: the
+  // same row is dispatched from the POST handler, again from the periodic retry
+  // tick after a backoff, and again from startup crash recovery, potentially
+  // hours apart. Every rung below reads LIVE state (`activeProfileId`, the
+  // opt-in, the chat's `connection_profile_id` pin), so without this rung
+  // switching the active profile between those ticks silently retargets a
+  // request the user already committed. Ahead of `preferActiveConnection` on
+  // purpose: the recorded value ALREADY baked in the opt-in's answer at commit
+  // time (see `connections.service.resolveEditAndSendConnectionId`, which
+  // mirrors this ladder rung for rung), so consulting the opt-in again could
+  // only re-introduce the drift.
+  //
+  // Returning from here bypasses the `connection_model` metadata override at the
+  // bottom of this function, so that override is re-applied inline — but ONLY
+  // when the committed connection IS the chat's live pin. That condition is
+  // exactly the existing `boundConnection && metadata.connection_model` gate, so
+  // a pinned chat keeps its pinned model bit-for-bit. When the committed id came
+  // from the active-profile opt-in instead (i.e. it is NOT the pinned profile),
+  // the override is dropped, matching the reasoning already documented for the
+  // active-profile rung: a pinned model belongs to the pinned profile and is
+  // very often not a model the other endpoint serves, so carrying it over would
+  // produce a second, subtler failure of exactly the kind this fix removes.
+  // Blanket-dropping the override on this rung was the rejected alternative; it
+  // silently changed the MODEL of every pinned chat, which is a behaviour change
+  // this finding never asked for (and which
+  // `edit-and-send-active-connection-optin.integration.test.ts`'s
+  // "binding live, activeProfileId deleted" case pins).
+  //
+  // MISS POLICY: if the recorded id no longer resolves — the profile was deleted
+  // between commit and dispatch — FALL THROUGH to the unchanged ladder rather
+  // than throwing. A deleted profile is unrecoverable: no amount of retrying
+  // brings it back, so throwing would only strand the user's committed edit with
+  // no output at all, which is strictly worse than running it on their current
+  // selection. This mirrors the precedent already documented on this function
+  // for the chat-scoped binding ("If the bound profile was deleted, fall back ...
+  // so an old metadata reference cannot make the chat unusable"). The rejected
+  // alternative was failing the row terminally; that trades a rare wrong-profile
+  // dispatch for a guaranteed lost request.
+  const authoritativeId = opts?.authoritativeConnectionId?.trim() || undefined;
+  if (authoritativeId) {
+    const committed = connectionsSvc.resolveConnection(userId, authoritativeId);
+    if (committed) {
+      const pinnedId = typeof metadata?.connection_profile_id === "string"
+        ? metadata.connection_profile_id.trim()
+        : "";
+      const committedIsPinned = pinnedId !== "" && pinnedId === committed.id;
+      const pinnedModel = committedIsPinned && typeof metadata?.connection_model === "string"
+        ? metadata.connection_model.trim()
+        : "";
+      return pinnedModel ? { ...committed, model: pinnedModel } : committed;
+    }
+  }
 
   // The opt-in: the user's STRICT active profile wins over a live chat-scoped
   // binding, for Edit-and-Send only, and only when no explicit id was supplied
@@ -276,30 +338,26 @@ function resolveChatGenerationConnection(
 }
 
 /**
- * The `editAndSendAlwaysUseActiveConnection` Productivity setting, read from the
- * persisted per-user `quickToolbarSettings` blob at DISPATCH time — the same way
- * `activeProfileId`, `activePersonaId`, and `activeLoomPresetId` are already
- * read — so the decision is identical whether the Edit-and-Send dispatch runs
- * in the POST handler, on a periodic retry tick, or during startup recovery.
- * Nothing is captured at request time, so nothing can be dropped on the two
- * paths that lack a user-facing error surface, and no `generation_outbox`
- * column, schema, baseline, or migration change is needed.
+ * The `editAndSendAlwaysUseActiveConnection` Productivity setting, used on the
+ * LEGACY dispatch path — i.e. for outbox rows that recorded no
+ * `connection_id`, either because they were committed before
+ * `migrations/111_generation_outbox_connection_id.sql` or because resolution
+ * came up empty at commit time. Rows that DID record one never reach this read:
+ * the recorded value already baked the opt-in's answer in at commit time.
  *
- * Strict `=== true`: an absent row, an absent key, `null`, `undefined`, a
- * non-object or array value, an explicit `false`, and the coercible `"true"` /
- * `0` all mean OFF. No truthiness coercion anywhere, so an explicit `false`
- * cannot be flipped. Frontend defaults are deliberately NOT merged server-side
- * (`DEFAULT_QUICK_TOOLBAR_SETTINGS` is a frontend module) — a default merge is
- * the one way a wrong value could be reintroduced. Only the CANONICAL
- * `quickToolbarSettings` row is read; the namespaced compatibility mirror
- * `spindle:lumiverse_suite:quick_toolbar:quickToolbarSettings` is never
- * authoritative.
+ * The predicate itself now lives in `settings.service`, which owns it for BOTH
+ * ends of the flow — `chats.service.editAndSend` (via
+ * `connections.service.resolveEditAndSendConnectionId`) at commit time and this
+ * module at dispatch time. The rejected alternative was keeping a second copy
+ * here: two independent strict-read implementations for one setting is exactly
+ * how the commit-time and dispatch-time answers would drift, which is the class
+ * of bug this whole change exists to remove. This local alias is retained only
+ * so the `__test__` seam below keeps its existing name and existing callers
+ * (`connections.service.acting-connection.test.ts`,
+ * `edit-and-send-active-connection-optin.property.test.ts`).
  */
-function readEditAndSendAlwaysUseActiveConnection(userId: string): boolean {
-  const value = settingsSvc.getSetting(userId, "quickToolbarSettings")?.value;
-  return !!value && typeof value === "object" && !Array.isArray(value)
-    && (value as Record<string, unknown>).editAndSendAlwaysUseActiveConnection === true;
-}
+const readEditAndSendAlwaysUseActiveConnection = (userId: string): boolean =>
+  settingsSvc.readEditAndSendAlwaysUseActiveConnection(userId);
 
 /** Lifecycle context passed from startGeneration → runGeneration */
 interface GenerationLifecycle {
@@ -1993,6 +2051,19 @@ function reusableStagedSwipeIndex(message: Message): number | undefined {
  */
 export interface StartGenerationOptions {
   origin?: "edit_and_send";
+  /**
+   * The connection profile the Edit-and-Send request was COMMITTED against, read
+   * off `generation_outbox.connection_id` by the dispatcher. Authoritative: it is
+   * the first rung of `resolveChatGenerationConnection`, ahead of the
+   * active-profile opt-in and ahead of the chat's `connection_profile_id` pin, so
+   * no live-state re-read on a retry tick or during crash recovery can retarget a
+   * request the user already committed.
+   *
+   * In this out-of-band bag rather than on `GenerateInput` for the same security
+   * reason as `origin` (see above): an in-band field would be spread out of the
+   * request body by `chatRoute` and therefore forgeable by any client.
+   */
+  connectionId?: string;
 }
 
 export async function startGeneration(
@@ -2146,10 +2217,20 @@ export async function startGeneration(
       chat?.metadata,
       input.connection_id,
       {
+        // The connection this request was COMMITTED against, forwarded from
+        // `generation_outbox.connection_id` by the dispatcher. Gated on the
+        // origin for the same reason as below — and because an interactive
+        // caller must not be able to express it at all. `undefined` for
+        // pre-migration rows and for commits where nothing resolved, which then
+        // take the unchanged ladder.
+        authoritativeConnectionId: options?.origin === "edit_and_send"
+          ? options.connectionId
+          : undefined,
         // Short-circuited on the origin: interactive paths never reach the
         // settings read, so they issue ZERO extra queries (and
         // `generate.service.edit-and-send.test.ts` runs startGeneration with no
-        // database at all).
+        // database at all). Kept for the legacy path only: a row that recorded a
+        // connection returns from rung 0 before this value is ever consulted.
         preferActiveConnection: options?.origin === "edit_and_send"
           && readEditAndSendAlwaysUseActiveConnection(input.userId),
       },

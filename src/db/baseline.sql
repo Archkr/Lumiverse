@@ -345,7 +345,13 @@ CREATE TABLE generation_outbox (
   completed_at INTEGER,
   cancelled_at INTEGER,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  -- Added by migrations/111_generation_outbox_connection_id.sql. MUST stay the
+  -- LAST column: `ALTER TABLE ADD COLUMN` appends at the highest `cid`, and
+  -- `src/db/migrate.baseline-sync.test.ts` compares raw `PRAGMA table_info`
+  -- output (cid included) between a fresh-from-baseline database and a fully
+  -- migrated one.
+  connection_id TEXT
 );
 
 CREATE TABLE global_addons (

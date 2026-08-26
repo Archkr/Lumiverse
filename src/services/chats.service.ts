@@ -3579,12 +3579,41 @@ export function editAndSend(
       now,
       now,
     );
+    // Resolve the connection ONCE, here, at COMMIT time, and store it on the
+    // row. The outbox is durable but its dispatch is not a single event: the
+    // same row can be dispatched from the POST handler, again from the periodic
+    // retry tick after a backoff, and again from startup crash recovery, hours
+    // apart. Re-reading `activeProfileId` / the opt-in / the chat pin on each of
+    // those ticks means switching the active profile retargets a request the
+    // user already committed. Recording the answer makes it immutable for the
+    // life of the request.
+    //
+    // Note the replay short-circuit at the top of this transaction: an existing
+    // `edit_and_send_requests` row returns the ORIGINAL stored payload and never
+    // reaches this INSERT, so the value recorded on the FIRST commit is
+    // automatically the one honored by every subsequent replay of the same
+    // requestId. There is no second resolution to keep in sync.
+    //
+    // Lazily required rather than statically imported (existing precedent in
+    // this file for `resolveConnection`): `chats.service` carries no static
+    // connections/settings import today, and it must never gain a static import
+    // of `generate.service`, which imports this module — that would be a cycle.
+    // `resolveEditAndSendConnectionId` never throws and returns `undefined` when
+    // nothing resolves (including in fixtures with no `settings` /
+    // `connection_profiles` tables), so a connection lookup can never fail the
+    // user's edit; a NULL column simply means "fall back to the legacy
+    // resolve-at-dispatch ladder", exactly like pre-migration rows.
+    const { resolveEditAndSendConnectionId } = require("./connections.service");
+    const committedConnectionId: string | undefined = resolveEditAndSendConnectionId(
+      userId,
+      chat.metadata,
+    );
     db.query(
       `INSERT INTO generation_outbox (
         id, request_id, user_id, chat_id, branch_chat_id, edited_message_id,
         target_message_id, target_swipe_index, expected_version, generation_id,
-        mode, status, attempt_count, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+        mode, status, attempt_count, created_at, updated_at, connection_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
     ).run(
       crypto.randomUUID(),
       input.requestId,
@@ -3599,6 +3628,7 @@ export function editAndSend(
       mode,
       now,
       now,
+      committedConnectionId ?? null,
     );
 
       return { status: "ok", replayed: false, payload };

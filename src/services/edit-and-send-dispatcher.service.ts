@@ -38,6 +38,14 @@ export interface GenerationOutboxRow {
   cancelled_at: number | null;
   created_at: number;
   updated_at: number;
+  /**
+   * The connection profile this request was COMMITTED against, resolved once by
+   * `chats.service.editAndSend` and never re-resolved. `null` for rows written
+   * before `migrations/111_generation_outbox_connection_id.sql`, and for the
+   * rare commit where nothing resolved; both cases fall back to the unchanged
+   * resolve-at-dispatch ladder in `generate.service`.
+   */
+  connection_id: string | null;
 }
 
 export interface StartEditAndSendGenerationInput {
@@ -65,6 +73,16 @@ export interface StartEditAndSendGenerationInput {
  */
 export interface StartGenerationOptions {
   origin: "edit_and_send";
+  /**
+   * The connection recorded on the outbox row at commit time, forwarded verbatim
+   * and authoritatively. Travels in this out-of-band options bag for the exact
+   * same reason `origin` does: an in-band field on
+   * `StartEditAndSendGenerationInput` would be spread out of the request body by
+   * `chatRoute`, letting any client forge a connection override on
+   * `POST /generate`. `undefined` for pre-migration rows, which then take the
+   * unchanged legacy ladder.
+   */
+  connectionId?: string;
 }
 
 export type StartEditAndSendGenerationFn = (
@@ -152,6 +170,7 @@ function rowToOutbox(row: any): GenerationOutboxRow {
     cancelled_at: row.cancelled_at ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    connection_id: row.connection_id ?? null,
   };
 }
 
@@ -256,12 +275,21 @@ export function claimNextEditAndSendOutbox(now = nowMs()): GenerationOutboxRow |
   });
 }
 
-const EDIT_AND_SEND_ORIGIN: StartGenerationOptions = { origin: "edit_and_send" };
-
-async function invokeStartGeneration(input: StartEditAndSendGenerationInput) {
-  if (startGenerationFn) return startGenerationFn(input, EDIT_AND_SEND_ORIGIN);
+/**
+ * `options` used to be a shared module-level constant (`EDIT_AND_SEND_ORIGIN`)
+ * because `origin` was its only field and was the same for every row. The
+ * committed connection is PER-ROW, so the bag is now built per dispatch by
+ * `dispatchClaimedEditAndSendOutbox` and threaded through here. A mutable shared
+ * object was the rejected alternative: two concurrent dispatches (the retry tick
+ * overlapping a POST) would stomp each other's connection id.
+ */
+async function invokeStartGeneration(
+  input: StartEditAndSendGenerationInput,
+  options: StartGenerationOptions,
+) {
+  if (startGenerationFn) return startGenerationFn(input, options);
   const { startGeneration } = await import("./generate.service");
-  return startGeneration(input, EDIT_AND_SEND_ORIGIN);
+  return startGeneration(input, options);
 }
 
 function invokeStopGeneration(userId: string, generationId: string): boolean {
@@ -367,8 +395,22 @@ export async function dispatchClaimedEditAndSendOutbox(row: GenerationOutboxRow)
       : {}),
   };
 
+  // Strictly out of band. `connection_id` must NOT become a field on `input`:
+  // `chatRoute` in `src/routes/generate.routes.ts` builds its service input as
+  // `handler({ ...body, userId, signal, ...extras })`, so an in-band field is
+  // client-settable on `POST /generate`, `/regenerate` and `/continue`, which
+  // would hand a forged interactive send an arbitrary connection override.
+  // `chatRoute` calls `handler(inputObject)` with exactly ONE argument, so a
+  // second positional argument is structurally unreachable from body spreading.
+  // `??  undefined` rather than passing `null`: `StartGenerationOptions.connectionId`
+  // is optional, and "absent" is what the legacy ladder keys off.
+  const options: StartGenerationOptions = {
+    origin: "edit_and_send",
+    connectionId: row.connection_id ?? undefined,
+  };
+
   try {
-    const started = await invokeStartGeneration(input);
+    const started = await invokeStartGeneration(input, options);
     const now = nowMs();
     withImmediateTransaction(() => {
       const current = getGenerationOutboxById(row.id);

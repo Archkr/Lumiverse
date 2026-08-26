@@ -55,7 +55,11 @@ function initTestDb(): void {
     status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'running', 'completed', 'failed', 'cancelled')),
     lease_owner TEXT, lease_expires_at INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER,
     last_error_code TEXT, terminal_reason TEXT, dispatched_at INTEGER, completed_at INTEGER, cancelled_at INTEGER,
-    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    -- migrations/111_generation_outbox_connection_id.sql. Hand-written schema
+    -- (no migrations run here), so the column is mirrored LAST to match the
+    -- ALTER TABLE append order.
+    connection_id TEXT
   )`);
   db.query("INSERT INTO characters (id, user_id, name) VALUES (?, ?, ?)").run("char-alpha", USER_ALPHA, "Alpha");
   db.query("INSERT INTO characters (id, user_id, name) VALUES (?, ?, ?)").run("char-beta", USER_BETA, "Beta");
@@ -196,6 +200,13 @@ describe("Property 2 preservation: branch-disabled Edit-and-Send", () => {
         cancelled_at: null,
         created_at: expect.any(Number),
         updated_at: expect.any(Number),
+        // This fixture deliberately builds no `settings` / `connection_profiles`
+        // tables, so `resolveEditAndSendConnectionId` returns `undefined` and the
+        // committed identity is NULL. Asserted explicitly rather than omitted:
+        // NULL is the documented "fall back to the legacy resolve-at-dispatch
+        // ladder" value, and it must also prove that a missing connection surface
+        // cannot fail the user's edit.
+        connection_id: null,
       });
       expect(getGenerationOutboxByRequest(USER_BETA, chatId, requestId)).toBeNull();
       expect(getGenerationOutboxByRequest(USER_ALPHA, "wrong-chat", requestId)).toBeNull();
