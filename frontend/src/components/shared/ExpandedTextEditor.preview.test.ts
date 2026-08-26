@@ -26,11 +26,13 @@ describe('ExpandedTextEditor mobile editing stability', () => {
     expect(componentSource).toContain('document.documentElement.style.overflow = rootOverflow')
   })
 
-  test('uses one native text renderer on touch-only devices', () => {
+  test('keeps syntax highlighting enabled on touch-only devices', () => {
     const touchBlock = cssSource.match(/@media \(any-hover: none\)\s*\{([\s\S]*)\n\}/)?.[1] ?? ''
-    expect(touchBlock).toMatch(/\.highlightPre\s*\{[\s\S]*?display:\s*none/)
-    expect(touchBlock).toMatch(/\.textareaHighlighted\s*\{[\s\S]*?overflow-y:\s*auto/)
-    expect(touchBlock).toMatch(/-webkit-text-fill-color:\s*var\(--lumiverse-text\)/)
+    expect(touchBlock).not.toMatch(/\.highlightPre\s*\{[\s\S]*?display:\s*none/)
+    expect(touchBlock).not.toMatch(/\.textareaHighlighted\s*\{[\s\S]*?-webkit-text-fill-color:\s*var\(--lumiverse-text\)/)
+
+    const highlightedTextareaBlock = cssSource.match(/\.textareaHighlighted\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    expect(highlightedTextareaBlock).toMatch(/-webkit-text-fill-color:\s*transparent/)
   })
 
   test('disables scroll anchoring in the highlighted editor scroller', () => {
