@@ -56,6 +56,12 @@ function assertPlacement(row: PhysicalMountPlacement | undefined, scope: string)
   })
   document.body.append(host)
   const service = getDomDecoratorService()
+  const disposeDecorator = service.registerDecorator({
+    mount: row.literal,
+    owner: OWNER,
+    generation: GENERATION,
+    render: () => undefined,
+  })
   service.registerAnchor({
     mount: row.literal,
     scope,
@@ -66,6 +72,7 @@ function assertPlacement(row: PhysicalMountPlacement | undefined, scope: string)
   flushDomDecoratorWork()
   expect(host.getAttribute('data-spindle-mount')).toBe(row.literal)
   expect(service.getRoot(OWNER, GENERATION, row.literal, scope)?.getAttribute('data-spindle-extension-root')).toBe(OWNER)
+  disposeDecorator()
 }
 
 function findPlacement(literal: string, hostName: string): PhysicalMountPlacement | undefined {

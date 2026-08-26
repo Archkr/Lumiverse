@@ -212,6 +212,7 @@ describe('InputArea action bar live reorder', () => {
       'continue',
       'regen',
       'connectionsPicker',
+      'promptVariables',
     ])
     await act(async () => root.unmount())
 
@@ -231,6 +232,7 @@ describe('InputArea action bar live reorder', () => {
       'home',
       'continue',
       'connectionsPicker',
+      'promptVariables',
     ])
     await act(async () => root2.unmount())
   })
