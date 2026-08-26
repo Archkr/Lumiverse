@@ -28,6 +28,7 @@ import {
   dispatchMessageContentLayout,
   MESSAGE_CONTENT_LAYOUT_EVENT,
 } from '@/lib/message-content-layout'
+import { beginChatRenderedResource } from '@/lib/chatDisplaySettle'
 import { useStore } from '@/store'
 import i18n from '@/i18n'
 import { useDisplayRegex } from '@/hooks/useDisplayRegex'
@@ -1326,6 +1327,14 @@ function getChatFindHighlightRoots(container: HTMLElement): ChatFindHighlightRoo
   return roots
 }
 
+function getRenderedImages(container: HTMLElement): HTMLImageElement[] {
+  const images = Array.from(container.querySelectorAll<HTMLImageElement>('img[src]'))
+  for (const island of container.querySelectorAll<HTMLElement>('[data-lumiverse-html-island]')) {
+    if (island.shadowRoot) images.push(...island.shadowRoot.querySelectorAll<HTMLImageElement>('img[src]'))
+  }
+  return images
+}
+
 /**
  * dangerouslySetInnerHTML wrapper that preserves IMG element identity by
  * src across innerHTML replacements, so images don't redo the cache lookup,
@@ -2059,6 +2068,67 @@ export default function MessageContent({
 
     return elements
   }, [blocks, oocEnabled, lumiaOOCStyle, isStreaming])
+
+  const pendingRenderedImagesRef = useRef(new Map<
+    HTMLImageElement,
+    { chatId: string | undefined; release: () => void }
+  >())
+
+  // Display regex completion yields a replacement string; resource fetching is
+  // deliberately outside that CPU clock. Track images after React commits the
+  // rendered replacement so the bounded chat-reveal gate can wait for their
+  // load/error and decode without ever blaming the regex for network latency.
+  useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const images = new Set(getRenderedImages(container))
+    const tracked = pendingRenderedImagesRef.current
+    for (const [image, entry] of tracked) {
+      if (!images.has(image) || image.complete || entry.chatId !== chatId) entry.release()
+    }
+
+    for (const image of images) {
+      if (image.complete || tracked.has(image)) continue
+
+      const releaseBlocker = beginChatRenderedResource(chatId)
+      let released = false
+      const release = () => {
+        if (released) return
+        released = true
+        image.removeEventListener('load', handleLoad)
+        image.removeEventListener('error', handleError)
+        tracked.delete(image)
+        releaseBlocker()
+      }
+      const finishAfterDecode = () => {
+        if (typeof image.decode !== 'function') {
+          release()
+          return
+        }
+        try {
+          void image.decode().catch(() => {}).finally(release)
+        } catch {
+          release()
+        }
+      }
+      const handleLoad = () => finishAfterDecode()
+      const handleError = () => release()
+
+      image.addEventListener('load', handleLoad, { once: true })
+      image.addEventListener('error', handleError, { once: true })
+      tracked.set(image, { chatId, release })
+
+      // A cached image can complete between the initial check and listener
+      // attachment. Re-check synchronously so its blocker cannot leak.
+      if (image.complete) finishAfterDecode()
+    }
+  }, [chatId, renderedBlocks])
+
+  useEffect(() => () => {
+    for (const entry of pendingRenderedImagesRef.current.values()) entry.release()
+    pendingRenderedImagesRef.current.clear()
+  }, [])
 
   useLayoutEffect(() => {
     measureLongMessageOverflow()

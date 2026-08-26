@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   beginChatDisplayWork,
+  beginChatRenderedResource,
   endChatDisplayWork,
   getChatDisplaySettleDiagnostics,
   isChatDisplaySettled,
@@ -57,6 +58,20 @@ describe('chatDisplaySettle', () => {
     expect(isChatDisplaySettled()).toBe(false)
     endChatDisplayWork()
     expect(isChatDisplaySettled()).toBe(true)
+  })
+
+  test('rendered image resources block independently and release idempotently', () => {
+    const release = beginChatRenderedResource('chat-images')
+    expect(isChatDisplaySettled('chat-images')).toBe(false)
+    expect(isChatDisplaySettled('other-chat')).toBe(true)
+    expect(getChatDisplaySettleDiagnostics('chat-images')).toMatchObject({
+      blockers: ['rendered-resources'],
+      pendingRenderedResources: { chat: 1, global: 0 },
+    })
+
+    release()
+    release()
+    expect(isChatDisplaySettled('chat-images')).toBe(true)
   })
 
   test('work from a previous chat does not hold the current chat closed', async () => {

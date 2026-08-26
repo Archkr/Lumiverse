@@ -4,6 +4,15 @@ import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from '
 import { JSDOM } from 'jsdom'
 import type { Root, createRoot as CreateRoot } from 'react-dom/client'
 import type { default as MessageContentType } from './MessageContent'
+import {
+  getChatDisplaySettleDiagnostics,
+  isChatDisplaySettled,
+  resetChatDisplaySettleForTests,
+} from '@/lib/chatDisplaySettle'
+import {
+  reconcileMessageTagRuntimeCapabilities,
+  resetMessageTagRuntimeReadinessForTests,
+} from '@/lib/spindle/message-tag-runtime-readiness'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://lumiverse.test/' })
 const domWindow = dom.window
@@ -18,6 +27,7 @@ Object.assign(globalThis, {
   NodeFilter: domWindow.NodeFilter,
   Element: domWindow.Element,
   HTMLElement: domWindow.HTMLElement,
+  HTMLImageElement: domWindow.HTMLImageElement,
   Event: domWindow.Event,
   EventTarget: domWindow.EventTarget,
   CustomEvent: domWindow.CustomEvent,
@@ -131,6 +141,8 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  reconcileMessageTagRuntimeCapabilities([])
+  resetChatDisplaySettleForTests()
   resizeObservers.length = 0
   host = document.createElement('div')
   document.body.appendChild(host)
@@ -146,9 +158,35 @@ afterEach(async () => {
   if (root) await act(async () => root?.unmount())
   root = null
   host.remove()
+  resetChatDisplaySettleForTests()
+  resetMessageTagRuntimeReadinessForTests()
 })
 
 describe('MessageContent long-message collapsing', () => {
+  test('keeps a regex-rendered Pollinations image in the resource settle phase until load', async () => {
+    await act(async () => {
+      root?.render(
+        <MessageContent
+          content={'<img src="https://image.pollinations.ai/prompt/slow-generated-scene">'}
+          isUser={false}
+          userName="User"
+          chatId="chat-images"
+          messageId="pollinations-message"
+        />,
+      )
+    })
+
+    const image = host.querySelector<HTMLImageElement>('img[src*="pollinations.ai"]')
+    expect(image).not.toBeNull()
+    expect(isChatDisplaySettled('chat-images')).toBe(false)
+    const pendingDiagnostics = getChatDisplaySettleDiagnostics('chat-images')
+    expect(pendingDiagnostics.blockers).toContain('rendered-resources')
+    expect(pendingDiagnostics.pendingRenderedResources).toMatchObject({ chat: 1, global: 0 })
+
+    await act(async () => image?.dispatchEvent(new Event('load')))
+    expect(getChatDisplaySettleDiagnostics('chat-images').pendingRenderedResources.chat).toBe(0)
+  })
+
   test('clips an overflowing streaming assistant message and toggles it open', async () => {
     await act(async () => {
       root?.render(
