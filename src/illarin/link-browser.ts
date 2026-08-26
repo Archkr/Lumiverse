@@ -60,7 +60,7 @@ export interface BrowserLinkInput {
   declaration: IllarinDeclaration;
   /** Injectable transport for tests; production uses safeFetch. */
   fetchImpl?: IllarinFetch;
-  /** Opens the authorization URL in the system browser. */
+  /** Receives the authorization URL once the loopback listener is ready. */
   openUrl: (authorizationUrl: string) => void;
   /** Test seam: called once the loopback listener accepts connections. */
   onListening?: (redirectUri: string) => void;

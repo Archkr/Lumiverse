@@ -96,16 +96,6 @@ function activeLinkFor(userId: string): PendingBrowserLink | undefined {
   return undefined;
 }
 
-function openInSystemBrowser(url: string): void {
-  try {
-    if (process.platform === "darwin") Bun.spawn(["open", url], { stdout: "ignore", stderr: "ignore" });
-    else if (process.platform === "win32") Bun.spawn(["cmd", "/c", "start", "", url], { stdout: "ignore", stderr: "ignore" });
-    else Bun.spawn(["xdg-open", url], { stdout: "ignore", stderr: "ignore" });
-  } catch (err) {
-    console.warn("[Illarin] Could not open system browser:", err instanceof Error ? err.message : err);
-  }
-}
-
 export const illarinRoutes = new Hono();
 
 /** Start a same-device browser link. */
@@ -163,11 +153,18 @@ illarinRoutes.post("/link/browser", async (c) => {
   };
   pendingLinks.set(linkId, session);
 
-  void runBrowserLink({
+  // The browser that initiated the request owns opening the authorization
+  // page. This works on mobile localhost installs where desktop launchers
+  // such as xdg-open are unavailable, and lets the frontend reserve a tab
+  // synchronously before its user-activation window expires.
+  const authorizationReady = Promise.withResolvers<string>();
+  const linkTask = runBrowserLink({
     baseUrl,
     declaration,
-    openUrl: openInSystemBrowser,
-  })
+    openUrl: authorizationReady.resolve,
+  });
+
+  void linkTask
     .then(async (outcome: BrowserLinkOutcome) => {
       if (outcome.kind === "linked") {
         await svc.saveInstance({
@@ -191,7 +188,25 @@ illarinRoutes.post("/link/browser", async (c) => {
       session.reason = "link_failed";
     });
 
-  return c.json({ link_id: linkId, expires_at: new Date(session.expiresAt).toISOString() });
+  let authorizeUrl: string;
+  try {
+    authorizeUrl = await Promise.race([
+      authorizationReady.promise,
+      linkTask.then(() => {
+        throw new Error("Browser link ended before authorization was ready");
+      }),
+    ]);
+  } catch {
+    return c.json({ error: "Failed to start browser linking" }, 502);
+  }
+
+  // The URL contains a one-use request secret and must never be cached.
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    link_id: linkId,
+    authorize_url: authorizeUrl,
+    expires_at: new Date(session.expiresAt).toISOString(),
+  });
 });
 
 /** Connection status plus the state of any in-progress linking attempt. */

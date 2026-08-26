@@ -70,6 +70,7 @@ import pickerStyles from '@/components/shared/SidecarConnectionPicker.module.css
 import ModelCombobox from '@/components/panels/connection-manager/ModelCombobox'
 import { getVisibleSettingsTabs, sectionAnchorId, SETTINGS_TABS } from '@/lib/settings-tab-registry'
 import { activateExtensionSettingsTab } from '@/lib/spindle/settings-tab-bridge'
+import { getSafeHttpsUrl } from '@/lib/navigationSafety'
 import type { SettingsTabState } from '@/store/slices/spindle-placement'
 import SettingsSearch from './SettingsSearch'
 import styles from './SettingsModal.module.css'
@@ -4006,6 +4007,13 @@ function IllarinSettings() {
       setError(t('illarin.errUrl'))
       return
     }
+
+    // Reserve the tab while this click still has browser user activation.
+    // Calling window.open only after the API request is blocked by mobile
+    // browsers, even though the request originated from this button click.
+    const authorizationTab = isLocalOrigin ? window.open('', '_blank') : null
+    if (authorizationTab) authorizationTab.opener = null
+
     setError(null)
     setLinking(true)
     if (!isLocalOrigin) {
@@ -4021,11 +4029,26 @@ function IllarinSettings() {
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
+        authorizationTab?.close()
         setError((body as any).error || t('illarin.errLinkFailed'))
         setLinking(false)
         return
       }
-      // Backend opened the system browser and listens on loopback.
+      const data = await res.json() as { authorize_url?: string }
+      const authorizeUrl = getSafeHttpsUrl(data.authorize_url)
+      if (!authorizeUrl) {
+        authorizationTab?.close()
+        setError(t('illarin.errLinkFailed'))
+        setLinking(false)
+        return
+      }
+
+      // Prefer the tab reserved synchronously above. If popups are disabled,
+      // same-tab navigation still lets the user complete the loopback flow.
+      if (authorizationTab) authorizationTab.location.replace(authorizeUrl)
+      else window.location.assign(authorizeUrl)
+
+      // Backend listens on loopback while the authorization page is open.
       pollRef.current.timer = setInterval(async () => {
         await fetchStatus()
         if (statusRef.current?.linked || statusRef.current?.pending_link?.status === 'failed') {
@@ -4040,6 +4063,7 @@ function IllarinSettings() {
       }, 2000)
       pollRef.current.timeout = setTimeout(finishLinking, 5 * 60 * 1000)
     } catch (err: any) {
+      authorizationTab?.close()
       setError(err.message || t('illarin.errConnectFailed'))
       setLinking(false)
     }
