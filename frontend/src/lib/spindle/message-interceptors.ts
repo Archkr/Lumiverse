@@ -3,6 +3,7 @@ import type {
   SpindleMessageTagInterceptorOptions,
 } from 'lumiverse-spindle-types'
 import { beginChatDisplayWork, endChatDisplayWork } from '@/lib/chatDisplaySettle'
+import { scheduleMicrotask } from '@/lib/schedule-microtask'
 import {
   clearAttachedMessageTagInterceptors,
   noteMessageTagInterceptorAttached,
@@ -283,7 +284,7 @@ function processMessageTagIntercepts(intercepts: PendingTagIntercept[], delivere
     }
   }
   if (activeWorkScopes.size > 0) {
-    queueMicrotask(() => {
+    scheduleMicrotask(() => {
       for (const workScope of activeWorkScopes) endChatDisplayWork(workScope)
     })
   }
