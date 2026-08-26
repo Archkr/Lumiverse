@@ -435,6 +435,17 @@
   color: var(--lumiverse-text-dim, rgba(230, 230, 240, 0.4));
 }
 
+.popState {
+  flex-shrink: 0;
+  font-size: calc(10px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+  color: var(--lumiverse-text-dim, rgba(230, 230, 240, 0.4));
+}
+
+.popStateActive {
+  color: var(--lumiverse-primary, rgba(140, 130, 255, 0.9));
+}
+
 .popLink {
   border: none;
   background: transparent;

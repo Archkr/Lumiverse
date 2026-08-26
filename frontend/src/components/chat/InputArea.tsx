@@ -3478,9 +3478,20 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
                 </>
               )}
               {guidedGenerations.map((g) => (
-                <button key={g.id} type="button" className={styles.popRowBtn} onClick={() => toggleGuide(g.id)}>
-                  <span>{g.name}</span>
-                  <span className={styles.popMeta}>{g.enabled ? t('on') : t('off')} • {g.mode}</span>
+                <button
+                  key={g.id}
+                  type="button"
+                  className={clsx(styles.popRowBtn, g.enabled && styles.popRowBtnActive)}
+                  onClick={() => toggleGuide(g.id)}
+                  aria-pressed={g.enabled}
+                >
+                  <span className={styles.personaMain}>
+                    <span className={clsx(styles.popState, g.enabled && styles.popStateActive)}>
+                      {g.enabled ? t('on') : t('off')}
+                    </span>
+                    <span>{g.name}</span>
+                  </span>
+                  <span className={styles.popMeta}>{g.mode}</span>
                 </button>
               ))}
               <button type="button" className={styles.popLink} onClick={() => {
