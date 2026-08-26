@@ -60,6 +60,7 @@ import { markLandingPageChatReturn, peekLandingPageSnapshot } from '@/lib/landin
 import { holdImagesForTransition } from '@/lib/imageDecodeCache'
 import { takeChatNavigationSnapshot } from '@/lib/chatNavigationSnapshot'
 import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
+import { resolveChatContentWidthPx } from '@/lib/chatContentWidth'
 
 interface CortexNotice {
   variant: 'processing' | 'error'
@@ -680,13 +681,14 @@ export default function ChatView() {
     }
   }, [chatId, t])
 
-  const innerStyle = useMemo(() => {
-    switch (chatWidthMode) {
-      case 'comfortable': return { '--lumiverse-chat-content-width': '1000px' } as React.CSSProperties
-      case 'compact': return { '--lumiverse-chat-content-width': '760px' } as React.CSSProperties
-      case 'custom': return { '--lumiverse-chat-content-width': `${chatContentMaxWidth}px` } as React.CSSProperties
-      default: return undefined
-    }
+  // Single source of truth for the chat content width. The resolver reports `null` for
+  // every unconstrained mode, which is exactly the set of modes that must publish no
+  // `--lumiverse-chat-content-width` variable at all.
+  const innerStyle = useMemo<React.CSSProperties | undefined>(() => {
+    const width = resolveChatContentWidthPx(chatWidthMode, chatContentMaxWidth)
+    return width === null
+      ? undefined
+      : ({ '--lumiverse-chat-content-width': `${width}px` } as React.CSSProperties)
   }, [chatWidthMode, chatContentMaxWidth])
 
   // React Router reuses this component when only the chatId parameter changes.
@@ -1250,7 +1252,7 @@ export default function ChatView() {
         }}
       />
       <div className={clsx(styles.wallpaperTransitionLayer, wallpaperTransitioning && !sceneBackground && styles.wallpaperTransitionLayerActive)} />
-      <div className={styles.body} {...(chatWidthMode !== 'full' ? { 'data-chat-constrained': '' } : {})}>
+      <div className={styles.body} data-lumiverse-surface="chat-body" data-chat-width-mode={chatWidthMode} {...(chatWidthMode !== 'full' ? { 'data-chat-constrained': '' } : {})}>
         <div data-spindle-mount="chat_sidebar_left" data-spindle-scope={`chat:${chatId}:sidebar-left`} style={{ display: 'contents' }} />
         {!portraitSurfaceOccupied && portraitPanelSide !== 'none' && portraitPanelSide === 'left' && (
           <div className={clsx(styles.portraitSide, styles.portraitSideLeft, portraitPanelOpen && styles.portraitSideOpen)}>
