@@ -20,6 +20,7 @@ import { runRegexRequest } from "./regex-sandbox-core";
 
 const DEFAULT_TIMEOUT_MS = 500;
 const DEFAULT_POOL_SIZE = 2;
+export const REGEX_WORKER_START_TIMEOUT_MS = 5_000;
 
 export class RegexTimeoutError extends Error {
   constructor(public readonly timeoutMs: number) {
@@ -32,6 +33,13 @@ export class RegexSandboxError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RegexSandboxError";
+  }
+}
+
+export class RegexWorkerStartupTimeoutError extends RegexSandboxError {
+  constructor(public readonly timeoutMs: number) {
+    super(`Regex worker did not acknowledge the request within ${timeoutMs}ms`);
+    this.name = "RegexWorkerStartupTimeoutError";
   }
 }
 
@@ -58,19 +66,44 @@ interface QueueItem {
 
 interface InFlight {
   id: string;
-  timer: ReturnType<typeof setTimeout>;
+  timer: unknown;
+  phase: "startup" | "execution";
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
   timeoutMs: number;
 }
 
-class RegexWorkerPool {
+export interface RegexWorkerPoolDeps {
+  createWorker(): Worker;
+  scheduleTimer(fn: () => void, ms: number): unknown;
+  cancelTimer(timer: unknown): void;
+  createRequestId(): string;
+  startupTimeoutMs: number;
+}
+
+function defaultWorkerPoolDeps(): RegexWorkerPoolDeps {
+  return {
+    createWorker: () => new Worker(
+      new URL("./regex-sandbox.worker.ts", import.meta.url).href,
+      { type: "module" },
+    ),
+    scheduleTimer: (fn, ms) => setTimeout(fn, ms),
+    cancelTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    createRequestId: () => crypto.randomUUID(),
+    startupTimeoutMs: REGEX_WORKER_START_TIMEOUT_MS,
+  };
+}
+
+export class RegexWorkerPool {
   private workers = new Set<Worker>();
   private idle: Worker[] = [];
   private inflight = new Map<Worker, InFlight>();
   private queue: QueueItem[] = [];
 
-  constructor(private readonly maxSize: number) {}
+  constructor(
+    private readonly maxSize: number,
+    private readonly deps: RegexWorkerPoolDeps = defaultWorkerPoolDeps(),
+  ) {}
 
   run<T>(op: QueueItem["op"], payload: Record<string, unknown>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -100,10 +133,7 @@ class RegexWorkerPool {
   }
 
   private spawn(): Worker {
-    const worker = new Worker(
-      new URL("./regex-sandbox.worker.ts", import.meta.url).href,
-      { type: "module" },
-    );
+    const worker = this.deps.createWorker();
     worker.addEventListener("message", (e) => this.onMessage(worker, e as MessageEvent));
     worker.addEventListener("error", (e) => this.onError(worker, e as ErrorEvent));
     this.workers.add(worker);
@@ -111,11 +141,18 @@ class RegexWorkerPool {
   }
 
   private dispatch(worker: Worker, item: QueueItem): void {
-    const id = crypto.randomUUID();
-    const timer = setTimeout(() => this.onTimeout(worker), item.timeoutMs);
+    const id = this.deps.createRequestId();
+    // Worker construction, module loading and event-loop scheduling are not
+    // regex execution. Give that phase its own watchdog and start the regex
+    // budget only after the worker acknowledges this request.
+    const timer = this.deps.scheduleTimer(
+      () => this.onTimeout(worker),
+      this.deps.startupTimeoutMs,
+    );
     this.inflight.set(worker, {
       id,
       timer,
+      phase: "startup",
       resolve: item.resolve,
       reject: item.reject,
       timeoutMs: item.timeoutMs,
@@ -124,11 +161,27 @@ class RegexWorkerPool {
   }
 
   private onMessage(worker: Worker, event: MessageEvent): void {
-    const data = event.data as { id: string; ok: boolean; result?: unknown; error?: string };
+    const data = event.data as {
+      id: string;
+      type?: "started";
+      ok?: boolean;
+      result?: unknown;
+      error?: string;
+    };
     const flight = this.inflight.get(worker);
     if (!flight || flight.id !== data.id) return; // stale; ignore
+    if (data.type === "started") {
+      if (flight.phase !== "startup") return;
+      this.deps.cancelTimer(flight.timer);
+      flight.phase = "execution";
+      flight.timer = this.deps.scheduleTimer(
+        () => this.onTimeout(worker),
+        flight.timeoutMs,
+      );
+      return;
+    }
     this.inflight.delete(worker);
-    clearTimeout(flight.timer);
+    this.deps.cancelTimer(flight.timer);
     if (data.ok) flight.resolve(data.result);
     else flight.reject(new RegexSandboxError(data.error || "Regex evaluation failed"));
     this.release(worker);
@@ -138,7 +191,7 @@ class RegexWorkerPool {
     const flight = this.inflight.get(worker);
     if (flight) {
       this.inflight.delete(worker);
-      clearTimeout(flight.timer);
+      this.deps.cancelTimer(flight.timer);
       flight.reject(new RegexSandboxError(`Regex worker crashed: ${event.message || "unknown"}`));
     }
     this.discard(worker);
@@ -149,7 +202,11 @@ class RegexWorkerPool {
     const flight = this.inflight.get(worker);
     if (flight) {
       this.inflight.delete(worker);
-      flight.reject(new RegexTimeoutError(flight.timeoutMs));
+      if (flight.phase === "execution") {
+        flight.reject(new RegexTimeoutError(flight.timeoutMs));
+      } else {
+        flight.reject(new RegexWorkerStartupTimeoutError(this.deps.startupTimeoutMs));
+      }
     }
     try { worker.terminate(); } catch { /* ignore */ }
     this.discard(worker);
@@ -199,7 +256,7 @@ class RegexWorkerPool {
     this.workers.clear();
     this.idle = [];
     for (const flight of this.inflight.values()) {
-      clearTimeout(flight.timer);
+      this.deps.cancelTimer(flight.timer);
       flight.reject(new RegexSandboxError("Regex sandbox shut down"));
     }
     this.inflight.clear();

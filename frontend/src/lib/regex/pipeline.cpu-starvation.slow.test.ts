@@ -36,7 +36,7 @@ const { applyDisplayRegexTiered, resetTieredPipelineForTests } = await import('.
 const { getRegexExecTier, resetRegexEvidenceForTests } = await import('./evidence')
 const { KILL_MS, resetRegexWorkerForTests, setRegexWorkerDepsForTests } = await import('./worker-client')
 
-function useRealWorker(): void {
+function configureRealWorker(): void {
   resetRegexWorkerForTests()
   setRegexWorkerDepsForTests({
     scheduleTimer: (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id) },
@@ -85,7 +85,7 @@ describe('regex worker under CPU starvation', () => {
     const cores = cpus().length
     for (const hogs of [0, cores, cores * 3]) {
       resetRegexEvidenceForTests(); resetTieredPipelineForTests()
-      useRealWorker()
+      configureRealWorker()
       const scripts = ['a1', 'a2', 'a3', 'a4', 'a5'].map(script)
       const stop = hogs > 0 ? saturateCpu(hogs) : () => {}
       if (hogs > 0) await new Promise((r) => setTimeout(r, 150))

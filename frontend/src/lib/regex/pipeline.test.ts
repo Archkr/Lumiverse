@@ -245,13 +245,15 @@ describe('isolated regex pipeline', () => {
           result: 'AbC',
           touched_vars: [],
           cacheable: false,
-          timed_out_script_ids: ['catastrophic'],
+          // The backend may time out more than one suffix script, but only the
+          // one the browser acknowledged is independently corroborated.
+          timed_out_script_ids: ['catastrophic', 'suffix'],
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }) as typeof fetch)
       try {
         const prefix = script('prefix', { find_regex: 'a', replace_string: 'A' })
         const catastrophic = script('catastrophic', { find_regex: '(b+)+$', replace_string: 'B' })
-        const suffix = script('suffix', { find_regex: 'c', replace_string: 'C' })
+        const suffix = script('suffix', { find_regex: '(c+)+$', replace_string: 'C' })
         const promise = applyDisplayRegexTiered('abc', [prefix, catastrophic, suffix], context, resolveRawTemplates)
         await flush()
 

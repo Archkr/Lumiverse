@@ -154,10 +154,19 @@ async function applyBatchInWorker(
           context,
         )
         if (confirmed !== null) {
+          // Backend timing can only corroborate the script the browser worker
+          // actually said it started. A dispatch timeout identifies no script,
+          // and later scripts in the suffix were never observed running in the
+          // browser. Neither is durable evidence against a pattern.
+          const locallyStartedScriptId = error.phase === 'execution'
+            ? error.scriptId
+            : undefined
           for (const scriptId of confirmed.timedOutScriptIds ?? []) {
             const timedOut = unresolved.find((entry) => entry.script.id === scriptId)
             if (
-              !timedOut
+              !locallyStartedScriptId
+              || scriptId !== locallyStartedScriptId
+              || !timedOut
               || !shouldPermanentlyQuarantineRegex(
                 timedOut.worker.pattern,
                 error.environmentCongested,
