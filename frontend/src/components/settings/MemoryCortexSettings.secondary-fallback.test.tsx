@@ -88,6 +88,7 @@ const config = {
 const storeState = {
   addToast: () => undefined,
   openModal: () => undefined,
+  extensions: [{ identifier: "lumiverse_suite", enabled: true, has_frontend: true }],
   profiles: [{ id: "primary-conn", name: "Primary", metadata: {} }],
   activeChatId: "chat-1",
 };
