@@ -47,7 +47,6 @@ const {
   getRegexExecTier,
   quarantineRegexScript,
   readRegexScriptEvidence,
-  recordRegexScriptSuccess,
   resetRegexEvidenceForTests,
 } = await import('./evidence')
 const { KILL_MS, resetRegexWorkerForTests, setRegexWorkerDepsForTests } = await import('./worker-client')
@@ -138,20 +137,30 @@ afterEach(() => {
 })
 
 describe('isolated regex pipeline', () => {
-  test('successful evidence never promotes a user-authored regex to the main thread', () => {
-    const safeOnce = script('safe-once', { find_regex: '(a|aa)+$' })
-    recordRegexScriptSuccess(safeOnce, 1)
-    expect(readRegexScriptEvidence(safeOnce).last_ok_ms).toBe(1)
-    expect(getRegexExecTier(safeOnce)).toMatchObject({ tier: 'worker' })
-    expect(evidenceReports).toHaveLength(0)
-  })
-
-  test('session evidence is invalidated when the script definition changes', () => {
+  test('an edit re-syncs the session overlay from the persisted row instead of dropping quarantine', () => {
     const original = script('edited', { find_regex: 'a+', updated_at: 1 })
-    recordRegexScriptSuccess(original, 4)
-    const edited = { ...original, find_regex: '(a|aa)+$', updated_at: 2 }
-    expect(readRegexScriptEvidence(edited).last_ok_ms).toBeUndefined()
-    expect(getRegexExecTier(edited).tier).toBe('worker')
+    quarantineRegexScript(original)
+    expect(evidenceReports).toEqual([{ id: 'edited', payload: { quarantined: true } }])
+
+    // The row the panel refetches after the edit still carries the flag, so the
+    // rebuilt overlay entry keeps the script skipped.
+    const editedStillQuarantined = {
+      ...original,
+      find_regex: '(a|aa)+$',
+      updated_at: 2,
+      metadata: { regex_evidence: { quarantined: true } },
+    }
+    expect(readRegexScriptEvidence(editedStillQuarantined)).toEqual({ quarantined: true })
+    expect(getRegexExecTier(editedStillQuarantined)).toEqual({ tier: 'quarantined', reason: 'quarantined' })
+
+    // A row without the flag (cleared server-side) wins over the stale overlay
+    // entry once the definition fingerprint no longer matches.
+    const editedAndCleared = { ...original, find_regex: 'b+', updated_at: 3, metadata: {} }
+    expect(readRegexScriptEvidence(editedAndCleared)).toEqual({})
+    expect(getRegexExecTier(editedAndCleared)).toEqual({
+      tier: 'worker',
+      reason: 'user-authored regexes require isolated execution',
+    })
   })
 
   test('compatible scripts share one worker body round trip', async () => {

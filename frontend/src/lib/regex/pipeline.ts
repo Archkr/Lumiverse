@@ -10,7 +10,12 @@ import {
   type ApplyDisplayRegexContext,
   type DisplayRegexBackendResult,
 } from './compiler'
-import { getRegexExecTier, quarantineRegexScript, recordRegexScriptSuccess } from './evidence'
+import {
+  getRegexExecTier,
+  quarantineRegexScript,
+  resetRegexSkipAnnouncementsForTests,
+  shouldAnnounceRegexSkip,
+} from './evidence'
 import type { ApplyWorkerScript } from './apply.worker'
 import {
   isSupported as workerSupported,
@@ -36,11 +41,12 @@ export interface TieredApplyCallbacks {
 
 type ResolveRawTemplates = (templates: Record<string, string>) => Promise<Record<string, string>>
 
-const announcedSkipKeys = new Set<string>()
-
+// The once-per-script bookkeeping lives in evidence.ts so that clearing a
+// quarantine can reset it without evidence.ts importing this module (which
+// would close a cycle, since this module imports evidence.ts). Emitting the
+// warning itself stays here — evidence.ts has no business owning toasts.
 function announceSkippedOnce(script: RegexScript, reason: string): void {
-  if (announcedSkipKeys.has(script.id)) return
-  announcedSkipKeys.add(script.id)
+  if (!shouldAnnounceRegexSkip(script.id)) return
   console.warn(`[display] skipping display regex script (script=${script.id} "${script.name}", reason=${reason})`)
   toast.warning(
     i18n.t('panels:regexPanel.quarantinedDisplay', { name: script.name }),
@@ -49,7 +55,7 @@ function announceSkippedOnce(script: RegexScript, reason: string): void {
 }
 
 export function resetTieredPipelineForTests(): void {
-  announcedSkipKeys.clear()
+  resetRegexSkipAnnouncementsForTests()
 }
 
 function placementEligible(script: RegexScript, context: ApplyDisplayRegexContext): boolean {
@@ -125,9 +131,6 @@ async function applyBatchInWorker(
         body: content,
         scripts: resolved.map((entry) => entry.worker),
       })
-      for (let i = 0; i < resolved.length; i += 1) {
-        recordRegexScriptSuccess(resolved[i]!.script, outcome.scriptElapsedMs[i] ?? outcome.elapsedMs)
-      }
       return { ok: true, result: outcome.result }
     } catch (error) {
       if (error instanceof RegexWorkerTimeoutError && error.scriptId) {

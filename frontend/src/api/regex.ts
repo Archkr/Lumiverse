@@ -104,7 +104,8 @@ export const regexApi = {
     return post<RegexScript>(`/regex-scripts/${id}/report-performance`, payload)
   },
 
-  reportEvidence(id: string, payload: { last_ok_ms?: number; last_ok_at?: number; quarantined?: boolean }) {
+  // `quarantined: false` is the clear path — the backend deletes the key.
+  reportEvidence(id: string, payload: { quarantined?: boolean }) {
     return post<RegexScript>(`/regex-scripts/${id}/report-evidence`, payload)
   },
 }

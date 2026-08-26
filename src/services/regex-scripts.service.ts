@@ -230,20 +230,6 @@ function shouldResetRegexPerformance(input: UpdateRegexScriptInput): boolean {
   ].some((key) => Object.prototype.hasOwnProperty.call(input, key));
 }
 
-// A pattern-affecting edit invalidates prior ok-evidence (the measured safety
-// of the old shape says nothing about the new one), demoting the script to the
-// unknown tier -> worker path. An explicit quarantine survives edits so a
-// script that hung the executor stays skipped until deliberately cleared.
-function withoutStaleRegexEvidence(metadata: Record<string, any>): Record<string, any> {
-  const raw = metadata.regex_evidence;
-  if (!raw || typeof raw !== "object") return metadata;
-  const next = { ...raw };
-  delete next.last_ok_ms;
-  delete next.last_ok_at;
-  metadata.regex_evidence = next;
-  return metadata;
-}
-
 function isDisplayPerformanceSource(source: RegexPerformanceSource): boolean {
   return source === "display_client" || source === "display_backend";
 }
@@ -320,13 +306,15 @@ export function reportRegexScriptPerformance(
 }
 
 // Client-side evidence persistence for the display-regex execution tiers
-// (last_ok_ms/last_ok_at/quarantined under metadata.regex_evidence). Unlike
-// report-performance this never clears existing fields implicitly; the client
-// sends only the fields it wants to record.
+// (metadata.regex_evidence.quarantined). Quarantine deliberately survives a
+// script edit: a pattern that hung the executor stays skipped until the user
+// clears it from the panel, which sends `quarantined: false` and deletes the
+// key here. Timing evidence used to live alongside it and was removed — no
+// consumer read it, so it could never affect tier selection.
 export function reportRegexScriptEvidence(
   userId: string,
   id: string,
-  patch: { lastOkMs?: number; lastOkAt?: number; quarantined?: boolean },
+  patch: { quarantined?: boolean },
 ): RegexScript | null {
   const script = getRegexScript(userId, id);
   if (!script) return null;
@@ -336,12 +324,6 @@ export function reportRegexScriptEvidence(
   const evidence =
     metadata.regex_evidence && typeof metadata.regex_evidence === "object" ? { ...metadata.regex_evidence } : {};
 
-  if (patch.lastOkMs !== undefined) {
-    evidence.last_ok_ms = Math.max(0, Math.round(patch.lastOkMs));
-  }
-  if (patch.lastOkAt !== undefined) {
-    evidence.last_ok_at = Math.max(0, Math.round(patch.lastOkAt));
-  }
   if (patch.quarantined !== undefined) {
     if (patch.quarantined) {
       evidence.quarantined = true;
@@ -1026,9 +1008,12 @@ export function updateRegexScript(
       nextInput.scope_id = existing.scope === nextInput.scope ? existing.scope_id : null;
     }
   }
+  // A pattern-affecting edit clears the slow/timed-out warning, since the
+  // measurement described the old shape. The quarantine flag under
+  // metadata.regex_evidence is intentionally left untouched: a script that hung
+  // the executor stays skipped until the user clears it from the panel.
   if (shouldResetRegexPerformance(nextInput)) {
     nextInput.metadata = withoutRegexPerformanceMetadata(nextInput.metadata ?? existing.metadata);
-    nextInput.metadata = withoutStaleRegexEvidence(nextInput.metadata);
   }
   const hasPresetIdUpdate = Object.prototype.hasOwnProperty.call(nextInput, "preset_id");
   const nextPresetId = hasPresetIdUpdate ? normalizeOptionalId(nextInput.preset_id) : existing.preset_id;

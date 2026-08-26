@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 
-import { Plus, Upload, Download, Trash2, Globe, User, MessageCircle, ChevronRight, FolderPlus, Check, X, Link, Unlink, TriangleAlert, GripVertical, Power, PowerOff, ListChecks, Square, CheckSquare } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Globe, User, MessageCircle, ChevronRight, FolderPlus, Check, X, Link, Unlink, TriangleAlert, ShieldAlert, GripVertical, Power, PowerOff, ListChecks, Square, CheckSquare } from 'lucide-react'
 import {
   DndContext,
   MouseSensor,
@@ -32,6 +32,12 @@ import { Toggle } from '@/components/shared/Toggle'
 import { Badge } from '@/components/shared/Badge'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import type { RegexScript, RegexScope, RegexPerformanceMetadata } from '@/types/regex'
+import {
+  clearRegexScriptQuarantine,
+  getRegexEvidenceVersion,
+  isRegexScriptQuarantined,
+  subscribeRegexEvidence,
+} from '@/lib/regex/evidence'
 import { resolveRegexCreateScope, type RegexPanelScopeFilterValue } from './regexPanelScope'
 import styles from './RegexPanel.module.css'
 import clsx from 'clsx'
@@ -1187,6 +1193,36 @@ function ScriptRow({
       : t('regexPanel.slowDetected', { seconds: (performance.elapsed_ms / 1000).toFixed(1) })
     : null
 
+  // Quarantine can be set by the display pipeline mid-session, outside any
+  // store write, so the row subscribes to the evidence module instead of
+  // reading script.metadata. The overlay is the source of truth: it also
+  // reflects a clear that has not been refetched from the server yet.
+  const evidenceVersion = useSyncExternalStore(
+    subscribeRegexEvidence,
+    getRegexEvidenceVersion,
+    getRegexEvidenceVersion,
+  )
+  const quarantined = useMemo(() => isRegexScriptQuarantined(script), [script, evidenceVersion])
+  const [clearingQuarantine, setClearingQuarantine] = useState(false)
+  const loadRegexScripts = useStore((s) => s.loadRegexScripts)
+
+  const handleClearQuarantine = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setClearingQuarantine(true)
+    try {
+      await clearRegexScriptQuarantine(script)
+      // Refetch so script.metadata.regex_evidence matches the cleared row.
+      // updateRegexScript() was rejected for this: it would issue a write (and
+      // bump updated_at) purely to read state back.
+      await loadRegexScripts()
+      toast.success(t('regexPanel.quarantineCleared', { name: script.name }))
+    } catch (err: any) {
+      toast.error(err.body?.error || err.message || t('regexPanel.requestFailed'))
+    } finally {
+      setClearingQuarantine(false)
+    }
+  }, [script, loadRegexScripts, t])
+
   return (
     <div ref={setNodeRef} style={rowStyle}>
       <div
@@ -1232,6 +1268,15 @@ function ScriptRow({
         {performance && (
           <span className={styles.slowBadge} title={warningText ?? undefined} aria-label={warningText ?? undefined}>
             <TriangleAlert size={12} /> {t('regexPanel.slow')}
+          </span>
+        )}
+        {quarantined && (
+          <span
+            className={styles.slowBadge}
+            title={t('regexPanel.quarantinedDetail')}
+            aria-label={t('regexPanel.quarantinedDetail')}
+          >
+            <ShieldAlert size={12} /> {t('regexPanel.quarantined')}
           </span>
         )}
         {targetBadge}
@@ -1283,6 +1328,22 @@ function ScriptRow({
                   ? t('regexPanel.timedOutDetail')
                   : t('regexPanel.slowDetail', { seconds: (performance.elapsed_ms / 1000).toFixed(1) })}
               </span>
+            </div>
+          )}
+          {quarantined && (
+            <div className={styles.warningBox}>
+              <ShieldAlert size={14} />
+              <span>{t('regexPanel.quarantinedDetail')}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={styles.warningBoxAction}
+                onClick={handleClearQuarantine}
+                loading={clearingQuarantine}
+                aria-label={t('regexPanel.clearQuarantineAria', { name: script.name })}
+              >
+                {t('regexPanel.clearQuarantine')}
+              </Button>
             </div>
           )}
           <div className={styles.field}>

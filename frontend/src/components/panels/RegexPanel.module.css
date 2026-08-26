@@ -303,6 +303,13 @@
   font-size: calc(11px * var(--lumiverse-font-scale, 1));
 }
 
+/* Keeps a recovery action (e.g. clearing a quarantine) pinned to the trailing
+   edge of a warning box so the explanatory text keeps the remaining width. */
+.warningBoxAction {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .fieldRow {
   display: flex;
   gap: 16px;
