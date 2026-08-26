@@ -77,7 +77,40 @@ class StallingWorker implements RegexWorkerLike {
   setErrorHandler(): void {}
 }
 
+// A cold worker on first launch: construction, chunk fetch and module init all
+// happen before it can acknowledge a script, so the deadline can fire while
+// currentScript is still null.
+class SilentWorker implements RegexWorkerLike {
+  postMessage(): void {}
+  terminate(): void {}
+  setMessageHandler(): void {}
+  setErrorHandler(): void {}
+}
+
 interface ManualTimer { fn: () => void; cancelled: boolean }
+
+function coldStartHarness() {
+  resetRegexWorkerForTests()
+  const timers: ManualTimer[] = []
+  setRegexWorkerDepsForTests({
+    now: () => timers.length,
+    spawnWorker: () => new SilentWorker(),
+    scheduleTimer: (fn) => {
+      const t: ManualTimer = { fn, cancelled: false }
+      timers.push(t)
+      return () => { t.cancelled = true }
+    },
+    isSupported: () => true,
+    // An idle phone is slow
+    isPageVisible: () => true,
+    schedulerLagMs: () => 0,
+  })
+  const fireLatest = (): void => {
+    const t = [...timers].reverse().find((e) => !e.cancelled)
+    t?.fn()
+  }
+  return { fireLatest }
+}
 
 function fakeHarness(congestedCanary: boolean) {
   resetRegexWorkerForTests()
@@ -187,6 +220,21 @@ describe('a literal pattern is never permanently quarantined on timing evidence'
   }, 300000)
 })
 
+describe('a cold-start timeout is not evidence about any script', () => {
+  const BENIGN_NESTED = '(「[^」]*」(?:「[^」]*」)*)*'
+
+  test('a benign nested-quantifier pattern is not quarantined when the worker never acknowledged it', async () => {
+    const { fireLatest } = coldStartHarness()
+    installBackend('congested')
+    const quoted = script('quoted', { find_regex: BENIGN_NESTED, replace_string: 'X' })
+    await drive(
+      applyDisplayRegexTiered('「a」「b」', [quoted], context, resolveRawTemplates),
+      fireLatest,
+    )
+    expect(new Set(persisted).has('quoted')).toBe(false)
+  }, 30000)
+})
+
 describe('a stalled worker is not evidence about the pattern', () => {
   // Burning CPU and starved of CPU both present as ack then silence, so a
   // stall cannot justify durable evidence against the script that was running.
@@ -228,6 +276,7 @@ describe('a stalled worker is not evidence about the pattern', () => {
     resetRegexWorkerForTests()
     setRegexWorkerDepsForTests({
       scheduleTimer: (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id) },
+      isPageVisible: () => true,
     })
     installDiscriminatingBackend(500)
 
