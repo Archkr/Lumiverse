@@ -520,7 +520,12 @@ function useDisplayPreprocessedState(
             }
             return { content, ok: false }
           })
-        assignedPromise = trackInitialDisplayResolve(promise)
+        // Scope the pending count to THIS chat. Omitting the id files the work
+        // under `__global__`, and `hasPending` in `chatDisplaySettle` treats the
+        // global bucket as blocking for every chat — so a hung preprocess in one
+        // chat would hold another chat's reveal closed until the settle cap.
+        // `chatId` is non-null here: the effect returns early above when it isn't.
+        assignedPromise = trackInitialDisplayResolve(promise, chatId)
         displayPreprocessCache.set(key, { promise: assignedPromise, messageId: messageIdForEntry })
       }
       displayPreprocessCache.get(key)?.promise?.then(apply)
