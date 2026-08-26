@@ -26,6 +26,7 @@ import {
   RegexWorkerUnsupportedError,
   runRegexJobInWorker,
 } from './worker-client'
+import { shouldPermanentlyQuarantineRegex } from './quarantine-policy'
 
 export interface TieredSlowRegexReport {
   script: RegexScript
@@ -154,10 +155,16 @@ async function applyBatchInWorker(
         )
         if (confirmed !== null) {
           for (const scriptId of confirmed.timedOutScriptIds ?? []) {
-            const timedOut = unresolved.find((entry) => entry.script.id === scriptId)?.script
-            if (!timedOut) continue
-            quarantineRegexScript(timedOut)
-            announceSkippedOnce(timedOut, 'worker and backend deadlines exceeded')
+            const timedOut = unresolved.find((entry) => entry.script.id === scriptId)
+            if (
+              !timedOut
+              || !shouldPermanentlyQuarantineRegex(
+                timedOut.worker.pattern,
+                error.environmentCongested,
+              )
+            ) continue
+            quarantineRegexScript(timedOut.script)
+            announceSkippedOnce(timedOut.script, 'worker and backend deadlines exceeded')
           }
           return { ok: true, outcome: confirmed }
         }
