@@ -311,4 +311,3 @@ describe('P12 chat dock preservation contracts', () => {
     expect(chatCss).toMatch(/\.chatToolbar\[data-dock-request='floating'\]:not\(:has\(> button:not\(\[hidden\]\), > \.nativeDockActions > button:not\(\[hidden\]\), > \[data-component='QuickToolbar'\]\)\):not\(\[data-spindle-occupied\]\)/)
   })
 })
-

@@ -62,7 +62,7 @@ const DRAWER_TAB_IDS = [
 const SETTINGS_TAB_IDS = [
   'productivity', 'account', 'display', 'chat', 'extensions', 'guided', 'quickReplies', 'extensionPools',
   'webSearch', 'embeddings', 'memoryCortex', 'notifications', 'voice', 'mcpServers',
-  'advanced', 'lumihub', 'dataPortability', 'diagnostics', 'streamDeck', 'ssoProviders', 'operator',
+  'advanced', 'lumihub', 'illarin', 'dataPortability', 'diagnostics', 'streamDeck', 'ssoProviders', 'operator',
   'tokenizers', 'users', 'migration',
 ] as const
 
