@@ -290,8 +290,13 @@ describe('P12 chat dock preservation contracts', () => {
     const source = await readSource('ChatView.tsx')
 
     expect(source).toContain("const nativeDockRequest = 'strip' as const")
-    expect(source).toContain('const chatTopDockDefaultRequest = nativeDockRequest')
-    expect(source).toContain('const chatTopDockRequest = nativeDockRequest')
+    // Line-anchored: the rail's own request must be the native constant and
+    // nothing else. A placement-derived tail (dockQuickToolbar /
+    // keepFloatingDockHost / effectiveQuickToolbarDockRequest) would let Suite
+    // placement move or collapse the native strip, which is the regression this
+    // contract exists to prevent.
+    expect(source).toMatch(/^\s*const chatTopDockRequest = nativeDockRequest\s*$/m)
+    expect(source).toMatch(/data-dock-request=\{chatTopDockRequest\}/)
     expect(source).toMatch(/syncDockRequest\(\s*chatTopDock\s*,\s*\(\)\s*=>\s*nativeDockRequest\s*,\s*nativeDockRequest\s*,\s*\(request\)\s*=>\s*effectiveQuickToolbarDockRequest\(request,\s*quickToolbarSettings\)\s*\)/)
   })
 
