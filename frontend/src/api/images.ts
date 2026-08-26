@@ -29,6 +29,13 @@ function joinApiPath(path: string): string {
   return `${BASE_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 }
 
+function isDirectImageUrl(value: string): boolean {
+  const apiBase = BASE_URL.replace(/\/+$/, '')
+  return (value.startsWith('/') && !value.startsWith('//'))
+    || value.startsWith(`${apiBase}/images/`)
+    || value.startsWith('/api/v1/images/')
+}
+
 export const imagesApi = {
   get(id: string) {
     return get<Image>(`/images/${id}`)
@@ -103,11 +110,23 @@ export const imagesApi = {
   /** Render a durable local image directly; proxy only third-party URLs. */
   displayUrl(url: string) {
     const value = url.trim()
-    const apiBase = BASE_URL.replace(/\/+$/, '')
-    if (value.startsWith(`${apiBase}/images/`) || value.startsWith('/api/v1/images/')) {
-      return value
-    }
+    if (isDirectImageUrl(value)) return value
     return `${joinApiPath('/images/remote')}?url=${encodeURIComponent(value)}`
+  },
+
+  /**
+   * Browser-side fallback for split-horizon/LAN hosts rejected by the SSRF-safe
+   * proxy. The caller should try this only after displayUrl() fails.
+   */
+  directDisplayFallback(url: string) {
+    const value = url.trim()
+    if (!value || isDirectImageUrl(value)) return null
+    try {
+      const parsed = new URL(value)
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : null
+    } catch {
+      return null
+    }
   },
 
   rebuildThumbnails(options?: {

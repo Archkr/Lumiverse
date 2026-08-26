@@ -1520,8 +1520,17 @@ function PresetSelector({ registry, activePresetId, activePresetName, onSelect, 
                       src={imagesApi.displayUrl(entry.coverUrl)}
                       alt=""
                       className={s.presetManagerCoverImage}
+                      referrerPolicy="no-referrer"
                       onLoad={(event) => { event.currentTarget.style.display = '' }}
-                      onError={(event) => { event.currentTarget.style.display = 'none' }}
+                      onError={(event) => {
+                        const fallback = imagesApi.directDisplayFallback(entry.coverUrl!)
+                        if (fallback && event.currentTarget.dataset.directFallback !== fallback) {
+                          event.currentTarget.dataset.directFallback = fallback
+                          event.currentTarget.src = fallback
+                          return
+                        }
+                        event.currentTarget.style.display = 'none'
+                      }}
                     />
                   )}
                   {isActive && <span className={s.presetManagerActiveBadge}>{t('preset.active')}</span>}
@@ -1621,8 +1630,17 @@ function PresetCoverHeader({ preset }: { preset: LoomPreset }) {
           src={imagesApi.displayUrl(visibleCoverUrl)}
           alt=""
           aria-hidden="true"
+          referrerPolicy="no-referrer"
           onLoad={(event) => { event.currentTarget.style.display = '' }}
-          onError={() => setFailedCoverUrl(visibleCoverUrl)}
+          onError={(event) => {
+            const fallback = imagesApi.directDisplayFallback(visibleCoverUrl)
+            if (fallback && event.currentTarget.dataset.directFallback !== fallback) {
+              event.currentTarget.dataset.directFallback = fallback
+              event.currentTarget.src = fallback
+              return
+            }
+            setFailedCoverUrl(visibleCoverUrl)
+          }}
         />
       )}
       <div className={s.presetCoverContent}>

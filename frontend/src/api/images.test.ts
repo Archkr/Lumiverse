@@ -29,9 +29,20 @@ describe('imagesApi thumbnail rebuild', () => {
   test('renders durable local images directly and proxies remote covers', () => {
     expect(imagesApi.displayUrl('/api/v1/images/local-id')).toBe('/api/v1/images/local-id')
     expect(imagesApi.displayUrl('/custom/api/images/local-id')).toBe('/custom/api/images/local-id')
+    expect(imagesApi.displayUrl('/user-media/preset-cover.webp')).toBe('/user-media/preset-cover.webp')
     expect(imagesApi.displayUrl('https://cdn.example.test/cover.webp')).toBe(
       '/custom/api/images/remote?url=https%3A%2F%2Fcdn.example.test%2Fcover.webp',
     )
+  })
+
+  test('offers a direct browser fallback only for remote HTTP cover URLs', () => {
+    expect(imagesApi.directDisplayFallback('https://zip.example.test/u/preset.webp')).toBe(
+      'https://zip.example.test/u/preset.webp',
+    )
+    expect(imagesApi.directDisplayFallback('/api/v1/images/local-id')).toBeNull()
+    expect(imagesApi.directDisplayFallback('/user-media/preset-cover.webp')).toBeNull()
+    expect(imagesApi.directDisplayFallback('data:image/png;base64,abc')).toBeNull()
+    expect(imagesApi.directDisplayFallback('not a url')).toBeNull()
   })
 
   test('uses the shared API client for an ordinary rebuild', async () => {
