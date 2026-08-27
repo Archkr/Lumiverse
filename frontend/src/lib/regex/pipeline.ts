@@ -19,7 +19,7 @@ import {
 import type { ApplyWorkerScript } from './apply.worker'
 import {
   isSupported as workerSupported,
-  RegexJobDroppedError,
+  RegexJobSupersededError,
   RegexWorkerCrashedError,
   RegexWorkerError,
   RegexWorkerTimeoutError,
@@ -112,10 +112,18 @@ interface WorkerBatchAttempt {
   outcome?: DisplayRegexBackendResult
 }
 
+interface RenderDedupe {
+  dedupeKey: string
+  dedupeGeneration: number
+}
+
+let nextRenderGeneration = 1
+
 async function applyBatchInWorker(
   content: string,
   scripts: RegexScript[],
   context: ApplyDisplayRegexContext,
+  dedupe: RenderDedupe | null,
 ): Promise<WorkerBatchAttempt> {
   let remaining = scripts
   let currentContent = content
@@ -132,9 +140,12 @@ async function applyBatchInWorker(
         op: 'apply',
         body: currentContent,
         scripts: resolved.map((entry) => entry.worker),
+        ...(dedupe ?? {}),
       })
       return { ok: true, outcome: { result: outcome.result } }
     } catch (error) {
+      // A newer render of this message is already queued (abandoning this shouldn't look like a worker failure)
+      if (error instanceof RegexJobSupersededError) throw error
       if (error instanceof RegexWorkerTimeoutError) {
         const completedCount = Math.min(
           Math.max(error.completedScriptCount, 0),
@@ -197,7 +208,6 @@ async function applyBatchInWorker(
       }
       if (
         error instanceof RegexWorkerCrashedError
-        || error instanceof RegexJobDroppedError
         || error instanceof RegexWorkerUnsupportedError
         || !(error instanceof RegexWorkerError)
       ) return { ok: false }
@@ -262,6 +272,12 @@ export async function applyDisplayRegexTiered(
   const provenance: { touchedVars?: ReadonlySet<string>; sawUncacheable: boolean } = { sawUncacheable: false }
   let workerUsable = workerSupported()
   let index = 0
+  const dedupe: RenderDedupe | null = context.messageId
+    ? {
+      dedupeKey: `${context.messageId}|${context.isUser ? 'user' : 'ai'}`,
+      dedupeGeneration: nextRenderGeneration++,
+    }
+    : null
 
   while (index < eligible.length) {
     if (!isWorkerCapable(eligible[index]!)) {
@@ -278,7 +294,7 @@ export async function applyDisplayRegexTiered(
     while (end < eligible.length && isWorkerCapable(eligible[end]!)) end += 1
     const batch = eligible.slice(index, end)
     if (workerUsable) {
-      const attempt = await applyBatchInWorker(result, batch, context)
+      const attempt = await applyBatchInWorker(result, batch, context, dedupe)
       if (attempt.ok) {
         if (attempt.outcome) {
           mergeProvenance(provenance, attempt.outcome)
