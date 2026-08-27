@@ -18,6 +18,7 @@ export interface ApplyWorkerJob {
 }
 
 export type ApplyWorkerResponse =
+  | { type: 'ready' }
   | { type: 'progress'; jobId: number; scriptIndex: number; scriptId?: string; scriptName?: string }
   | { type: 'checkpoint'; jobId: number; scriptIndex: number; result: string; elapsedMs: number }
   | { type: 'result'; jobId: number; op: 'apply'; result: string; elapsedMs: number; scriptElapsedMs: number[] }
@@ -64,6 +65,8 @@ const workerSelf = self as unknown as {
   onmessage: ((event: { data: ApplyWorkerJob }) => void) | null
   postMessage(message: ApplyWorkerResponse): void
 }
+
+workerSelf.postMessage({ type: 'ready' })
 
 workerSelf.onmessage = (event) => {
   const job = event.data
