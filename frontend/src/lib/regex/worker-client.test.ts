@@ -13,13 +13,13 @@ import type { RegexWorkerLike } from './worker-client'
 const { compileRegex } = await import('./compile-regex')
 const { replaceWithinRegexSearchWindow } = await import('./search-window')
 const {
-  MAX_PENDING_JOBS,
-  RegexJobDroppedError,
+  COLD_SPAWN_KILL_MS,
+  KILL_MS,
+  RegexJobSupersededError,
   RegexWorkerTimeoutError,
   RegexWorkerUnsupportedError,
   resetRegexWorkerForTests,
   runRegexJobInWorker,
-  setRegexWorkerCallbacks,
   setRegexWorkerDepsForTests,
 } = await import('./worker-client')
 
@@ -258,25 +258,85 @@ describe('regex worker client', () => {
     }
   })
 
-  test('overflow drops the oldest queued job, never the active job', async () => {
+  test('distinct-message jobs are never dropped at any queue depth', async () => {
     const { spawned } = makeHarness()
     try {
-      const dropped: number[] = []
-      setRegexWorkerCallbacks({ onDropped: ({ jobId }) => dropped.push(jobId) })
-      const promises = Array.from({ length: MAX_PENDING_JOBS }, (_, index) => runRegexJobInWorker({
-        op: 'apply', body: String(index), scripts: [workerScript(String(index))],
+      const promises = Array.from({ length: 100 }, (_, index) => runRegexJobInWorker({
+        op: 'apply', body: String(index), scripts: [workerScript(String(index))], dedupeKey: `m${index}|ai`,
       }))
       expect(spawned[0].sent).toHaveLength(1)
 
-      const newest = runRegexJobInWorker({ op: 'apply', body: 'new', scripts: [workerScript('new', 'NEW')] })
-      expect(dropped).toEqual([2])
-      await expect(promises[1]).rejects.toBeInstanceOf(RegexJobDroppedError)
+      echoWorker(spawned[0])
+      const outcomes = await Promise.allSettled(promises)
+      expect(outcomes.every((entry) => entry.status === 'fulfilled')).toBe(true)
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('a newer job supersedes only queued jobs with the same dedupeKey, never the active one', async () => {
+    const { spawned } = makeHarness()
+    try {
+      const activeJob = runRegexJobInWorker({ op: 'apply', body: 'a', scripts: [workerScript('a', 'A')], dedupeKey: 'm1|ai' })
+      const staleRender = runRegexJobInWorker({ op: 'apply', body: 'b', scripts: [workerScript('b', 'OLD')], dedupeKey: 'm2|ai' })
+      const otherMessage = runRegexJobInWorker({ op: 'apply', body: 'c', scripts: [workerScript('c', 'C')], dedupeKey: 'm3|ai' })
+      const freshRender = runRegexJobInWorker({ op: 'apply', body: 'b', scripts: [workerScript('b', 'NEW')], dedupeKey: 'm2|ai' })
+
+      await expect(staleRender).rejects.toBeInstanceOf(RegexJobSupersededError)
 
       echoWorker(spawned[0])
-      expect((await promises[0]).result).toBe('')
-      expect((await newest).result).toBe('NEW')
-      const survivors = await Promise.allSettled(promises.slice(2))
-      expect(survivors.every((entry) => entry.status === 'fulfilled')).toBe(true)
+      expect((await activeJob).result).toBe('A')
+      expect((await otherMessage).result).toBe('C')
+      expect((await freshRender).result).toBe('NEW')
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('a stale render retry never displaces an already-queued fresher render of the same message', async () => {
+    const { spawned } = makeHarness()
+    try {
+      const occupies = runRegexJobInWorker({ op: 'apply', body: 'x', scripts: [workerScript('x', 'X')], dedupeKey: 'other|ai', dedupeGeneration: 1 })
+      const fresh = runRegexJobInWorker({ op: 'apply', body: 'b', scripts: [workerScript('b', 'FRESH')], dedupeKey: 'm1|ai', dedupeGeneration: 5 })
+      const staleRetry = runRegexJobInWorker({ op: 'apply', body: 'b', scripts: [workerScript('b', 'STALE')], dedupeKey: 'm1|ai', dedupeGeneration: 4 })
+
+      await expect(staleRetry).rejects.toBeInstanceOf(RegexJobSupersededError)
+
+      echoWorker(spawned[0])
+      expect((await occupies).result).toBe('X')
+      expect((await fresh).result).toBe('FRESH')
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('a same-key job arriving while its predecessor is active leaves the active job untouched', async () => {
+    const { spawned } = makeHarness()
+    try {
+      const first = runRegexJobInWorker({ op: 'apply', body: 'a', scripts: [workerScript('a', 'V1')], dedupeKey: 'm1|ai' })
+      const second = runRegexJobInWorker({ op: 'apply', body: 'a', scripts: [workerScript('a', 'V2')], dedupeKey: 'm1|ai' })
+      expect(spawned[0].sent).toHaveLength(1)
+
+      echoWorker(spawned[0])
+      expect((await first).result).toBe('V1')
+      expect((await second).result).toBe('V2')
+    } finally {
+      resetRegexWorkerForTests()
+    }
+  })
+
+  test('a cold worker keeps the spawn deadline until it signals ready, then falls to the kill deadline', async () => {
+    const { spawned, timers } = makeHarness()
+    try {
+      const promise = runRegexJobInWorker({ op: 'apply', body: 'a', scripts: [workerScript('a', 'A')] })
+      expect(timers[0].ms).toBe(COLD_SPAWN_KILL_MS)
+
+      spawned[0].respond({ type: 'ready' })
+      expect(timers[0].cancelled).toBe(true)
+      expect(timers[1].ms).toBe(KILL_MS)
+
+      echoWorker(spawned[0])
+      expect((await promise).result).toBe('A')
     } finally {
       resetRegexWorkerForTests()
     }

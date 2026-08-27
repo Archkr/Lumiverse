@@ -6,7 +6,7 @@ export const KILL_MS_DEFAULT = 250
 export const DEADLINE_GRACE_MS = 50
 export const CONGESTED_DEADLINE_GRACE_MS = 1_000
 export const SCHEDULER_STARVATION_MS = 200
-export const MAX_PENDING_JOBS = 8
+export const COLD_SPAWN_KILL_MS = 5_000
 
 function resolveKillMs(): number {
   const raw = import.meta.env.VITE_REGEX_KILL_MS
@@ -34,7 +34,6 @@ export interface RegexWorkerDeps {
 
 export interface RegexWorkerCallbacks {
   onScriptFlagged?: (event: { jobId: number; scriptId?: string; scriptName?: string; elapsedMs?: number }) => void
-  onDropped?: (event: { jobId: number; scriptId?: string; scriptName?: string }) => void
 }
 
 export class RegexWorkerError extends Error {
@@ -87,11 +86,11 @@ export class RegexWorkerTimeoutError extends RegexWorkerError {
   }
 }
 
-export class RegexJobDroppedError extends RegexWorkerError {
+export class RegexJobSupersededError extends RegexWorkerError {
   readonly jobId: number
-  constructor(jobId: number, message = `regex job ${jobId} dropped (queue overflow)`) {
+  constructor(jobId: number, message = `regex job ${jobId} superseded by a newer job for the same message`) {
     super(message)
-    this.name = 'RegexJobDroppedError'
+    this.name = 'RegexJobSupersededError'
     this.jobId = jobId
   }
 }
@@ -195,7 +194,10 @@ export function setRegexWorkerCallbacks(next: RegexWorkerCallbacks): void {
   callbacks = next
 }
 
-export type RegexJobInput = Omit<ApplyWorkerJob, 'jobId'>
+export type RegexJobInput = Omit<ApplyWorkerJob, 'jobId'> & {
+  dedupeKey?: string
+  dedupeGeneration?: number
+}
 export type RegexJobOutcome = {
   op: 'apply'
   result: string
@@ -205,6 +207,8 @@ export type RegexJobOutcome = {
 
 interface PendingJob {
   job: ApplyWorkerJob
+  dedupeKey?: string
+  dedupeGeneration?: number
   resolve: (outcome: RegexJobOutcome) => void
   reject: (error: RegexWorkerError) => void
   cancelDeadline: (() => void) | null
@@ -217,6 +221,7 @@ interface PendingJob {
 const queue: PendingJob[] = []
 let active: PendingJob | null = null
 let activeWorker: RegexWorkerLike | null = null
+let activeWorkerWarm = false
 let nextJobId = 1
 
 export function isSupported(): boolean {
@@ -229,13 +234,17 @@ function ensureWorker(): RegexWorkerLike {
   worker.setMessageHandler((message) => handleWorkerMessage(worker, message))
   worker.setErrorHandler((error) => handleWorkerError(worker, error))
   activeWorker = worker
+  activeWorkerWarm = false
   return worker
 }
 
 function armDeadline(entry: PendingJob): void {
   entry.cancelDeadline?.()
   entry.phaseStartedAt = getDeps().now()
-  entry.cancelDeadline = getDeps().scheduleTimer(() => beginDeadlineGrace(entry), KILL_MS)
+  entry.cancelDeadline = getDeps().scheduleTimer(
+    () => beginDeadlineGrace(entry),
+    activeWorkerWarm ? KILL_MS : COLD_SPAWN_KILL_MS,
+  )
 }
 
 function beginDeadlineGrace(entry: PendingJob): void {
@@ -282,7 +291,14 @@ function pumpQueue(): void {
 }
 
 function handleWorkerMessage(worker: RegexWorkerLike, message: ApplyWorkerResponse): void {
-  if (worker !== activeWorker || !active || active.job.jobId !== message.jobId) return
+  if (worker !== activeWorker) return
+  const wasWarm = activeWorkerWarm
+  activeWorkerWarm = true
+  if (message.type === 'ready') {
+    if (active && !wasWarm && !active.currentScript) armDeadline(active)
+    return
+  }
+  if (!active || active.job.jobId !== message.jobId) return
   if (message.type === 'progress') {
     active.currentScript = {
       ...(message.scriptId ? { scriptId: message.scriptId } : {}),
@@ -368,19 +384,29 @@ function handleDeadlineExpired(entry: PendingJob): void {
 export function runRegexJobInWorker(input: RegexJobInput): Promise<RegexJobOutcome> {
   if (!isSupported()) return Promise.reject(new RegexWorkerUnsupportedError())
 
-  const job: ApplyWorkerJob = { ...input, jobId: nextJobId++ }
+  const { dedupeKey, dedupeGeneration, ...jobFields } = input
+  const job: ApplyWorkerJob = { ...jobFields, jobId: nextJobId++ }
+  const generation = dedupeGeneration ?? job.jobId
   return new Promise<RegexJobOutcome>((resolve, reject) => {
-    while ((active ? 1 : 0) + queue.length >= MAX_PENDING_JOBS) {
-      const oldest = queue.shift()
-      if (!oldest) break
-      callbacks.onDropped?.({
-        jobId: oldest.job.jobId,
-        ...(oldest.currentScript ?? {}),
-      })
-      oldest.reject(new RegexJobDroppedError(oldest.job.jobId))
+    if (dedupeKey !== undefined) {
+      const generationOf = (entry: PendingJob): number => entry.dedupeGeneration ?? entry.job.jobId
+      const fresherExists = (active?.dedupeKey === dedupeKey && generationOf(active) > generation)
+        || queue.some((entry) => entry.dedupeKey === dedupeKey && generationOf(entry) > generation)
+      if (fresherExists) {
+        reject(new RegexJobSupersededError(job.jobId))
+        return
+      }
+      for (let index = queue.length - 1; index >= 0; index -= 1) {
+        const stale = queue[index]!
+        if (stale.dedupeKey !== dedupeKey || generationOf(stale) >= generation) continue
+        queue.splice(index, 1)
+        stale.reject(new RegexJobSupersededError(stale.job.jobId))
+      }
     }
     queue.push({
       job,
+      ...(dedupeKey !== undefined ? { dedupeKey } : {}),
+      ...(dedupeGeneration !== undefined ? { dedupeGeneration } : {}),
       resolve,
       reject,
       cancelDeadline: null,
@@ -403,6 +429,7 @@ export function resetRegexWorkerForTests(): void {
   queue.length = 0
   activeWorker?.terminate()
   activeWorker = null
+  activeWorkerWarm = false
   stopSchedulerCanary()
   schedulerCanaryFailed = false
   nextJobId = 1
