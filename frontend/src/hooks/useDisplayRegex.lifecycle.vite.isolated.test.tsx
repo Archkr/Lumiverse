@@ -87,9 +87,35 @@ mock.module('@/api/macros', () => ({
  */
 const heldPreprocess = new Set<string>()
 const pendingPreprocess = new Map<string, (value: { content: string; cacheable: boolean }) => void>()
+const isDisplayChatOwnedMock = mock(() => true)
+const heldRemotePreprocess = new Set<string>()
+const pendingRemotePreprocess = new Map<string, (response: Response) => void>()
+const nativeFetch = globalThis.fetch
+
+function remotePreprocessResponse(rawContents: string[]): Response {
+  return new Response(JSON.stringify({
+    items: rawContents.map((content) => ({ content, incrementalRawAppendSafe: true })),
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+const fetchMock = mock((_input: RequestInfo | URL, init?: RequestInit) => {
+  const parsed = JSON.parse(String(init?.body ?? '{}')) as { items?: Array<{ rawContent?: string }> }
+  const rawContents = (parsed.items ?? []).map((item) => item.rawContent ?? '')
+  const held = rawContents.find((content) => heldRemotePreprocess.has(content))
+  if (held) {
+    return new Promise<Response>((resolve) => {
+      pendingRemotePreprocess.set(held, resolve)
+    })
+  }
+  return Promise.resolve(remotePreprocessResponse(rawContents))
+})
+globalThis.fetch = fetchMock as unknown as typeof fetch
 
 mock.module('@/lib/spindle/display-resolver-registry', () => ({
-  isDisplayChatOwned: () => true,
+  isDisplayChatOwned: isDisplayChatOwnedMock,
   getDisplayResolverForChat: () => ({
     resolveBody: ({ content }: { content: string }) => (
       heldPreprocess.has(content)
@@ -217,6 +243,10 @@ afterEach(() => {
   pendingResults.clear()
   heldPreprocess.clear()
   pendingPreprocess.clear()
+  heldRemotePreprocess.clear()
+  pendingRemotePreprocess.clear()
+  isDisplayChatOwnedMock.mockImplementation(() => true)
+  fetchMock.mockClear()
   applyDisplayRegexTiered.mockClear()
   trackInitialDisplayResolve.mockClear()
   document.body.replaceChildren()
@@ -225,10 +255,54 @@ afterEach(() => {
 })
 
 afterAll(() => {
+  globalThis.fetch = nativeFetch
   dom.window.close()
 })
 
 describe('useDisplayRegex resolver lifecycle', () => {
+  test('paints safe plain-text suffixes immediately but holds a new macro opener', async () => {
+    const { host, root } = await createHarness()
+    const identity = { chatId: 'chat-plain-stream', messageId: 'message-plain-stream' }
+    const originalScripts = storeState.regexScripts
+    isDisplayChatOwnedMock.mockImplementation(() => false)
+    storeState.regexScripts = []
+
+    try {
+      await act(async () => {
+        root.render(createElement(Harness, {
+          content: 'Hello',
+          identity,
+          isStreaming: true,
+        }))
+      })
+      await flushReact()
+      await act(async () => {
+        await new Promise<void>((resolve) => domWindow.setTimeout(resolve, 12))
+      })
+      expect(readRendered(host)).toBe('Hello')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      heldRemotePreprocess.add('Hello world')
+      await renderWhilePreprocessPending(root, {
+        content: 'Hello world',
+        identity,
+        isStreaming: true,
+      })
+      expect(readRendered(host)).toBe('Hello world')
+
+      heldRemotePreprocess.add('Hello world {')
+      await renderWhilePreprocessPending(root, {
+        content: 'Hello world {',
+        identity,
+        isStreaming: true,
+      })
+      expect(readRendered(host)).toBe('Hello world')
+    } finally {
+      storeState.regexScripts = originalScripts
+      await destroyHarness(host, root)
+    }
+  })
+
   test('tracks only the first preprocess and regex keys of an active stream', async () => {
     const { host, root } = await createHarness()
     const identity = { chatId: 'chat-recovery-stream', messageId: 'message-recovery-stream' }

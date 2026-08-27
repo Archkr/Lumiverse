@@ -44,7 +44,9 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'autoUpdate',
-      injectRegister: 'inline',
+      // main.tsx imports virtual:pwa-register so it can own update UI and the
+      // guarded reload policy. Do not inject a second raw registration.
+      injectRegister: false,
       manifest: false,
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
       injectManifest: {

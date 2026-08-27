@@ -7,6 +7,7 @@ import { getSafeInAppNavigationUrl } from './lib/navigationSafety'
 import { installWindowOpenGuard } from './lib/windowOpenGuard'
 import { computeViewportKeyboardInset } from './lib/viewportKeyboardInset'
 import { rememberRegistration } from './lib/swUpdater'
+import { claimServiceWorkerReload } from './lib/swUpdatePolicy'
 import { installPwaLifecycleDiagnostics } from './lib/pwaLifecycleDiagnostics'
 import { initializeSafeThemeMode } from './lib/safeThemeMode'
 import { router } from './router'
@@ -31,6 +32,10 @@ registerSW({
   // registration lifecycle instead of duplicating it with a browser listener.
   onNeedReload() {
     if (reloading) return
+    if (!claimServiceWorkerReload(window.sessionStorage)) {
+      console.warn('[service-worker] Suppressed repeated automatic reload')
+      return
+    }
     reloading = true
     window.location.reload()
   },

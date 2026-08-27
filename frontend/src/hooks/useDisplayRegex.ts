@@ -10,6 +10,7 @@ import i18n from '@/i18n'
 import type { DisplayMacroContext } from '@/lib/resolveDisplayMacros'
 import type { RegexScript } from '@/types/regex'
 import type { Message } from '@/types/api'
+import { canOptimisticallyAppendStreamingText } from '@/lib/display-streaming'
 
 interface ResolvedDisplayRegexTemplates {
   resolvedFindPatterns: Map<string, string>
@@ -69,16 +70,25 @@ interface DisplayPreprocessOutcome {
   ok: boolean
   touchedVars?: readonly string[]
   cacheable?: boolean
+  incrementalRawAppendSafe?: boolean
 }
 
 interface PendingDisplayPreprocess {
   body: DisplayPreprocessBody
-  resolve: (value: string) => void
+  resolve: (value: DisplayPreprocessOutcome) => void
+}
+
+interface DisplayPreprocessCacheEntry {
+  value?: string
+  promise?: Promise<DisplayPreprocessOutcome>
+  touchedVars?: ReadonlySet<string>
+  messageId?: string
+  incrementalRawAppendSafe?: boolean
 }
 
 const displayRegexResolutionCache = new Map<string, DisplayRegexCacheEntry>()
 const displayRegexContentCache = new Map<string, DisplayRegexContentCacheEntry>()
-const displayPreprocessCache = new Map<string, { value?: string; promise?: Promise<DisplayPreprocessOutcome>; touchedVars?: ReadonlySet<string>; messageId?: string }>()
+const displayPreprocessCache = new Map<string, DisplayPreprocessCacheEntry>()
 const DISPLAY_PREPROCESS_CACHE_MAX = 500
 const DISPLAY_REGEX_CONTENT_CACHE_MAX = 300
 
@@ -338,7 +348,7 @@ async function resolveTemplatesWithResolver(
 async function fetchDisplayPreprocessBatch(
   chatId: string,
   bodies: DisplayPreprocessBody[],
-): Promise<string[]> {
+): Promise<DisplayPreprocessOutcome[]> {
   try {
     const res = await fetch(`/api/v1/chats/${encodeURIComponent(chatId)}/display-preprocess`, {
       method: 'POST',
@@ -346,15 +356,23 @@ async function fetchDisplayPreprocessBatch(
       body: JSON.stringify({ items: bodies }),
       credentials: 'include',
     })
-    if (!res.ok) return bodies.map((body) => body.rawContent)
-    const json = (await res.json()) as { items?: Array<{ content?: unknown }> }
-    if (!Array.isArray(json.items)) return bodies.map((body) => body.rawContent)
+    if (!res.ok) return bodies.map((body) => ({ content: body.rawContent, ok: false }))
+    const json = (await res.json()) as {
+      items?: Array<{ content?: unknown; incrementalRawAppendSafe?: unknown }>
+    }
+    if (!Array.isArray(json.items)) {
+      return bodies.map((body) => ({ content: body.rawContent, ok: false }))
+    }
     return bodies.map((body, index) => {
-      const content = json.items?.[index]?.content
-      return typeof content === 'string' ? content : body.rawContent
+      const item = json.items?.[index]
+      return {
+        content: typeof item?.content === 'string' ? item.content : body.rawContent,
+        ok: typeof item?.content === 'string',
+        incrementalRawAppendSafe: item?.incrementalRawAppendSafe === true,
+      }
     })
   } catch {
-    return bodies.map((body) => body.rawContent)
+    return bodies.map((body) => ({ content: body.rawContent, ok: false }))
   }
 }
 
@@ -366,14 +384,16 @@ function flushDisplayPreprocessQueue(): void {
     for (let i = 0; i < queue.length; i += DISPLAY_PREPROCESS_BATCH_MAX) {
       const batch = queue.slice(i, i + DISPLAY_PREPROCESS_BATCH_MAX)
       void fetchDisplayPreprocessBatch(chatId, batch.map((item) => item.body))
-        .then((contents) => {
-          batch.forEach((item, index) => item.resolve(contents[index] ?? item.body.rawContent))
+        .then((outcomes) => {
+          batch.forEach((item, index) => item.resolve(
+            outcomes[index] ?? { content: item.body.rawContent, ok: false },
+          ))
         })
     }
   }
 }
 
-function enqueueDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<string> {
+function enqueueDisplayPreprocess(chatId: string, body: DisplayPreprocessBody): Promise<DisplayPreprocessOutcome> {
   return new Promise((resolve) => {
     const queue = displayPreprocessQueues.get(chatId)
     if (queue) queue.push({ body, resolve })
@@ -423,7 +443,7 @@ export function fetchDisplayPreprocess(chatId: string, body: DisplayPreprocessBo
     }
     return Promise.resolve({ content: body.rawContent, ok: false })
   }
-  return enqueueDisplayPreprocess(chatId, body).then((content) => ({ content, ok: true }))
+  return enqueueDisplayPreprocess(chatId, body)
 }
 
 interface DisplayPreprocessedState {
@@ -440,6 +460,7 @@ function useDisplayPreprocessedState(
   chatId: string | null,
   opts: DisplayPreprocessOpts | undefined,
   isStreaming = false,
+  allowOptimisticRawAppend = false,
 ): DisplayPreprocessedState {
   const messageIdForSnapshot = opts?.messageId ?? null
   const trackForDisplaySettle = useDisplaySettleTracker(
@@ -462,9 +483,22 @@ function useDisplayPreprocessedState(
     return `${chatId}|${opts.messageId}|${opts.role}|${opts.depth ?? 0}|${opts.messageIndex ?? -1}|${JSON.stringify(opts.dynamicMacros ?? {})}|${content.length}|${fnv1a(content)}`
   }, [content, opts?.messageId, opts?.role, opts?.depth, opts?.messageIndex, opts?.dynamicMacros, chatId])
 
-  const cached = key ? displayPreprocessCache.get(key)?.value : undefined
-  const [state, setState] = useState<{ key: string; value: string; ok: boolean } | null>(() =>
-    key && cached !== undefined ? { key, value: cached, ok: true } : null,
+  const cachedEntry = key ? displayPreprocessCache.get(key) : undefined
+  const cached = cachedEntry?.value
+  const [state, setState] = useState<{
+    key: string
+    value: string
+    ok: boolean
+    incrementalRawAppendSafe: boolean
+  } | null>(() =>
+    key && cached !== undefined
+      ? {
+          key,
+          value: cached,
+          ok: true,
+          incrementalRawAppendSafe: cachedEntry?.incrementalRawAppendSafe === true,
+        }
+      : null,
   )
 
   const lastRef = useRef<{ raw: string; value: string } | null>(null)
@@ -479,7 +513,13 @@ function useDisplayPreprocessedState(
   // newest already-preprocessed value of THIS message on screen while the newest
   // key is pending, and is dropped when the chat/message identity changes or a
   // new stream begins, so preprocessed text can never cross identities.
-  const carryRef = useRef<{ chatId: string | null; messageId: string | null; value: string } | null>(null)
+  const carryRef = useRef<{
+    chatId: string | null
+    messageId: string | null
+    raw: string
+    value: string
+    incrementalRawAppendSafe: boolean
+  } | null>(null)
   const carryIdentityRef = useRef<{ chatId: string | null; messageId: string | null }>({
     chatId,
     messageId: messageIdForSnapshot,
@@ -503,8 +543,14 @@ function useDisplayPreprocessedState(
     finalKeyPendingRef.current = true
   }
   wasStreamingRef.current = isStreaming
-  const rememberCarry = (value: string): void => {
-    carryRef.current = { chatId, messageId: messageIdForSnapshot, value }
+  const rememberCarry = (raw: string, value: string, incrementalRawAppendSafe: boolean): void => {
+    carryRef.current = {
+      chatId,
+      messageId: messageIdForSnapshot,
+      raw,
+      value,
+      incrementalRawAppendSafe,
+    }
   }
 
   useEffect(() => {
@@ -514,12 +560,23 @@ function useDisplayPreprocessedState(
     }
     let cancelled = false
     const apply = (next: DisplayPreprocessOutcome) => {
-      if (!cancelled) setState({ key, value: next.content, ok: next.ok })
+      if (!cancelled) {
+        setState({
+          key,
+          value: next.content,
+          ok: next.ok,
+          incrementalRawAppendSafe: next.incrementalRawAppendSafe === true,
+        })
+      }
     }
     const run = () => {
       const existing = displayPreprocessCache.get(key)
       if (existing?.value !== undefined) {
-        apply({ content: existing.value, ok: true })
+        apply({
+          content: existing.value,
+          ok: true,
+          incrementalRawAppendSafe: existing.incrementalRawAppendSafe === true,
+        })
         return
       }
       if (!existing?.promise) {
@@ -541,6 +598,9 @@ function useDisplayPreprocessedState(
                   messageId: messageIdForEntry,
                   ...(next.touchedVars && next.touchedVars.length > 0
                     ? { touchedVars: new Set(next.touchedVars) }
+                    : {}),
+                  ...(next.incrementalRawAppendSafe
+                    ? { incrementalRawAppendSafe: true }
                     : {}),
                 })
                 if (displayPreprocessCache.size > DISPLAY_PREPROCESS_CACHE_MAX) {
@@ -589,11 +649,11 @@ function useDisplayPreprocessedState(
 
   if (!key) return { value: content, ready: true, settled: true }
   if (cached !== undefined) {
-    rememberCarry(cached)
+    rememberCarry(content, cached, cachedEntry?.incrementalRawAppendSafe === true)
     return { value: cached, ready: true, settled: true }
   }
   if (state?.key === key) {
-    if (state.ok) rememberCarry(state.value)
+    if (state.ok) rememberCarry(content, state.value, state.incrementalRawAppendSafe)
     return { value: state.value, ready: state.ok, settled: true }
   }
   if (lastRef.current?.raw === content) return { value: lastRef.current.value, ready: true, settled: true }
@@ -605,6 +665,26 @@ function useDisplayPreprocessedState(
     && (isStreaming || finalKeyPendingRef.current)
     && content.length > 0
   ) {
+    if (
+      allowOptimisticRawAppend
+      && carried.incrementalRawAppendSafe
+      && canOptimisticallyAppendStreamingText(carried.raw, content)
+    ) {
+      const optimisticValue = carried.value + content.slice(carried.raw.length)
+      // This suffix is guaranteed to be a preprocess pass-through, so it can
+      // become the next continuity base. Doing so prevents a later macro
+      // opener from rewinding already-painted plain prose while it waits.
+      carryRef.current = {
+        ...carried,
+        raw: content,
+        value: optimisticValue,
+      }
+      return {
+        value: optimisticValue,
+        ready: false,
+        settled: false,
+      }
+    }
     // Preprocessed, just one key behind. The stream buffer is append-only, so
     // this always contains the previously visible prefix.
     return { value: carried.value, ready: true, settled: false }
@@ -868,23 +948,7 @@ export function useDisplayRegex(
       : undefined,
     [preprocessOpts, depth, messageIndex, dynamicMacros],
   )
-  const {
-    value: content,
-    ready: preprocessReady,
-    settled: preprocessSettled,
-  } = useDisplayPreprocessedState(
-    rawContent,
-    scopedChatId,
-    displayPreprocessOpts,
-    isStreaming,
-  )
-  const pendingSlowReportsRef = useRef<SlowRegexReport[]>([])
-  const pendingRecoveredReportsRef = useRef<SlowRegexReport[]>([])
-
   const displayOwned = !!scopedChatId && isDisplayChatOwned(scopedChatId)
-  // When an extension owns display, regex runs on preprocessed content only.
-  const regexGated = displayOwned && !preprocessReady
-
   const displayScripts = useMemo(
     () =>
       regexScripts.filter(
@@ -897,6 +961,22 @@ export function useDisplayRegex(
       ),
     [regexScripts, activeCharacterId, scopedChatId],
   )
+  const {
+    value: content,
+    ready: preprocessReady,
+    settled: preprocessSettled,
+  } = useDisplayPreprocessedState(
+    rawContent,
+    scopedChatId,
+    displayPreprocessOpts,
+    isStreaming,
+    isStreaming && !displayOwned && displayScripts.length === 0,
+  )
+  const pendingSlowReportsRef = useRef<SlowRegexReport[]>([])
+  const pendingRecoveredReportsRef = useRef<SlowRegexReport[]>([])
+
+  // When an extension owns display, regex runs on preprocessed content only.
+  const regexGated = displayOwned && !preprocessReady
   const needsPreviousContent = useMemo(
     () => displayScripts.some(
       (script) =>

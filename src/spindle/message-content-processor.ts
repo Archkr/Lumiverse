@@ -158,6 +158,10 @@ class MessageContentProcessorChain {
   get count(): number {
     return this.handlers.length;
   }
+
+  hasForUser(userId?: string | null): boolean {
+    return this.handlers.some((handler) => !handler.userId || handler.userId === userId);
+  }
 }
 
 export const messageContentProcessorChain = new MessageContentProcessorChain();

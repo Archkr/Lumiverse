@@ -33,4 +33,31 @@ describe("message content processor context", () => {
 
     expect(seen).toEqual([true, false]);
   });
+
+  test("reports whether a processor applies to a specific user", () => {
+    const unregisterScoped = messageContentProcessorChain.register({
+      extensionId: "test-user-scope",
+      userId: "user-a",
+      priority: 100,
+      handler: async () => undefined,
+    });
+
+    try {
+      expect(messageContentProcessorChain.hasForUser("user-a")).toBe(true);
+      expect(messageContentProcessorChain.hasForUser("user-b")).toBe(false);
+
+      const unregisterGlobal = messageContentProcessorChain.register({
+        extensionId: "test-global-scope",
+        priority: 100,
+        handler: async () => undefined,
+      });
+      try {
+        expect(messageContentProcessorChain.hasForUser("user-b")).toBe(true);
+      } finally {
+        unregisterGlobal();
+      }
+    } finally {
+      unregisterScoped();
+    }
+  });
 });

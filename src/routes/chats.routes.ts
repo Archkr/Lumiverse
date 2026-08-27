@@ -124,7 +124,8 @@ async function runDisplayPreprocessItem(
   item: DisplayPreprocessItem,
   signal?: AbortSignal,
 ) {
-  const processed = messageContentProcessorChain.count > 0
+  const hasContentProcessor = messageContentProcessorChain.hasForUser(userId);
+  const processed = hasContentProcessor
     ? await messageContentProcessorChain.run({
         chatId,
         content: item.rawContent,
@@ -157,7 +158,14 @@ async function runDisplayPreprocessItem(
     }
   }
 
-  return { messageId: item.messageId, content };
+  return {
+    messageId: item.messageId,
+    content,
+    // Lets the client paint an append-only plain-text suffix while its next
+    // coalesced preprocess request is pending. Macro-looking suffixes remain
+    // gated client-side, and any applicable processor disables the fast path.
+    incrementalRawAppendSafe: !hasContentProcessor,
+  };
 }
 
 // --- Chat endpoints ---
