@@ -53,8 +53,9 @@ const storeState = {
     scope_id: null,
     find_regex: 'chunk',
     replace_string: 'resolved',
+    actions: [],
     flags: 'g',
-    placement: [],
+    placement: ['ai_output'],
     min_depth: null,
     max_depth: null,
     trim_strings: [],
@@ -75,7 +76,10 @@ mock.module('@/store', () => ({
 mock.module('@/lib/chatDisplaySettle', () => ({
   trackInitialDisplayResolve,
 }))
-mock.module('@/lib/regex/pipeline', () => ({ applyDisplayRegexTiered }))
+mock.module('@/lib/regex/pipeline', () => ({
+  applyDisplayRegexTiered,
+  canApplyDisplayRegexInWorker: () => true,
+}))
 mock.module('@/api/macros', () => ({
   resolveMacrosBatch: async ({ templates }: { templates: Record<string, string> }) => ({ resolved: templates }),
 }))
@@ -171,6 +175,13 @@ function configureImmediateCoalescing(): void {
       queueMicrotask(() => { if (active) fn() })
       return () => { active = false }
     },
+  })
+}
+
+function configurePausedTrailingCoalescing(): void {
+  setDisplayCoalesceDepsForTests({
+    now: () => 1_000,
+    scheduleTimer: () => () => {},
   })
 }
 
@@ -299,6 +310,49 @@ describe('useDisplayRegex resolver lifecycle', () => {
       expect(readRendered(host)).toBe('Hello world')
     } finally {
       storeState.regexScripts = originalScripts
+      await destroyHarness(host, root)
+    }
+  })
+
+  test('worker-only display regexes resolve each answer frame without waiting for the trailing edge', async () => {
+    const { host, root } = await createHarness()
+    const identity = { chatId: 'chat-worker-stream', messageId: 'message-worker-stream' }
+    isDisplayChatOwnedMock.mockImplementation(() => false)
+    configurePausedTrailingCoalescing()
+
+    try {
+      await render(root, { content: 'Hello', identity, isStreaming: true })
+      await settle('Hello', '[Hello]')
+      await act(async () => {
+        await new Promise<void>((resolve) => domWindow.setTimeout(resolve, 12))
+      })
+      expect(readRendered(host)).toBe('[Hello]')
+
+      await act(async () => {
+        root.render(createElement(Harness, {
+          content: 'Hello world',
+          identity,
+          isStreaming: true,
+        }))
+      })
+      await waitForPending('Hello world')
+      expect(readRendered(host)).toBe('[Hello]')
+      await settle('Hello world', '[Hello world]')
+      expect(readRendered(host)).toBe('[Hello world]')
+
+      // The paused preprocess scheduler has not advanced, but a possible
+      // macro opener still holds the latest safely resolved answer frame.
+      await act(async () => {
+        root.render(createElement(Harness, {
+          content: 'Hello world {',
+          identity,
+          isStreaming: true,
+        }))
+      })
+      await flushReact()
+      expect(readRendered(host)).toBe('[Hello world]')
+      expect(pendingResults.has('Hello world {')).toBe(false)
+    } finally {
       await destroyHarness(host, root)
     }
   })

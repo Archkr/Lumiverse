@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore } from '@/store'
 import { trackInitialDisplayResolve } from '@/lib/chatDisplaySettle'
-import { applyDisplayRegexTiered } from '@/lib/regex/pipeline'
+import { applyDisplayRegexTiered, canApplyDisplayRegexInWorker } from '@/lib/regex/pipeline'
 import { resolveMacrosBatch } from '@/api/macros'
 import { isDisplayChatOwned, getDisplayResolverForChat } from '@/lib/spindle/display-resolver-registry'
 import { regexApi } from '@/api/regex'
@@ -955,12 +955,18 @@ export function useDisplayRegex(
         (s) =>
           s.target.includes('display') &&
           !s.disabled &&
+          s.placement.includes(isUser ? 'user_input' : 'ai_output') &&
+          (s.min_depth === null || depth >= s.min_depth) &&
+          (s.max_depth === null || depth <= s.max_depth) &&
           (s.scope === 'global' ||
             (s.scope === 'character' && s.scope_id === activeCharacterId) ||
             (s.scope === 'chat' && s.scope_id === scopedChatId)),
       ),
-    [regexScripts, activeCharacterId, scopedChatId],
+    [regexScripts, isUser, depth, activeCharacterId, scopedChatId],
   )
+  const canApplyStreamingRegexImmediately = isStreaming
+    && !displayOwned
+    && canApplyDisplayRegexInWorker(displayScripts)
   const {
     value: content,
     ready: preprocessReady,
@@ -970,7 +976,7 @@ export function useDisplayRegex(
     scopedChatId,
     displayPreprocessOpts,
     isStreaming,
-    isStreaming && !displayOwned && displayScripts.length === 0,
+    isStreaming && !displayOwned,
   )
   const pendingSlowReportsRef = useRef<SlowRegexReport[]>([])
   const pendingRecoveredReportsRef = useRef<SlowRegexReport[]>([])
@@ -1311,9 +1317,12 @@ export function useDisplayRegex(
 
       displayRegexContentCache.get(contentCacheKey)?.promise?.then(applyResolvedContent)
     }
-    // Coalesce per-token churn of the same message into one apply pass per window.
+    // Keep backend-capable display work coalesced. Worker-contained scripts
+    // can safely follow the store's existing ~32ms streaming cadence.
     const cancelCoalesce = scheduleCoalescedDisplayResolve(
-      preprocessOpts?.messageId && scopedChatId ? `${scopedChatId}|${preprocessOpts.messageId}|apply` : null,
+      !canApplyStreamingRegexImmediately && preprocessOpts?.messageId && scopedChatId
+        ? `${scopedChatId}|${preprocessOpts.messageId}|apply`
+        : null,
       run,
     )
     return () => { cancelled = true; cancelCoalesce() }
@@ -1338,6 +1347,7 @@ export function useDisplayRegex(
     preprocessOpts?.messageId,
     preprocessOpts?.role,
     trackContentForDisplaySettle,
+    canApplyStreamingRegexImmediately,
   ])
 
   // Carry the previous resolved value forward across cv-bumps and per-chunk

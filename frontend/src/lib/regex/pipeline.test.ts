@@ -42,7 +42,11 @@ mock.module('@/lib/spindle/display-resolver-registry', () => ({
   getDisplayResolverForChat: () => registryState.owned ? registryState.resolver : null,
 }))
 
-const { applyDisplayRegexTiered, resetTieredPipelineForTests } = await import('./pipeline')
+const {
+  applyDisplayRegexTiered,
+  canApplyDisplayRegexInWorker,
+  resetTieredPipelineForTests,
+} = await import('./pipeline')
 const {
   getRegexExecTier,
   quarantineRegexScript,
@@ -148,6 +152,32 @@ afterEach(() => {
 })
 
 describe('isolated regex pipeline', () => {
+  test('only worker-contained scripts qualify for immediate streaming passes', () => {
+    makeHarness()
+    expect(canApplyDisplayRegexInWorker([
+      script('plain'),
+      script('macro-find', { substitute_macros: 'find' }),
+    ])).toBe(true)
+    expect(canApplyDisplayRegexInWorker([
+      script('raw-macro', { substitute_macros: 'raw' }),
+    ])).toBe(false)
+    expect(canApplyDisplayRegexInWorker([
+      script('action', { actions: [{
+        id: 'send',
+        type: 'send',
+        multi_select: false,
+        cost: '1',
+        limit: '1',
+        title: 'Send',
+        subtitle: '',
+        content: '',
+      }] }),
+    ])).toBe(false)
+    expect(canApplyDisplayRegexInWorker([
+      script('match-action', { metadata: { match_actions: ['move_top'] } }),
+    ])).toBe(false)
+  })
+
   test('an edit re-syncs the session overlay from the persisted row instead of dropping quarantine', () => {
     const original = script('edited', { find_regex: 'a+', updated_at: 1 })
     quarantineRegexScript(original)

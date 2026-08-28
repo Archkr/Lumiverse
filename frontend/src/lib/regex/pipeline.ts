@@ -74,6 +74,15 @@ function isWorkerCapable(script: RegexScript): boolean {
   return true
 }
 
+/**
+ * True when a streaming display pass can stay entirely in the browser worker.
+ * These passes can follow the existing 32ms stream cadence without restoring
+ * the per-token backend load that the display coalescer was added to prevent.
+ */
+export function canApplyDisplayRegexInWorker(scripts: readonly RegexScript[]): boolean {
+  return workerSupported() && scripts.every(isWorkerCapable)
+}
+
 function resolveWorkerScript(
   script: RegexScript,
   context: ApplyDisplayRegexContext,
