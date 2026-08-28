@@ -163,28 +163,25 @@ afterEach(async () => {
 })
 
 describe('MessageContent long-message collapsing', () => {
-  test('keeps a regex-rendered Pollinations image in the resource settle phase until load', async () => {
+  test('does not hold the chat reveal for an inline image still loading', async () => {
     await act(async () => {
       root?.render(
         <MessageContent
-          content={'<img src="https://image.pollinations.ai/prompt/slow-generated-scene">'}
+          content={'![slow image](https://images.example/slow-generated-scene.png)'}
           isUser={false}
           userName="User"
           chatId="chat-images"
-          messageId="pollinations-message"
+          messageId="inline-image-message"
         />,
       )
     })
 
-    const image = host.querySelector<HTMLImageElement>('img[src*="pollinations.ai"]')
-    expect(image).not.toBeNull()
-    expect(isChatDisplaySettled('chat-images')).toBe(false)
-    const pendingDiagnostics = getChatDisplaySettleDiagnostics('chat-images')
-    expect(pendingDiagnostics.blockers).toContain('rendered-resources')
-    expect(pendingDiagnostics.pendingRenderedResources).toMatchObject({ chat: 1, global: 0 })
-
-    await act(async () => image?.dispatchEvent(new Event('load')))
-    expect(getChatDisplaySettleDiagnostics('chat-images').pendingRenderedResources.chat).toBe(0)
+    expect(host.querySelector<HTMLImageElement>('img[src*="images.example"]')).not.toBeNull()
+    await act(async () => {
+      await new Promise((resolve) => domWindow.setTimeout(resolve, 20))
+    })
+    expect(getChatDisplaySettleDiagnostics('chat-images').blockers).toEqual([])
+    expect(isChatDisplaySettled('chat-images')).toBe(true)
   })
 
   test('clips an overflowing streaming assistant message and toggles it open', async () => {

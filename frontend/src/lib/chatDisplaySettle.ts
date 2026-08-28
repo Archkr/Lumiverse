@@ -14,7 +14,7 @@ import {
 // repaints already-mounted rows, so revealing the chat before the pipeline
 // settles shows raw tags/JSON that visibly flash away a second or two later.
 //
-// This module tracks the four signals the reveal gate needs:
+// This module tracks the three signals the reveal gate needs:
 //   - runtime tag readiness: backend-declared tag-interceptor extensions must
 //     attach their frontend handlers before raw payload-bearing tags can paint.
 //   - PENDING first resolves: in-flight first resolutions for the mounted
@@ -23,9 +23,6 @@ import {
 //     widget DOM inserts those handlers schedule. SimTracker (and similar
 //     interceptors) rewrite row height after the registry has gone quiet;
 //     revealing before those inserts finish still thrashes the list.
-//   - PENDING rendered resources: images introduced by resolved display regex
-//     output must load (and decode when supported) before their final layout is
-//     known. Network/generation latency belongs here, never in regex CPU time.
 // The reveal itself is deferred by two animation frames, giving React time to
 // commit the interceptor-triggered repaint without imposing an arbitrary
 // quiet-period delay. The caller bounds its wait with a hard cap so
@@ -37,13 +34,11 @@ export const CHAT_REVEAL_SETTLE_CAP_MS = 5000
 export function resetChatDisplaySettleForTests(): void {
   pendingFirstResolves.clear()
   pendingDisplayWork.clear()
-  pendingRenderedResources.clear()
 }
 
 const GLOBAL_SCOPE = '__global__'
 const pendingFirstResolves = new Map<string, number>()
 const pendingDisplayWork = new Map<string, number>()
-const pendingRenderedResources = new Map<string, number>()
 
 type ScopedPendingDiagnostics = {
   chat: number
@@ -59,12 +54,10 @@ export type ChatDisplaySettleDiagnostics = {
     | 'message-tag-interceptors'
     | 'initial-display-resolves'
     | 'display-work'
-    | 'rendered-resources'
   >
   messageTagRuntime: MessageTagRuntimeReadinessDiagnostics
   pendingFirstResolves: ScopedPendingDiagnostics
   pendingDisplayWork: ScopedPendingDiagnostics
-  pendingRenderedResources: ScopedPendingDiagnostics
 }
 
 function scopeKey(chatId?: string | null): string {
@@ -112,22 +105,6 @@ export function endChatDisplayWork(chatId?: string | null): void {
 }
 
 /**
- * Register a rendered resource whose eventual dimensions can change message
- * layout. The returned release is idempotent so load/error/decode and React
- * cleanup paths can safely race without corrupting the pending count.
- */
-export function beginChatRenderedResource(chatId?: string | null): () => void {
-  const key = scopeKey(chatId)
-  increment(pendingRenderedResources, key)
-  let released = false
-  return () => {
-    if (released) return
-    released = true
-    decrement(pendingRenderedResources, key)
-  }
-}
-
-/**
  * Track a first-pass resolve (one whose cache entry had no value yet). The
  * returned promise is behaviorally identical — same value, same rejection —
  * with a decrement hooked on settlement, so callers should store/await the
@@ -142,15 +119,15 @@ export function trackInitialDisplayResolve<T>(promise: Promise<T>, chatId?: stri
 }
 
 /**
- * True when all declared tag interceptors are attached and no first resolves,
- * first-wave display work, or rendered resources remain in flight.
+ * True when all declared tag interceptors are attached and no first resolves
+ * or first-wave display work remain in flight. Resource fetching deliberately
+ * does not participate: slow or unreachable image URLs must not hide a chat.
  */
 export function isChatDisplaySettled(chatId?: string | null): boolean {
   if (!areMessageTagRuntimeInterceptorsReady()) return false
   if (
     hasPending(pendingFirstResolves, chatId)
     || hasPending(pendingDisplayWork, chatId)
-    || hasPending(pendingRenderedResources, chatId)
   ) return false
   return true
 }
@@ -160,14 +137,12 @@ export function getChatDisplaySettleDiagnostics(chatId?: string | null): ChatDis
   const messageTagRuntime = getMessageTagRuntimeReadinessDiagnostics()
   const firstResolves = pendingDiagnostics(pendingFirstResolves, chatId)
   const displayWork = pendingDiagnostics(pendingDisplayWork, chatId)
-  const renderedResources = pendingDiagnostics(pendingRenderedResources, chatId)
   const blockers: ChatDisplaySettleDiagnostics['blockers'] = []
 
   if (!messageTagRuntime.snapshotReady) blockers.push('runtime-capability-snapshot')
   else if (!messageTagRuntime.ready) blockers.push('message-tag-interceptors')
   if (firstResolves.chat > 0 || firstResolves.global > 0) blockers.push('initial-display-resolves')
   if (displayWork.chat > 0 || displayWork.global > 0) blockers.push('display-work')
-  if (renderedResources.chat > 0 || renderedResources.global > 0) blockers.push('rendered-resources')
 
   return {
     chatId: chatId ?? null,
@@ -176,6 +151,5 @@ export function getChatDisplaySettleDiagnostics(chatId?: string | null): ChatDis
     messageTagRuntime,
     pendingFirstResolves: firstResolves,
     pendingDisplayWork: displayWork,
-    pendingRenderedResources: renderedResources,
   }
 }
