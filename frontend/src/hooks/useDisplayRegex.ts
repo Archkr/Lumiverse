@@ -964,9 +964,6 @@ export function useDisplayRegex(
       ),
     [regexScripts, isUser, depth, activeCharacterId, scopedChatId],
   )
-  const canApplyStreamingRegexImmediately = isStreaming
-    && !displayOwned
-    && canApplyDisplayRegexInWorker(displayScripts)
   const {
     value: content,
     ready: preprocessReady,
@@ -978,6 +975,9 @@ export function useDisplayRegex(
     isStreaming,
     isStreaming && !displayOwned,
   )
+  const canApplyStreamingRegexImmediately = isStreaming
+    && !displayOwned
+    && canApplyDisplayRegexInWorker(content, displayScripts)
   const pendingSlowReportsRef = useRef<SlowRegexReport[]>([])
   const pendingRecoveredReportsRef = useRef<SlowRegexReport[]>([])
 

@@ -154,14 +154,25 @@ afterEach(() => {
 describe('isolated regex pipeline', () => {
   test('only worker-contained scripts qualify for immediate streaming passes', () => {
     makeHarness()
-    expect(canApplyDisplayRegexInWorker([
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
       script('plain'),
       script('macro-find', { substitute_macros: 'find' }),
     ])).toBe(true)
-    expect(canApplyDisplayRegexInWorker([
-      script('raw-macro', { substitute_macros: 'raw' }),
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
+      script('raw-without-macros', { substitute_macros: 'raw' }),
+      script('after-without-macros', { substitute_macros: 'after' }),
+    ])).toBe(true)
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
+      script('raw-macro', { substitute_macros: 'raw', replace_string: '{{user}}' }),
     ])).toBe(false)
-    expect(canApplyDisplayRegexInWorker([
+    expect(canApplyDisplayRegexInWorker('response with {{user}}', [
+      script('after-macro-input', { substitute_macros: 'after' }),
+    ])).toBe(false)
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
+      script('introduces-macro', { replace_string: '{{user}}' }),
+      script('consumes-macro-after', { substitute_macros: 'after' }),
+    ])).toBe(false)
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
       script('action', { actions: [{
         id: 'send',
         type: 'send',
@@ -173,7 +184,7 @@ describe('isolated regex pipeline', () => {
         content: '',
       }] }),
     ])).toBe(false)
-    expect(canApplyDisplayRegexInWorker([
+    expect(canApplyDisplayRegexInWorker('ordinary response', [
       script('match-action', { metadata: { match_actions: ['move_top'] } }),
     ])).toBe(false)
   })
@@ -213,6 +224,28 @@ describe('isolated regex pipeline', () => {
     await flush()
     echoWorker(spawned[0])
     expect((await promise).result).toBe('bar b<oo>')
+    expect(spawned[0].sent).toHaveLength(1)
+    expect(spawned[0].sent[0].scripts).toHaveLength(2)
+  })
+
+  test('macro-free raw and after imports use native replacement in the worker', async () => {
+    const { spawned } = makeHarness()
+    const promise = applyDisplayRegexTiered('foo bar', [
+      script('raw-captures', {
+        find_regex: '(foo)',
+        replace_string: '[$1]',
+        substitute_macros: 'raw',
+      }),
+      script('after-without-macros', {
+        find_regex: 'bar',
+        replace_string: 'baz',
+        substitute_macros: 'after',
+      }),
+    ], context, resolveRawTemplates)
+    await flush()
+    echoWorker(spawned[0])
+
+    expect((await promise).result).toBe('[foo] baz')
     expect(spawned[0].sent).toHaveLength(1)
     expect(spawned[0].sent[0].scripts).toHaveLength(2)
   })

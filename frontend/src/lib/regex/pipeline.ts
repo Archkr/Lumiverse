@@ -67,10 +67,35 @@ function placementEligible(script: RegexScript, context: ApplyDisplayRegexContex
   return true
 }
 
-function isWorkerCapable(script: RegexScript): boolean {
+const DISPLAY_MACRO_SYNTAX_RE = /\{\{|<(?:user|bot|char)>/i
+
+function hasDisplayMacroSyntax(value: string): boolean {
+  return DISPLAY_MACRO_SYNTAX_RE.test(value)
+}
+
+function canTreatMacroSensitiveModesAsNativeReplace(
+  content: string,
+  scripts: readonly RegexScript[],
+): boolean {
+  // `raw` resolves macros after capture substitution and `after` resolves the
+  // complete replaced body. When neither the input nor any replacement can
+  // contain a macro, both modes are observably identical to native replace.
+  // Looking at every replacement also guarantees an earlier worker script
+  // cannot introduce syntax for a later `raw`/`after` script to consume.
+  return scripts.some((script) => (
+    script.substitute_macros === 'raw' || script.substitute_macros === 'after'
+  ))
+    && !hasDisplayMacroSyntax(content)
+    && scripts.every((script) => !hasDisplayMacroSyntax(script.replace_string))
+}
+
+function isWorkerCapable(script: RegexScript, macroSensitiveModesAreSafe = false): boolean {
   if (script.actions.length > 0) return false
   if (Array.isArray(script.metadata?.match_actions) && script.metadata.match_actions.length > 0) return false
-  if (script.substitute_macros === 'raw' || script.substitute_macros === 'after') return false
+  if (
+    (script.substitute_macros === 'raw' || script.substitute_macros === 'after')
+    && !macroSensitiveModesAreSafe
+  ) return false
   return true
 }
 
@@ -79,8 +104,13 @@ function isWorkerCapable(script: RegexScript): boolean {
  * These passes can follow the existing 32ms stream cadence without restoring
  * the per-token backend load that the display coalescer was added to prevent.
  */
-export function canApplyDisplayRegexInWorker(scripts: readonly RegexScript[]): boolean {
-  return workerSupported() && scripts.every(isWorkerCapable)
+export function canApplyDisplayRegexInWorker(
+  content: string,
+  scripts: readonly RegexScript[],
+): boolean {
+  const macroSensitiveModesAreSafe = canTreatMacroSensitiveModesAsNativeReplace(content, scripts)
+  return workerSupported()
+    && scripts.every((script) => isWorkerCapable(script, macroSensitiveModesAreSafe))
 }
 
 function resolveWorkerScript(
@@ -277,6 +307,8 @@ export async function applyDisplayRegexTiered(
     eligible.push(script)
   }
 
+  const macroSensitiveModesAreSafe = canTreatMacroSensitiveModesAsNativeReplace(content, eligible)
+
   let result = content
   const provenance: { touchedVars?: ReadonlySet<string>; sawUncacheable: boolean } = { sawUncacheable: false }
   let workerUsable = workerSupported()
@@ -289,9 +321,9 @@ export async function applyDisplayRegexTiered(
     : null
 
   while (index < eligible.length) {
-    if (!isWorkerCapable(eligible[index]!)) {
+    if (!isWorkerCapable(eligible[index]!, macroSensitiveModesAreSafe)) {
       let end = index + 1
-      while (end < eligible.length && !isWorkerCapable(eligible[end]!)) end += 1
+      while (end < eligible.length && !isWorkerCapable(eligible[end]!, macroSensitiveModesAreSafe)) end += 1
       const applied = await backendThenRaw(result, eligible.slice(index, end), context)
       mergeProvenance(provenance, applied)
       result = applied.result
@@ -300,7 +332,7 @@ export async function applyDisplayRegexTiered(
     }
 
     let end = index + 1
-    while (end < eligible.length && isWorkerCapable(eligible[end]!)) end += 1
+    while (end < eligible.length && isWorkerCapable(eligible[end]!, macroSensitiveModesAreSafe)) end += 1
     const batch = eligible.slice(index, end)
     if (workerUsable) {
       const attempt = await applyBatchInWorker(result, batch, context, dedupe)
