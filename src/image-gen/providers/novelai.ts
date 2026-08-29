@@ -103,7 +103,7 @@ export class NovelAIImageProvider implements ImageProvider {
     defaultUrl: "https://image.novelai.net",
   };
 
-  async generate(apiKey: string, _apiUrl: string, request: ImageGenRequest): Promise<ImageGenResponse> {
+  async generate(apiKey: string, apiUrl: string, request: ImageGenRequest): Promise<ImageGenResponse> {
     const params = request.parameters;
     const model = request.model || "nai-diffusion-4-5-full";
     const [width, height] = String(params.resolution || "1216x832").split("x").map(Number);
@@ -213,7 +213,7 @@ export class NovelAIImageProvider implements ImageProvider {
     const outerBody = { input: request.prompt, model, action: "generate", parameters: naiParams };
     const finalBody = applyRawOverride(outerBody, params.rawRequestOverride);
 
-    const res = await fetchWithPreflightAbort("https://image.novelai.net/ai/generate-image-stream", {
+    const res = await fetchWithPreflightAbort(`${this.baseUrl(apiUrl)}/ai/generate-image-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -228,12 +228,12 @@ export class NovelAIImageProvider implements ImageProvider {
     return { imageDataUrl, model, provider: this.name };
   }
 
-  async validateKey(apiKey: string, _apiUrl: string): Promise<boolean> {
+  async validateKey(apiKey: string, apiUrl: string): Promise<boolean> {
     try {
       // Validate against the Image API itself. NovelAI documents this as an
       // authenticated, non-generation endpoint and accepts persistent API
       // tokens here; the Primary API is not the service this provider uses.
-      const res = await fetch("https://image.novelai.net/user/information", {
+      const res = await fetch(`${this.baseUrl(apiUrl)}/user/information`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
       if (!res.ok) await throwProviderResponseError(this.displayName, "authentication", res);
@@ -246,6 +246,10 @@ export class NovelAIImageProvider implements ImageProvider {
 
   async listModels(_apiKey: string, _apiUrl: string): Promise<Array<{ id: string; label: string }>> {
     return this.capabilities.staticModels || [];
+  }
+
+  private baseUrl(apiUrl: string): string {
+    return (apiUrl.trim() || this.capabilities.defaultUrl).replace(/\/+$/, "");
   }
 }
 

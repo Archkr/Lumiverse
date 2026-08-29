@@ -40,6 +40,34 @@ describe("NovelAIImageProvider", () => {
     expect((calls[0].init?.headers as Record<string, string>).Authorization).toBe("Bearer pst-test-token");
   });
 
+  test("uses the configured base URL for validation", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    await expect(provider.validateKey("pst-test-token", " https://nai-proxy.example/api/ ")).resolves.toBe(true);
+
+    expect(calls).toEqual(["https://nai-proxy.example/api/user/information"]);
+  });
+
+  test("uses the configured base URL for image generation", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(TINY_PNG, { status: 200 });
+    }) as typeof fetch;
+
+    await provider.generate("pst-test-token", "https://nai-proxy.example/root/", {
+      prompt: "a fox",
+      model: "nai-diffusion-5-full",
+      parameters: {},
+    });
+
+    expect(calls).toEqual(["https://nai-proxy.example/root/ai/generate-image-stream"]);
+  });
+
   test("uses the structured V4+ prompt payload for both V5 models", async () => {
     const bodies: any[] = [];
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
