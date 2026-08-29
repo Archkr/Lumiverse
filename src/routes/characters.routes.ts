@@ -17,6 +17,11 @@ import { parseBotBooruId, rewriteBotBooruUrl } from "../utils/botbooru";
 import { createAvatarResolverResponse } from "../utils/avatar-cache";
 import { buildSlug } from "../lumihub/manifest";
 import { applyCharxModulesAndAssets, autoImportEmbeddedWorldbook } from "../services/charx-import.service";
+import { importCharacterFile } from "../services/character-import.service";
+import {
+  characterImportJobs,
+  CharacterImportJobError,
+} from "../services/character-import-jobs.service";
 import { mapWithConcurrency } from "../utils/concurrency";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
@@ -44,6 +49,14 @@ function respondImportError(c: any, err: any, fallbackMessage: string) {
     return c.json({ error: err.message, code: err.code }, err.status);
   }
   return c.json({ error: err?.message || fallbackMessage }, 400);
+}
+
+function respondImportJobError(c: any, err: unknown) {
+  if (err instanceof CharacterImportJobError) {
+    return c.json({ error: err.message, code: err.code }, err.status as any);
+  }
+  console.error("[character import job] failed:", err);
+  return c.json({ error: err instanceof Error ? err.message : "Character import job failed" }, 500);
 }
 
 // Bind any card-embedded regex scripts (Lumiverse bundle or SillyTavern) to a
@@ -962,6 +975,72 @@ app.delete("/:id/perspective-layers/:layer", (c) => {
   return c.json(updated);
 });
 
+app.post("/import-jobs", async (c) => {
+  const userId = c.get("userId");
+  try {
+    const body = await c.req.json<{ total?: unknown; skip_duplicates?: unknown }>().catch(() => null);
+    if (!body) return c.json({ error: "Invalid JSON request body", code: "invalid_request" }, 400);
+    const total = Number(body?.total);
+    return c.json(characterImportJobs.create(userId, total, body?.skip_duplicates === true), 201);
+  } catch (err) {
+    return respondImportJobError(c, err);
+  }
+});
+
+app.put("/import-jobs/:jobId/files/:index", async (c) => {
+  const userId = c.get("userId");
+  const requestBody = c.req.raw.body;
+  if (!requestBody) return c.json({ error: "Request body is empty", code: "empty_file" }, 400);
+
+  const contentType = c.req.header("content-type") || "application/octet-stream";
+  if (contentType.toLowerCase().startsWith("multipart/form-data")) {
+    return c.json({
+      error: "Multipart uploads are not supported for character import jobs; send the file as the raw request body",
+      code: "multipart_not_supported",
+    }, 415);
+  }
+
+  const contentLengthHeader = c.req.header("content-length");
+  const declaredSize = contentLengthHeader == null ? null : Number(contentLengthHeader);
+  const filename = c.req.query("filename") || "character-card";
+  try {
+    const snapshot = await characterImportJobs.upload(
+      userId,
+      c.req.param("jobId"),
+      Number(c.req.param("index")),
+      filename,
+      contentType,
+      requestBody,
+      declaredSize,
+    );
+    return c.json(snapshot, 201);
+  } catch (err) {
+    return respondImportJobError(c, err);
+  }
+});
+
+app.post("/import-jobs/:jobId/start", (c) => {
+  try {
+    return c.json(characterImportJobs.start(c.get("userId"), c.req.param("jobId")), 202);
+  } catch (err) {
+    return respondImportJobError(c, err);
+  }
+});
+
+app.get("/import-jobs/:jobId/status", (c) => {
+  const snapshot = characterImportJobs.get(c.get("userId"), c.req.param("jobId"));
+  if (!snapshot) return c.json({ error: "Character import job not found", code: "job_not_found" }, 404);
+  return c.json(snapshot);
+});
+
+app.post("/import-jobs/:jobId/cancel", (c) => {
+  try {
+    return c.json(characterImportJobs.cancel(c.get("userId"), c.req.param("jobId")));
+  } catch (err) {
+    return respondImportJobError(c, err);
+  }
+});
+
 app.post("/import-bulk", async (c) => {
   const userId = c.get("userId");
 
@@ -973,97 +1052,12 @@ app.post("/import-bulk", async (c) => {
 
     const skipDuplicates = formData.get("skip_duplicates") === "true";
 
-    const results: Array<{
-      filename: string;
-      success: boolean;
-      character?: any;
-      lorebook?: { name: string; entryCount: number };
-      lumiverse_lora?: characterLoraSvc.PortableLoraReference;
-      error?: string;
-      skipped?: boolean;
-    }> = [];
+    const results: Awaited<ReturnType<typeof importCharacterFile>>[] = [];
 
     for (const file of files) {
       const filename = file.name || "unknown";
       try {
-        let cardInput;
-        let pngAvatar: File | null = null;
-        let charxResult: cardSvc.CharxResult | null = null;
-
-        const detectedFormat = await cardSvc.detectCharacterImportFormat(file);
-
-        if (detectedFormat === "png") {
-          cardInput = await cardSvc.extractCardFromPng(file);
-          pngAvatar = file;
-        } else if (detectedFormat === "charx" || detectedFormat === "jpeg_polyglot") {
-          charxResult = await cardSvc.extractCardFromCharx(file);
-          cardInput = charxResult.card;
-        } else if (detectedFormat === "jpeg") {
-          // Plain JPEG with no embedded data — skip
-          results.push({ filename, success: false, error: "JPEG file does not contain embedded character card data" });
-          continue;
-        } else {
-          const text = await file.text();
-          const json = JSON.parse(text);
-          cardInput = cardSvc.parseCardJson(json);
-        }
-
-        // Deduplication check
-        if (skipDuplicates) {
-          const hasRealFilename = filename && filename !== "unknown" && filename !== "";
-          const existingByFile = hasRealFilename
-            ? svc.findCharacterBySourceFilename(userId, filename)
-            : null;
-
-          if (existingByFile) {
-            results.push({ filename, success: true, skipped: true, character: existingByFile });
-            continue;
-          }
-
-          // No filename match — fall back to name-based check only when filename is absent
-          if (!hasRealFilename && svc.characterExistsByName(userId, cardInput.name)) {
-            const existing = svc.findCharactersByName(userId, cardInput.name);
-            results.push({ filename, success: true, skipped: true, character: existing[0] });
-            continue;
-          }
-        }
-
-        const character = svc.createCharacter(userId, cardInput);
-
-        // Store source filename so re-imports can deduplicate by file identity
-        if (filename && filename !== "unknown" && filename !== "") {
-          svc.setCharacterSourceFilename(userId, character.id, filename);
-        }
-
-        if (charxResult) {
-          // Full CHARX processing (lumiverse_modules, gallery, inline assets,
-          // RisuAI module/expressions) shared with single & URL import so the
-          // bulk path keeps parity with the exporter.
-          await applyCharxModulesAndAssets(userId, character, charxResult);
-        } else {
-          if (pngAvatar) {
-            const image = await images.uploadImage(userId, pngAvatar);
-            svc.setCharacterImage(userId, character.id, image.id);
-            svc.setCharacterAvatar(userId, character.id, image.filename);
-          }
-          importCardRegexBestEffort(userId, character.id, cardInput.extensions);
-          autoImportEmbeddedWorldbook(userId, character.id);
-        }
-
-        const imported = svc.getCharacter(userId, character.id)!;
-
-        // Check for embedded lorebook
-        let lorebook: { name: string; entryCount: number } | undefined;
-        const charBook = imported.extensions?.character_book;
-        const entryCount = wbSvc.countImportedWorldBookEntries(charBook?.entries);
-        if (entryCount > 0) {
-          lorebook = {
-            name: charBook.name || `${imported.name}'s Lorebook`,
-            entryCount,
-          };
-        }
-
-        results.push({ filename, success: true, character: imported, lorebook, ...loraSurface(imported) });
+        results.push(await importCharacterFile(userId, file, { skipDuplicates, emitEvent: false }));
       } catch (err: any) {
         results.push({
           filename,
@@ -1076,6 +1070,13 @@ app.post("/import-bulk", async (c) => {
     const imported = results.filter((r) => r.success && !r.skipped && r.character).length;
     const skipped = results.filter((r) => r.skipped).length;
     const failed = results.filter((r) => !r.success).length;
+
+    if (imported > 0) {
+      eventBus.emit(EventType.CHARACTER_LIBRARY_CHANGED, {
+        reason: "legacy_bulk_import",
+        imported,
+      }, userId);
+    }
 
     return c.json({ results, summary: { total: files.length, imported, skipped, failed } }, 201);
   } catch (err: any) {

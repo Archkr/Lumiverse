@@ -70,6 +70,7 @@
     "importing": "Importation de caractères...",
     "title": "Importation groupée",
     "skipDuplicates": "Ignorer les caractères qui existent déjà (par nom)",
+    "uploading": "Téléversement...",
     "processing": "Traitement...",
     "done": "Terminé",
     "filesSelected": "{{count}} fichiers sélectionnés",

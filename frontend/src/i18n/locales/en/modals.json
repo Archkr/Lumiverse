@@ -73,6 +73,7 @@
     "importing": "Importing Characters...",
     "title": "Bulk Import",
     "skipDuplicates": "Skip characters that already exist (by name)",
+    "uploading": "Uploading...",
     "processing": "Processing...",
     "done": "Done",
     "filesSelected": "{{count}} files selected",

@@ -4,12 +4,15 @@ const EXPRESSIONS_ZIP_PATH_RE =
   /^\/api\/v1\/characters\/[^/]+\/expressions\/(?:groups\/[^/]+\/)?upload-zip$/;
 const QWEN_CUSTOM_VOICE_UPLOAD_RE =
   /^\/api\/v1\/tts-connections\/[^/]+\/qwen\/custom-voices$/;
+const CHARACTER_IMPORT_JOB_FILE_RE =
+  /^\/api\/v1\/characters\/import-jobs\/[^/]+\/files\/\d+$/;
 
 export function isLargeUploadBodyLimitExemptPath(path: string): boolean {
   return (
     path.startsWith("/api/v1/migrate/") ||
     path === "/api/v1/characters/import-bulk" ||
     path === "/api/v1/characters/import" ||
+    CHARACTER_IMPORT_JOB_FILE_RE.test(path) ||
     CHARACTER_CARD_REPLACE_PATH_RE.test(path) ||
     path.startsWith("/api/v1/world-books/import") ||
     path === "/api/v1/images" ||

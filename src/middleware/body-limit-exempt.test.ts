@@ -21,4 +21,10 @@ describe("isLargeUploadBodyLimitExemptPath", () => {
   test("allows character-card replacements through the global 10MB guard", () => {
     expect(isLargeUploadBodyLimitExemptPath("/api/v1/characters/character-1/replace-card")).toBe(true);
   });
+
+  test("allows only raw character-job file uploads through the global 10MB guard", () => {
+    expect(isLargeUploadBodyLimitExemptPath("/api/v1/characters/import-jobs/job-1/files/12")).toBe(true);
+    expect(isLargeUploadBodyLimitExemptPath("/api/v1/characters/import-jobs/job-1/start")).toBe(false);
+    expect(isLargeUploadBodyLimitExemptPath("/api/v1/characters/import-jobs")).toBe(false);
+  });
 });

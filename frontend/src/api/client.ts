@@ -271,6 +271,37 @@ export async function upload<T>(path: string, formData: FormData, options?: Requ
   }
 }
 
+/**
+ * Upload a Blob/File as the request body without multipart encoding. This lets
+ * the server consume the HTTP stream directly instead of asking Bun's
+ * multipart parser to materialize every selected file in memory.
+ */
+export async function uploadRaw<T>(
+  path: string,
+  body: Blob,
+  options?: RequestOptions & { contentType?: string },
+): Promise<T> {
+  const { signal, cleanup, timeoutMs } = buildSignal(options)
+  const url = `${BASE_URL}${path}`
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': options?.contentType || body.type || 'application/octet-stream',
+        'Accept': 'application/json',
+      },
+      credentials: 'include',
+      body,
+      signal,
+    })
+    return handleResponse<T>(res)
+  } catch (error) {
+    throw maybeWrapTimeoutError(error, url, signal, timeoutMs)
+  } finally {
+    cleanup()
+  }
+}
+
 export function uploadWithProgress<T>(
   path: string,
   formData: FormData,

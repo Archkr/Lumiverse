@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, uploadWithProgress, getBlob, BASE_URL, type RequestOptions } from './client'
+import { get, post, put, del, upload, uploadRaw, uploadWithProgress, getBlob, BASE_URL, type RequestOptions } from './client'
 import { triggerBlobDownload } from '@/lib/downloads'
 import type {
   Character,
@@ -12,6 +12,7 @@ import type {
   PaginatedResult,
   ImportResult,
   BulkImportResult,
+  CharacterImportJob,
   BatchDeleteResult,
   BulkTagResult,
   TagLibraryImportResult,
@@ -156,6 +157,35 @@ export const charactersApi = {
       form.append('skip_duplicates', 'true')
     }
     return upload<BulkImportResult>('/characters/import-bulk', form, { timeout: 0 })
+  },
+
+  createImportJob(total: number, skipDuplicates = false) {
+    return post<CharacterImportJob>('/characters/import-jobs', {
+      total,
+      skip_duplicates: skipDuplicates,
+    })
+  },
+
+  uploadImportJobFile(jobId: string, index: number, file: File, signal?: AbortSignal) {
+    const filename = encodeURIComponent(file.name || `character-${index + 1}`)
+    return uploadRaw<CharacterImportJob>(
+      `/characters/import-jobs/${encodeURIComponent(jobId)}/files/${index}?filename=${filename}`,
+      file,
+      { timeout: 0, signal, contentType: file.type || 'application/octet-stream' },
+    )
+  },
+
+  startImportJob(jobId: string) {
+    return post<CharacterImportJob>(`/characters/import-jobs/${encodeURIComponent(jobId)}/start`)
+  },
+
+  getImportJob(jobId: string, signal?: AbortSignal) {
+    const options: RequestOptions | undefined = signal === undefined ? undefined : { signal }
+    return get<CharacterImportJob>(`/characters/import-jobs/${encodeURIComponent(jobId)}/status`, undefined, options)
+  },
+
+  cancelImportJob(jobId: string) {
+    return post<CharacterImportJob>(`/characters/import-jobs/${encodeURIComponent(jobId)}/cancel`)
   },
 
   importTagLibrary(file: File) {

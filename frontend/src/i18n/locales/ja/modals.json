@@ -70,6 +70,7 @@
     "importing": "文字をインポート中...",
     "title": "一括インポート",
     "skipDuplicates": "既存の文字を (名前で) スキップ",
+    "uploading": "アップロード中...",
     "processing": "処理中...",
     "done": "完了",
     "filesSelected": "{{count}} ファイルが選択されました",

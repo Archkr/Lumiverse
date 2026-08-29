@@ -1549,6 +1549,19 @@ export interface BulkImportResult {
   summary: { total: number; imported: number; skipped: number; failed: number }
 }
 
+export type CharacterImportJobStatus = 'accepting' | 'processing' | 'complete' | 'cancelled' | 'error'
+
+export interface CharacterImportJob {
+  jobId: string
+  status: CharacterImportJobStatus
+  total: number
+  uploaded: number
+  processed: number
+  results: BulkImportResultItem[]
+  summary: { total: number; imported: number; skipped: number; failed: number }
+  error?: string
+}
+
 export interface BulkPersonaImportResult {
   imported: Persona[]
   count: number

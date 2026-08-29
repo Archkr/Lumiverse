@@ -70,6 +70,7 @@
     "importing": "正在導入角色…",
     "title": "批量導入",
     "skipDuplicates": "跳過已存在的角色（按名稱）",
+    "uploading": "正在上傳…",
     "processing": "處理中…",
     "done": "完成",
     "filesSelected": "已選擇 {{count}} 個文件",

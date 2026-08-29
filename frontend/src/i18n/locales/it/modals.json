@@ -70,6 +70,7 @@
     "importing": "Importazione personaggi...",
     "title": "Importazione batch",
     "skipDuplicates": "Ignora personaggi che esistono già (per nome)",
+    "uploading": "Caricamento...",
     "processing": "Elaborazione...",
     "done": "Fatto",
     "filesSelected": "{{count}} file selezionati",
