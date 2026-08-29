@@ -34,6 +34,46 @@ import styles from './PersonaAddonsModal.module.css'
 import { uuidv7 } from '@/lib/uuid'
 import clsx from 'clsx'
 
+interface PersonaMetadataSave {
+  metadata: Record<string, any>
+  addonRevision: number
+  attachedRevision: number
+  failureMessage: string
+}
+
+function mergePersonaAddonDraft(serverAddons: PersonaAddon[], localAddons: PersonaAddon[]): PersonaAddon[] {
+  const serverById = new Map(serverAddons.map((addon) => [addon.id, addon]))
+  return localAddons.map((localAddon) => {
+    const serverAddon = serverById.get(localAddon.id)
+    if (!serverAddon) return localAddon
+    return {
+      ...serverAddon,
+      ...localAddon,
+      // Avatar fields are changed by their dedicated endpoints, so retain the
+      // server's result while preserving fields editable in this modal.
+      avatar_image_id: serverAddon.avatar_image_id,
+      avatar_crop_image_id: serverAddon.avatar_crop_image_id,
+    }
+  })
+}
+
+function mergeAttachedAddonDraft(
+  serverRefs: AttachedGlobalAddon[],
+  localRefs: AttachedGlobalAddon[],
+): AttachedGlobalAddon[] {
+  const serverById = new Map(serverRefs.map((ref) => [ref.id, ref]))
+  return localRefs.map((localRef) => {
+    const serverRef = serverById.get(localRef.id)
+    if (!serverRef) return localRef
+    return {
+      ...serverRef,
+      ...localRef,
+      avatar_image_id: serverRef.avatar_image_id,
+      avatar_crop_image_id: serverRef.avatar_crop_image_id,
+    }
+  })
+}
+
 export default function PersonaAddonsModal() {
   const { t } = useTranslation('modals', { keyPrefix: 'personaAddons' })
   const { t: tc } = useTranslation('common')
@@ -47,9 +87,16 @@ export default function PersonaAddonsModal() {
   const personaName = modalProps?.personaName as string | undefined
 
   const [addons, setAddons] = useState<PersonaAddon[]>([])
-  const [metadata, setMetadata] = useState<Record<string, any>>({})
   const [loading, setLoading] = useState(true)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const metadataRef = useRef<Record<string, any>>({})
+  const addonsRef = useRef<PersonaAddon[]>([])
+  const attachedRefsRef = useRef<AttachedGlobalAddon[]>([])
+  const addonRevisionRef = useRef(0)
+  const attachedRevisionRef = useRef(0)
+  const pendingSaveRef = useRef<PersonaMetadataSave | null>(null)
+  const saveInFlightRef = useRef(false)
+  const flushMetadataSaveRef = useRef<() => void>(() => {})
 
   // Global add-on state
   const [allGlobalAddons, setAllGlobalAddons] = useState<GlobalAddon[]>([])
@@ -57,13 +104,69 @@ export default function PersonaAddonsModal() {
   const [showAttachPicker, setShowAttachPicker] = useState(false)
   const [avatarOperationAddonId, setAvatarOperationAddonId] = useState<string | null>(null)
 
-  const adoptPersona = useCallback((persona: Persona) => {
-    const nextMetadata = persona.metadata || {}
-    setMetadata(nextMetadata)
-    setAddons(Array.isArray(nextMetadata.addons) ? nextMetadata.addons : [])
-    setAttachedRefs(Array.isArray(nextMetadata.attached_global_addons) ? nextMetadata.attached_global_addons : [])
-    updatePersonaInStore(personaId, persona)
+  const adoptPersona = useCallback((persona: Persona, saved?: PersonaMetadataSave) => {
+    const serverMetadata = persona.metadata || {}
+    const serverAddons: PersonaAddon[] = Array.isArray(serverMetadata.addons) ? serverMetadata.addons : []
+    const serverAttachedRefs: AttachedGlobalAddon[] = Array.isArray(serverMetadata.attached_global_addons)
+      ? serverMetadata.attached_global_addons
+      : []
+
+    // A request may finish after the user has resumed typing. In that case its
+    // payload is an acknowledged server snapshot, not the current UI value.
+    // Overlay only the newer local draft so React never writes stale content
+    // into the controlled textarea (which also moves the native caret).
+    const nextAddons = saved && saved.addonRevision !== addonRevisionRef.current
+      ? mergePersonaAddonDraft(serverAddons, addonsRef.current)
+      : serverAddons
+    const nextAttachedRefs = saved && saved.attachedRevision !== attachedRevisionRef.current
+      ? mergeAttachedAddonDraft(serverAttachedRefs, attachedRefsRef.current)
+      : serverAttachedRefs
+    const nextMetadata = {
+      ...serverMetadata,
+      addons: nextAddons,
+      attached_global_addons: nextAttachedRefs,
+    }
+
+    metadataRef.current = nextMetadata
+    addonsRef.current = nextAddons
+    attachedRefsRef.current = nextAttachedRefs
+    setAddons(nextAddons)
+    setAttachedRefs(nextAttachedRefs)
+    updatePersonaInStore(personaId, { ...persona, metadata: nextMetadata })
   }, [personaId, updatePersonaInStore])
+
+  const flushMetadataSave = useCallback(() => {
+    if (saveInFlightRef.current) return
+    const pending = pendingSaveRef.current
+    if (!pending) return
+
+    pendingSaveRef.current = null
+    saveInFlightRef.current = true
+    void personasApi.update(personaId, { metadata: pending.metadata })
+      .then((updated) => adoptPersona(updated, pending))
+      .catch(() => toast.error(pending.failureMessage))
+      .finally(() => {
+        saveInFlightRef.current = false
+        // Coalesce edits made during the request, then write them only after
+        // the preceding snapshot is acknowledged. This prevents out-of-order
+        // PUTs from leaving stale content on the server.
+        if (pendingSaveRef.current) flushMetadataSaveRef.current()
+      })
+  }, [adoptPersona, personaId])
+  flushMetadataSaveRef.current = flushMetadataSave
+
+  const scheduleMetadataSave = useCallback((failureMessage: string, delay: number) => {
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      pendingSaveRef.current = {
+        metadata: { ...metadataRef.current },
+        addonRevision: addonRevisionRef.current,
+        attachedRevision: attachedRevisionRef.current,
+        failureMessage,
+      }
+      flushMetadataSaveRef.current()
+    }, delay)
+  }, [])
 
   // Load persona data + global addons
   useEffect(() => {
@@ -81,29 +184,30 @@ export default function PersonaAddonsModal() {
   }, [personaId, t, adoptPersona])
 
   // Debounced save helper for persona-specific addons
-  const persistAddons = useCallback((next: PersonaAddon[]) => {
-    clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(async () => {
-      try {
-        const newMeta = { ...metadata, addons: next }
-        const updated = await personasApi.update(personaId, { metadata: newMeta })
-        adoptPersona(updated)
-      } catch {
-        toast.error(t('saveFailed'))
-      }
-    }, 300)
-  }, [personaId, metadata, adoptPersona, t])
+  const persistAddons = useCallback(() => {
+    scheduleMetadataSave(t('saveFailed'), 300)
+  }, [scheduleMetadataSave, t])
 
   // Save helper for attached global addon refs
-  const persistAttachedRefs = useCallback(async (next: AttachedGlobalAddon[]) => {
-    try {
-      const newMeta = { ...metadata, attached_global_addons: next }
-      const updated = await personasApi.update(personaId, { metadata: newMeta })
-      adoptPersona(updated)
-    } catch {
-      toast.error(t('saveAttachmentFailed'))
-    }
-  }, [personaId, metadata, adoptPersona, t])
+  const persistAttachedRefs = useCallback(() => {
+    scheduleMetadataSave(t('saveAttachmentFailed'), 0)
+  }, [scheduleMetadataSave, t])
+
+  const commitAddons = useCallback((next: PersonaAddon[]) => {
+    addonRevisionRef.current += 1
+    addonsRef.current = next
+    metadataRef.current = { ...metadataRef.current, addons: next }
+    setAddons(next)
+    persistAddons()
+  }, [persistAddons])
+
+  const commitAttachedRefs = useCallback((next: AttachedGlobalAddon[]) => {
+    attachedRevisionRef.current += 1
+    attachedRefsRef.current = next
+    metadataRef.current = { ...metadataRef.current, attached_global_addons: next }
+    setAttachedRefs(next)
+    persistAttachedRefs()
+  }, [persistAttachedRefs])
 
   const handleUploadAddonAvatar = useCallback(async (addonId: string, file: File) => {
     if (avatarOperationAddonId) return
@@ -141,39 +245,33 @@ export default function PersonaAddonsModal() {
       sort_order: addons.length,
     }
     const next = [...addons, newAddon]
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   const handleToggle = useCallback((id: string) => {
     const next = addons.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a)
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   const handleDelete = useCallback((id: string) => {
     const next = addons.filter((a) => a.id !== id)
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   const handleLabelChange = useCallback((id: string, label: string) => {
     const next = addons.map((a) => a.id === id ? { ...a, label } : a)
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   const handleContentChange = useCallback((id: string, content: string) => {
     const next = addons.map((a) => a.id === id ? { ...a, content } : a)
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   const handleOutletNameChange = useCallback((id: string, outlet_name: string) => {
     const next = addons.map((a) => a.id === id ? { ...a, outlet_name } : a)
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   // Drag-to-reorder for persona-specific addons. `sort_order` is also re-stamped
   // so the backend MacroEnv resolves them in the visual order.
@@ -191,29 +289,25 @@ export default function PersonaAddonsModal() {
     if (oldIndex < 0 || newIndex < 0) return
     const moved = arrayMove(addons, oldIndex, newIndex)
     const next = moved.map((a, i) => ({ ...a, sort_order: i }))
-    setAddons(next)
-    persistAddons(next)
-  }, [addons, persistAddons])
+    commitAddons(next)
+  }, [addons, commitAddons])
 
   // Global addon handlers
   const handleAttachGlobal = useCallback((globalAddonId: string) => {
     const next = [...attachedRefs, { id: globalAddonId, enabled: true }]
-    setAttachedRefs(next)
-    persistAttachedRefs(next)
+    commitAttachedRefs(next)
     setShowAttachPicker(false)
-  }, [attachedRefs, persistAttachedRefs])
+  }, [attachedRefs, commitAttachedRefs])
 
   const handleDetachGlobal = useCallback((globalAddonId: string) => {
     const next = attachedRefs.filter((a) => a.id !== globalAddonId)
-    setAttachedRefs(next)
-    persistAttachedRefs(next)
-  }, [attachedRefs, persistAttachedRefs])
+    commitAttachedRefs(next)
+  }, [attachedRefs, commitAttachedRefs])
 
   const handleToggleGlobal = useCallback((globalAddonId: string) => {
     const next = attachedRefs.map((a) => a.id === globalAddonId ? { ...a, enabled: !a.enabled } : a)
-    setAttachedRefs(next)
-    persistAttachedRefs(next)
-  }, [attachedRefs, persistAttachedRefs])
+    commitAttachedRefs(next)
+  }, [attachedRefs, commitAttachedRefs])
 
   // Resolved global addons (attached refs joined with full data)
   const attachedGlobalAddons = attachedRefs
