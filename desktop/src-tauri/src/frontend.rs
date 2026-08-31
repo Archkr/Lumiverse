@@ -280,13 +280,28 @@ fn frontend_startup_shell_script(appearance: &FrontendStartupAppearance) -> Stri
     style.textContent = '#lumiverse-startup-shell{{position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:var(--lumiverse-startup-background,#0a0812);color:var(--lumiverse-startup-text-muted,rgba(255,255,255,.64));font:600 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.02em}}.lumiverse-startup-titlebar{{height:36px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;border-bottom:1px solid var(--lumiverse-startup-border,rgba(255,255,255,.08));background:color-mix(in srgb,var(--lumiverse-startup-background,#0a0812) 86%,transparent)}}.lumiverse-startup-dot{{width:8px;height:8px;border-radius:999px;background:var(--lumiverse-startup-primary,#9370db);box-shadow:0 0 0 3px color-mix(in srgb,var(--lumiverse-startup-primary,#9370db) 12%,transparent)}}.lumiverse-startup-controls{{position:absolute;right:12px;display:flex;gap:7px}}.lumiverse-startup-controls i{{display:block;width:11px;height:11px;border-radius:999px;border:1px solid var(--lumiverse-startup-border,rgba(255,255,255,.12))}}.lumiverse-startup-pulse{{position:absolute;top:50%;left:50%;width:42px;height:42px;margin:-21px;border-radius:50%;border:2px solid var(--lumiverse-startup-primary,#9370db);border-left-color:transparent;opacity:.55;animation:lumiverse-startup-spin .9s linear infinite}}@keyframes lumiverse-startup-spin{{to{{transform:rotate(360deg)}}}}';
     document.head.appendChild(style);
     document.body.appendChild(shell);
+    // The shell must lift on every route the frontend can land on, not just
+    // the authenticated one. /login, /sso-complete and the Stream Deck
+    // handoff render as siblings of <App> in the router, so they never
+    // produce [data-app-root] — waiting on it alone leaves an opaque overlay
+    // over a working login form forever. Any mounted React root means the
+    // page is up: the app commits its first render in one pass, so this
+    // cannot uncover a half-drawn tree. Keep a wall-clock failsafe as well,
+    // so no future route can trap the window again.
+    const mounted = () =>
+      !!document.querySelector('[data-app-root]') ||
+      (document.getElementById('root')?.childElementCount ?? 0) > 0;
+    const dismiss = () => {{
+      shell.remove(); style.remove(); root.removeAttribute('data-lumiverse-startup-shell'); observer.disconnect();
+    }};
     const remove = () => {{
-      if (!document.querySelector('[data-app-root]')) return false;
-      shell.remove(); style.remove(); root.removeAttribute('data-lumiverse-startup-shell'); observer.disconnect(); return true;
+      if (!mounted()) return false;
+      dismiss(); return true;
     }};
     const observer = new MutationObserver(remove);
     observer.observe(document.documentElement, {{ childList: true, subtree: true }});
     requestAnimationFrame(remove);
+    setTimeout(dismiss, 15000);
   }};
   if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount, {{ once: true }});
 }})();"#
