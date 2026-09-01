@@ -8,6 +8,7 @@ import {
   regexReplaceSandboxed,
   RegexTimeoutError,
 } from "../../utils/regex-sandbox";
+import { applyRegexTrimStrings } from "../../utils/regex-trim";
 
 const REGEX_REF_TIMEOUT_MS = 500;
 
@@ -127,16 +128,7 @@ export function registerRegexRefMacros(): void {
           );
         }
 
-        // Apply trim_strings
-        if (script.trim_strings.length > 0) {
-          for (const trim of script.trim_strings) {
-            while (result.includes(trim)) {
-              result = result.replaceAll(trim, "");
-            }
-          }
-        }
-
-        return result;
+        return applyRegexTrimStrings(result, script.trim_strings);
       } catch (err) {
         if (err instanceof RegexTimeoutError) {
           ctx.warn(`regexInstalled: script "${scriptId}" exceeded ${REGEX_REF_TIMEOUT_MS}ms`);

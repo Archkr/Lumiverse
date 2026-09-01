@@ -1218,6 +1218,14 @@ describe("raw capture processing", () => {
   });
 });
 
+describe("trim string processing", () => {
+  test("treats an empty trim string as a no-op", async () => {
+    const script = runtimeScript({ trim_strings: [""] });
+
+    expect(await applyRegexScripts("x", [script], "ai_output")).toBe("y");
+  });
+});
+
 describe("find-only macro processing", () => {
   test("resolves the find pattern without resolving the replacement", async () => {
     const script = runtimeScript({

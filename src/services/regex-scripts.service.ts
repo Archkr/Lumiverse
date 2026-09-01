@@ -31,6 +31,7 @@ import {
   buildRegexActionCaptureTemplate,
   decorateRegexActionReplacements,
 } from "../utils/regex-actions";
+import { applyRegexTrimStrings } from "../utils/regex-trim";
 
 const REGEX_SCRIPT_TIMEOUT_MS = 500;
 const REGEX_SLOW_WARNING_MS = 5_000;
@@ -1683,10 +1684,7 @@ export async function applyRegexScripts(
           ),
         );
         if (applied.handled) {
-          result = applied.content;
-          for (const trim of script.trim_strings) {
-            while (result.includes(trim)) result = result.replaceAll(trim, "");
-          }
+          result = applyRegexTrimStrings(applied.content, script.trim_strings);
           continue;
         }
       }
@@ -1803,14 +1801,7 @@ export async function applyRegexScripts(
         }
       }
 
-      // Apply trim_strings
-      if (script.trim_strings.length > 0) {
-        for (const trim of script.trim_strings) {
-          while (result.includes(trim)) {
-            result = result.replaceAll(trim, "");
-          }
-        }
-      }
+      result = applyRegexTrimStrings(result, script.trim_strings);
 
       const elapsedMs = Date.now() - startedAt;
       if (elapsedMs >= REGEX_SLOW_WARNING_MS) {
