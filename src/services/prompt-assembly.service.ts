@@ -3067,6 +3067,13 @@ export async function assemblePrompt(
     if (!promptBlockMatchesCharacterTags(block.characterTagTrigger, focusedCharacter.tags)) {
       continue;
     }
+    // Structural world-info slots are unique. Presets can acquire duplicate
+    // markers during import/merge, while their independent display names can
+    // hide the collision (for example, a second marker named "Databank").
+    // Skip duplicates before marker-pinned entries are handled as those would
+    // otherwise be repeated too.
+    if (block.marker === "world_info_before" && hasWiBefore) continue;
+    if (block.marker === "world_info_after" && hasWiAfter) continue;
     // Marker-pinned WI: emit this block's "before" entries ahead of its own
     // output, and queue its "after" entries for the next-iteration flush.
     const pin = block.marker ? pinnedByMarker.get(block.marker) : undefined;
