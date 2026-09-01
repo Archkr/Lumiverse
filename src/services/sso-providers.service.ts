@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { getDb } from "../db/connection";
 import { getEncryptionKeyBytes } from "../crypto/init";
 import { env } from "../env";
+import { getExternalSsoCallbackPath } from "../auth/callback-compat";
 
 export type SsoProviderKind = "authelia" | "authentik" | "keycloak" | "custom_oidc";
 
@@ -256,7 +257,8 @@ function getRow(id: string): SsoProviderRow | null {
 
 export function getRedirectUri(slug: string, origin = process.env.AUTH_BASE_URL || `http://localhost:${env.port}`): string {
   const base = (origin || "").replace(/\/$/, "");
-  return base ? `${base}/api/auth/oauth2/callback/${slug}` : `/api/auth/oauth2/callback/${slug}`;
+  const path = getExternalSsoCallbackPath(slug);
+  return base ? `${base}${path}` : path;
 }
 
 function normalizeMetadata(input: any, existing?: string): string {

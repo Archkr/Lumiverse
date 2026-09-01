@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { createOAuthAccountIssuer } from "better-auth/db";
 import { username, admin, bearer, genericOAuth } from "better-auth/plugins";
 import { getDb } from "../db/connection";
 import { env } from "../env";
@@ -101,6 +102,10 @@ export const auth = betterAuth({
       ? [genericOAuth({
           config: ssoConfigs.map((provider) => ({
             providerId: provider.providerId,
+            // Preserve Better Auth 1.6's provider-scoped account identity.
+            // Without this explicit namespace, 1.7 discovery providers use
+            // their protocol issuer and can merge aliases for one authority.
+            accountIssuer: createOAuthAccountIssuer(provider.providerId),
             clientId: provider.clientId,
             clientSecret: provider.clientSecret,
             discoveryUrl: provider.discoveryUrl,

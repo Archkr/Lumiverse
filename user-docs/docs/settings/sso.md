@@ -70,6 +70,9 @@ https://app.example.com/api/auth/oauth2/callback/authentik
 ```
 
 The redirect URI must match exactly: scheme, host, port, path, and slug.
+Lumiverse retains this callback path across the Better Auth 1.7 upgrade and
+maps it to the library's new internal route, so existing provider registrations
+do not need to change.
 
 ---
 

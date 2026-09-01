@@ -18,7 +18,7 @@
     "@zilliz/milvus2-sdk-node": "^3.0.3",
     "apache-arrow": "18.1.0",
     "archiver": "^8.0.0",
-    "better-auth": "^1.5.3",
+    "better-auth": "1.7.2",
     "fflate": "^0.8.2",
     "gpt-tokenizer": "^2.8.1",
     "hono": "^4.7.0",
@@ -39,12 +39,12 @@
   },
   "overrides": {
     "lru-cache": "11.2.7",
-    "kysely": "0.28.15",
+    "kysely": "0.28.17",
     "protobufjs": "8.7.0"
   },
   "resolutions": {
     "lru-cache": "11.2.7",
-    "kysely": "0.28.15",
+    "kysely": "0.28.17",
     "protobufjs": "8.7.0"
   },
   "scripts": {

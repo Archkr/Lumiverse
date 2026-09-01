@@ -6,6 +6,7 @@ import { serveStatic } from "hono/bun";
 import { websocket } from "hono/bun";
 import { env } from "./env";
 import { auth } from "./auth";
+import { rewriteLegacySsoCallbackPath } from "./auth/callback-compat";
 import { requireAuth } from "./auth/middleware";
 import { settingsRoutes } from "./routes/settings.routes";
 import { charactersRoutes } from "./routes/characters.routes";
@@ -308,9 +309,11 @@ const betterAuthHandler: Handler = (c) => {
   }
   const host = c.req.header("x-forwarded-host") || c.req.header("host");
   const proto = c.req.header("x-forwarded-proto") || "http";
-  if (host) {
-    const url = new URL(c.req.url);
-    const rewritten = new URL(url.pathname + url.search, `${proto}://${host}`);
+  const url = new URL(c.req.url);
+  const pathname = rewriteLegacySsoCallbackPath(url.pathname);
+  if (host || pathname !== url.pathname) {
+    const origin = host ? `${proto}://${host}` : url.origin;
+    const rewritten = new URL(pathname + url.search, origin);
     return auth.handler(new Request(rewritten.toString(), c.req.raw));
   }
   return auth.handler(c.req.raw);

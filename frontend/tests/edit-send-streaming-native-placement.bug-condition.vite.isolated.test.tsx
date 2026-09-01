@@ -462,7 +462,7 @@ const hookStoreState = {
     find_regex: 'chunk',
     replace_string: 'resolved',
     flags: 'g',
-    placement: [],
+    placement: ['ai_output'],
     min_depth: null,
     max_depth: null,
     trim_strings: [],
@@ -478,7 +478,10 @@ const hookStoreState = {
 }
 mock.module('@/store', () => ({ useStore: (selector: (state: typeof hookStoreState) => unknown) => selector(hookStoreState) }))
 mock.module('@/lib/chatDisplaySettle', () => ({ trackInitialDisplayResolve: <T,>(promise: Promise<T>) => promise }))
-mock.module('@/lib/regex/pipeline', () => ({ applyDisplayRegexTiered }))
+mock.module('@/lib/regex/pipeline', () => ({
+  applyDisplayRegexTiered,
+  canApplyDisplayRegexInWorker: () => true,
+}))
 mock.module('@/api/macros', () => ({ resolveMacrosBatch: async ({ templates }: { templates: Record<string, string> }) => ({ resolved: templates }) }))
 mock.module('@/lib/spindle/display-resolver-registry', () => ({
   isDisplayChatOwned: () => true,

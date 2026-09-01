@@ -80,7 +80,7 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, getState) => ({
       isAuthLoading: false,
       authError: null,
     })
-    await authClient.signOut()
+    await authClient.signOut({})
   },
 
   checkSession: async () => {
@@ -91,6 +91,7 @@ export const createAuthSlice: StateCreator<AuthSlice> = (set, getState) => ({
     let responseMeta: AuthErrorResponseMeta | null = null
     try {
       const { data } = await authClient.getSession({
+        query: {},
         fetchOptions: {
           onError: async (ctx) => {
             responseMeta = await readAuthErrorResponseMeta(ctx)

@@ -128,6 +128,7 @@ const BASELINE_MIGRATIONS: readonly string[] = [
   "110_illarin_delivery_receipts.sql",
   "111_generation_outbox_connection_id.sql",
   "112_weaver_session_taste.sql",
+  "113_better_auth_1_7_accounts.sql",
 ];
 
 const BASELINE_SET = new Set(BASELINE_MIGRATIONS);
@@ -235,6 +236,9 @@ const FOREIGN_KEYS_OFF_MIGRATIONS = new Set([
   // Table rebuild (drop + recreate) of extension_grants, which carries a child
   // FK into extensions with ON DELETE CASCADE.
   "104_extension_grants_scoped_unique.sql",
+  // Better Auth 1.7 makes account.issuer required and adds a compound unique
+  // identity index, which requires rebuilding SQLite's account table.
+  "113_better_auth_1_7_accounts.sql",
 ]);
 
 function applyMigrationWithForeignKeysOff(db: Database, file: string, sql: string): void {
@@ -254,6 +258,54 @@ function applyMigrationWithForeignKeysOff(db: Database, file: string, sql: strin
     }
   } finally {
     db.run("PRAGMA foreign_keys = ON");
+  }
+}
+
+function assertBetterAuthAccountMigrationReady(db: Database): void {
+  const providerIds = db.query("SELECT DISTINCT providerId FROM account").all() as Array<{
+    providerId: string;
+  }>;
+  const unsupported = providerIds
+    .map((row) => row.providerId)
+    .filter((providerId) =>
+      providerId !== "credential"
+      && providerId !== "siwe"
+      && (!providerId || encodeURIComponent(providerId) !== providerId)
+    );
+  if (unsupported.length > 0) {
+    throw new Error(
+      "Better Auth 1.7 account migration cannot safely encode legacy provider IDs: "
+        + unsupported.map((providerId) => JSON.stringify(providerId)).join(", ")
+        + ". Rename or migrate these providers before restarting.",
+    );
+  }
+
+  const collision = db.query(`
+    SELECT
+      CASE
+        WHEN providerId = 'credential' THEN 'local:credential'
+        WHEN providerId = 'siwe' THEN 'local:siwe'
+        ELSE 'local:oauth:' || providerId
+      END AS issuer,
+      CASE WHEN providerId = 'credential' THEN userId ELSE accountId END AS accountId,
+      COUNT(*) AS accountCount,
+      COUNT(DISTINCT userId) AS userCount
+    FROM account
+    GROUP BY 1, 2
+    HAVING COUNT(*) > 1
+    LIMIT 1
+  `).get() as {
+    issuer: string;
+    accountId: string;
+    accountCount: number;
+    userCount: number;
+  } | null;
+  if (collision) {
+    throw new Error(
+      `Better Auth 1.7 account identity collision for (${collision.issuer}, ${collision.accountId}): `
+        + `${collision.accountCount} account rows across ${collision.userCount} user(s). `
+        + "Resolve the duplicate account links before restarting.",
+    );
   }
 }
 
@@ -345,6 +397,10 @@ export async function runMigrations(db: Database, migrationsDir?: string): Promi
 
     const sql = await Bun.file(join(dir, file)).text();
     console.log(`Applying migration: ${file}`);
+
+    if (file === "113_better_auth_1_7_accounts.sql") {
+      assertBetterAuthAccountMigrationReady(db);
+    }
 
     if (FOREIGN_KEYS_OFF_MIGRATIONS.has(file)) {
       applyMigrationWithForeignKeysOff(db, file, sql);

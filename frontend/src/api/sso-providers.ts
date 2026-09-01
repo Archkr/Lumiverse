@@ -126,9 +126,9 @@ export const ssoProvidersApi = {
     return del<{ success: boolean; recovery: SsoRecoveryStatus }>(`/sso-providers/links/${encodeURIComponent(providerId)}`)
   },
   getLoginUrl(providerId: string, callbackURL = '/') {
-    return authPost<{ url: string; redirect: boolean }>('/sign-in/oauth2', { providerId, callbackURL, disableRedirect: true })
+    return authPost<{ url: string; redirect: boolean }>('/sign-in/social', { provider: providerId, callbackURL, disableRedirect: true })
   },
   getLinkUrl(providerId: string, callbackURL = '/sso-complete') {
-    return authPost<{ url: string; redirect: boolean }>('/oauth2/link', { providerId, callbackURL })
+    return authPost<{ url: string; redirect: boolean }>('/link-social', { provider: providerId, callbackURL, disableRedirect: true })
   },
 }

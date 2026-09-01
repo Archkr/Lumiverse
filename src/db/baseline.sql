@@ -8,6 +8,7 @@ CREATE TABLE "account" (
   id TEXT PRIMARY KEY NOT NULL,
   accountId TEXT NOT NULL,
   providerId TEXT NOT NULL,
+  issuer TEXT NOT NULL,
   userId TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
   accessToken TEXT,
   refreshToken TEXT,
@@ -1098,6 +1099,9 @@ CREATE TABLE world_books (
 
 CREATE INDEX idx_account_provider_account
   ON account(providerId, accountId);
+
+CREATE UNIQUE INDEX account_issuer_accountId_uidx
+  ON account(issuer, accountId);
 
 CREATE INDEX idx_account_userId ON "account"(userId);
 
