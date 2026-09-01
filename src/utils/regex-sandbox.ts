@@ -1,6 +1,3 @@
-import { shouldUseBunWorkers, warnBunWorkerFallback } from "./bun-worker-guard";
-import { runRegexRequest } from "./regex-sandbox-core";
-
 /**
  * Worker-backed regex sandbox.
  *
@@ -274,54 +271,6 @@ function getPool(): RegexWorkerPool {
   return _pool;
 }
 
-function runRegexInline<T>(
-  op: QueueItem["op"],
-  payload: Record<string, unknown>,
-): Promise<T> {
-  // Windows Bun worker crashes are worse than losing timeout isolation here.
-  warnBunWorkerFallback("regex sandbox");
-  if (op === "replace") {
-    return Promise.resolve(runRegexRequest({
-      id: "inline",
-      op,
-      pattern: String(payload.pattern ?? ""),
-      flags: String(payload.flags ?? ""),
-      input: String(payload.input ?? ""),
-      replacement: String(payload.replacement ?? ""),
-    }) as T);
-  }
-
-  if (op === "test") {
-    return Promise.resolve(runRegexRequest({
-      id: "inline",
-      op,
-      pattern: String(payload.pattern ?? ""),
-      flags: String(payload.flags ?? ""),
-      input: String(payload.input ?? ""),
-      replacement: String(payload.replacement ?? ""),
-    }) as T);
-  }
-
-  if (op === "capture-replacements") {
-    return Promise.resolve(runRegexRequest({
-      id: "inline",
-      op,
-      pattern: String(payload.pattern ?? ""),
-      flags: String(payload.flags ?? ""),
-      input: String(payload.input ?? ""),
-      replacement: String(payload.replacement ?? ""),
-    }) as T);
-  }
-
-  return Promise.resolve(runRegexRequest({
-    id: "inline",
-    op,
-    pattern: String(payload.pattern ?? ""),
-    flags: String(payload.flags ?? ""),
-    input: String(payload.input ?? ""),
-  }) as T);
-}
-
 export function shutdownRegexSandbox(): void {
   if (_pool) {
     _pool.shutdown();
@@ -349,9 +298,6 @@ export async function regexReplaceSandboxed(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
   assertCompilable(pattern, flags);
-  if (!shouldUseBunWorkers()) {
-    return runRegexInline<string>("replace", { pattern, flags, input, replacement });
-  }
   return getPool().run<string>(
     "replace",
     { pattern, flags, input, replacement },
@@ -366,9 +312,6 @@ export async function regexCollectSandboxed(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<SandboxMatch[]> {
   assertCompilable(pattern, flags);
-  if (!shouldUseBunWorkers()) {
-    return runRegexInline<SandboxMatch[]>("collect", { pattern, flags, input });
-  }
   return getPool().run<SandboxMatch[]>(
     "collect",
     { pattern, flags, input },
@@ -389,12 +332,6 @@ export async function regexCaptureReplacementsSandboxed(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<SandboxCaptureReplacement[]> {
   assertCompilable(pattern, flags);
-  if (!shouldUseBunWorkers()) {
-    return runRegexInline<SandboxCaptureReplacement[]>(
-      "capture-replacements",
-      { pattern, flags, input, replacement },
-    );
-  }
   return getPool().run<SandboxCaptureReplacement[]>(
     "capture-replacements",
     { pattern, flags, input, replacement },
@@ -410,14 +347,6 @@ export async function regexTestSandboxed(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<{ result: string; matches: number }> {
   assertCompilable(pattern, flags);
-  if (!shouldUseBunWorkers()) {
-    return runRegexInline<{ result: string; matches: number }>("test", {
-      pattern,
-      flags,
-      input,
-      replacement,
-    });
-  }
   return getPool().run<{ result: string; matches: number }>(
     "test",
     { pattern, flags, input, replacement },

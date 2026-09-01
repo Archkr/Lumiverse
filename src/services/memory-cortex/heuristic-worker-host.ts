@@ -1,5 +1,3 @@
-import { warnBunWorkerFallback, shouldUseBunWorkers } from "../../utils/bun-worker-guard";
-import { runHeuristicAnalysis } from "./heuristic-analysis";
 import type {
   HeuristicAnalysisInput,
   HeuristicAnalysisOutput,
@@ -65,11 +63,6 @@ class HeuristicWorkerHost {
   }
 
   run(payload: HeuristicAnalysisInput): Promise<HeuristicAnalysisOutput> {
-    if (!shouldUseBunWorkers()) {
-      warnBunWorkerFallback("memory-cortex heuristics");
-      return Promise.resolve(runHeuristicAnalysis(payload));
-    }
-
     const requestId = crypto.randomUUID();
     const worker = this.ensureWorker();
     const request: HeuristicWorkerRequest = { type: "run", requestId, payload };
