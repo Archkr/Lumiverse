@@ -6,6 +6,7 @@ import { ModalShell } from '@/components/shared/ModalShell'
 import { characterGalleryApi } from '@/api/character-gallery'
 import { charactersApi } from '@/api/characters'
 import { imagesApi } from '@/api/images'
+import { getGreetingTitle } from '@/lib/greetingMetadata'
 import type { Character, CharacterGalleryItem } from '@/types/api'
 import styles from './GreetingPickerModal.module.css'
 import clsx from 'clsx'
@@ -30,9 +31,13 @@ export default function GreetingPickerModal({
   const { t } = useTranslation('modals')
 
   const greetings = [
-    { label: t('greetingPicker.defaultGreeting'), content: character.first_mes },
+    {
+      label: getGreetingTitle(character.extensions, 0) || t('greetingPicker.defaultGreeting'),
+      content: character.first_mes,
+    },
     ...(character.alternate_greetings || []).map((g, i) => ({
-      label: t('greetingPicker.greetingNumber', { number: i + 2 }),
+      label: getGreetingTitle(character.extensions, i + 1)
+        || t('greetingPicker.greetingNumber', { number: i + 2 }),
       content: g,
     })),
   ]
@@ -66,8 +71,11 @@ export default function GreetingPickerModal({
       delete updated[greetingIndex]
     }
     try {
+      const extensions = { ...character.extensions }
+      if (Object.keys(updated).length > 0) extensions.greeting_backgrounds = updated
+      else delete extensions.greeting_backgrounds
       await charactersApi.update(character.id, {
-        extensions: { ...character.extensions, greeting_backgrounds: updated },
+        extensions,
       })
       setGreetingBgs(updated)
     } catch {}
@@ -127,7 +135,7 @@ export default function GreetingPickerModal({
                       e.stopPropagation()
                       setGalleryOpenIndex(galleryOpenIndex === i ? null : i)
                     }}
-                    title="Set background image for this greeting"
+                    title={t('greetingPicker.setBackground')}
                   >
                     {greetingBgs[i] ? (
                       <img
@@ -165,11 +173,11 @@ export default function GreetingPickerModal({
                       onClick={() => assignBackground(i, null)}
                     >
                       <X size={10} />
-                      Clear background
+                      {t('greetingPicker.clearBackground')}
                     </button>
                   )}
                   {galleryItems.length === 0 && (
-                    <span className={styles.bgGalleryEmpty}>No gallery images. Add images in the character editor.</span>
+                    <span className={styles.bgGalleryEmpty}>{t('greetingPicker.noGalleryImages')}</span>
                   )}
                 </div>
               )}

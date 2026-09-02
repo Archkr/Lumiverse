@@ -31,7 +31,10 @@
     "defaultGreeting": "Default Greeting",
     "greetingNumber": "Greeting #{{number}}",
     "image": "Image",
-    "active": "Active"
+    "active": "Active",
+    "setBackground": "Set background image for this greeting",
+    "clearBackground": "Clear background",
+    "noGalleryImages": "No gallery images. Add images in the character editor."
   },
   "chatPicker": {
     "title": "Resume Chat · {{name}}",

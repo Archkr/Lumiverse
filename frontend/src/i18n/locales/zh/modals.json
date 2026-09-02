@@ -31,7 +31,10 @@
     "defaultGreeting": "默认问候语",
     "greetingNumber": "问候语 #{{number}}",
     "image": "图片",
-    "active": "当前"
+    "active": "当前",
+    "setBackground": "为此问候语设置背景图片",
+    "clearBackground": "清除背景",
+    "noGalleryImages": "图库中没有图片。请在角色编辑器中添加图片。"
   },
   "chatPicker": {
     "title": "继续聊天 · {{name}}",

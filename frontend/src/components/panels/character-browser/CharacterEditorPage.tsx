@@ -96,6 +96,11 @@ import AlternateAvatarManager from './AlternateAvatarManager'
 import type { AlternateAvatarEntry } from './AlternateAvatarManager'
 import CharacterTokenReportModal, { type CharacterTokenReportItem } from './CharacterTokenReportModal'
 import { GuideViewer } from '@/components/shared/GuideViewer'
+import {
+  getGreetingTitle,
+  removeAlternateGreetingMetadata,
+  setGreetingTitle,
+} from '@/lib/greetingMetadata'
 
 const DEBOUNCE_MS = 2000
 const MAX_PERSPECTIVE_LAYERS = 5
@@ -422,6 +427,7 @@ export default function CharacterEditorPage() {
   const [newTag, setNewTag] = useState('')
   const [guideOpen, setGuideOpen] = useState(false)
   const [alternateGreetings, setAlternateGreetings] = useState<string[]>([])
+  const [greetingBackgroundPickerIndex, setGreetingBackgroundPickerIndex] = useState<number | null>(null)
   const [alternateCharacterName, setAlternateCharacterName] = useState('')
   const [extensionsJson, setExtensionsJson] = useState('')
   const [jsonError, setJsonError] = useState<string | null>(null)
@@ -518,6 +524,7 @@ export default function CharacterEditorPage() {
     })
     setTags(character.tags || [])
     setAlternateGreetings(character.alternate_greetings || [])
+    setGreetingBackgroundPickerIndex(null)
     setAlternateCharacterName(character.extensions?.alternate_character_name || '')
     setExtensionsJson(JSON.stringify(character.extensions || {}, null, 2))
     setJsonError(null)
@@ -850,14 +857,15 @@ export default function CharacterEditorPage() {
 
     items.push({
       id: 'greeting:first',
-      label: t('characterEditor.firstMessage'),
+      label: getGreetingTitle(workingExtensions, 0) || t('characterEditor.firstMessage'),
       text: fields.first_mes || '',
       group: 'greeting',
     })
     alternateGreetings.forEach((greeting, index) => {
       items.push({
         id: `greeting:${index}`,
-        label: t('characterEditor.greetingNumber', { n: index + 1 }),
+        label: getGreetingTitle(workingExtensions, index + 1)
+          || t('characterEditor.greetingNumber', { n: index + 1 }),
         text: greeting,
         group: 'greeting',
       })
@@ -1072,6 +1080,31 @@ export default function CharacterEditorPage() {
     [alternateGreetings, debouncedSave]
   )
 
+  const handleGreetingTitleChange = useCallback(
+    (greetingIndex: number, value: string) => {
+      mutateExtensions((ext) => setGreetingTitle(ext, greetingIndex, value), false)
+    },
+    [mutateExtensions]
+  )
+
+  const handleGreetingBackgroundChange = useCallback(
+    (greetingIndex: number, imageId: string | null) => {
+      mutateExtensions((ext) => {
+        const next = { ...ext }
+        const backgrounds = isRecord(ext.greeting_backgrounds)
+          ? { ...ext.greeting_backgrounds }
+          : {}
+        if (imageId) backgrounds[greetingIndex] = imageId
+        else delete backgrounds[greetingIndex]
+        if (Object.keys(backgrounds).length > 0) next.greeting_backgrounds = backgrounds
+        else delete next.greeting_backgrounds
+        return next
+      }, false)
+      setGreetingBackgroundPickerIndex(null)
+    },
+    [mutateExtensions]
+  )
+
   const handleAddGreeting = useCallback(() => {
     const updated = [...alternateGreetings, '']
     setAlternateGreetings(updated)
@@ -1085,6 +1118,7 @@ export default function CharacterEditorPage() {
     (index: number) => {
       const updated = alternateGreetings.filter((_, i) => i !== index)
       setAlternateGreetings(updated)
+      setGreetingBackgroundPickerIndex(null)
       const removedGreetingIndex = index + 1
       mutateExtensions((ext) => {
         const nextBindings: AvatarBindings = {}
@@ -1110,7 +1144,7 @@ export default function CharacterEditorPage() {
           if (Object.keys(backgrounds).length > 0) next.greeting_backgrounds = backgrounds
           else delete next.greeting_backgrounds
         }
-        return next
+        return removeAlternateGreetingMetadata(next, index)
       }, false)
       if (editingCharacterId) {
         showSaving()
@@ -1971,6 +2005,31 @@ export default function CharacterEditorPage() {
 
                   {activeTab === 'greetings' && (
                     <>
+                      <div className={styles.greetingMetaRow}>
+                        <label className={styles.greetingNameField}>
+                          <span>{t('characterEditor.greetingName')}</span>
+                          <input
+                            type="text"
+                            className={styles.greetingNameInput}
+                            value={getGreetingTitle(workingExtensions, 0) || ''}
+                            onChange={(event) => handleGreetingTitleChange(0, event.target.value)}
+                            placeholder={t('characterEditor.greetingNamePlaceholder')}
+                          />
+                        </label>
+                        <GreetingBackgroundControl
+                          greetingIndex={0}
+                          imageId={readGreetingBackground(workingExtensions, 0)}
+                          galleryItems={galleryItems}
+                          open={greetingBackgroundPickerIndex === 0}
+                          onToggle={() => setGreetingBackgroundPickerIndex((current) => current === 0 ? null : 0)}
+                          onSelect={handleGreetingBackgroundChange}
+                          labels={{
+                            set: t('characterEditor.setGreetingBackground'),
+                            clear: t('characterEditor.clearGreetingBackground'),
+                            empty: t('characterEditor.noGalleryImages'),
+                          }}
+                        />
+                      </div>
                       <Field
                         label={t('characterEditor.firstMessage')}
                         helper={t('characterEditor.firstMessageHelper')}
@@ -1998,6 +2057,19 @@ export default function CharacterEditorPage() {
                               <span className={styles.greetingLabel}>{t('characterEditor.greetingNumber', { n: i + 1 })}</span>
                               <div className={styles.greetingActions}>
                                 <TokenCountButton text={greeting} />
+                                <GreetingBackgroundControl
+                                  greetingIndex={i + 1}
+                                  imageId={readGreetingBackground(workingExtensions, i + 1)}
+                                  galleryItems={galleryItems}
+                                  open={greetingBackgroundPickerIndex === i + 1}
+                                  onToggle={() => setGreetingBackgroundPickerIndex((current) => current === i + 1 ? null : i + 1)}
+                                  onSelect={handleGreetingBackgroundChange}
+                                  labels={{
+                                    set: t('characterEditor.setGreetingBackground'),
+                                    clear: t('characterEditor.clearGreetingBackground'),
+                                    empty: t('characterEditor.noGalleryImages'),
+                                  }}
+                                />
                                 <button
                                   type="button"
                                   className={styles.removeBtn}
@@ -2008,6 +2080,14 @@ export default function CharacterEditorPage() {
                                 </button>
                               </div>
                             </div>
+                            <input
+                              type="text"
+                              className={styles.greetingNameInput}
+                              value={getGreetingTitle(workingExtensions, i + 1) || ''}
+                              onChange={(event) => handleGreetingTitleChange(i + 1, event.target.value)}
+                              placeholder={t('characterEditor.greetingNamePlaceholder')}
+                              aria-label={t('characterEditor.greetingNameFor', { number: i + 1 })}
+                            />
                             <ExpandableTextarea
                               className={styles.fieldTextarea}
                               value={greeting}
@@ -2616,6 +2696,84 @@ function Field({
           onChange={(e) => onChange(e.target.value)}
           placeholder={`${label}...`}
         />
+      )}
+    </div>
+  )
+}
+
+function readGreetingBackground(extensions: Record<string, any>, greetingIndex: number): string | null {
+  const backgrounds = extensions.greeting_backgrounds
+  if (!isRecord(backgrounds)) return null
+  const imageId = backgrounds[greetingIndex]
+  return typeof imageId === 'string' && imageId ? imageId : null
+}
+
+function GreetingBackgroundControl({
+  greetingIndex,
+  imageId,
+  galleryItems,
+  open,
+  onToggle,
+  onSelect,
+  labels,
+}: {
+  greetingIndex: number
+  imageId: string | null
+  galleryItems: CharacterGalleryItem[]
+  open: boolean
+  onToggle: () => void
+  onSelect: (greetingIndex: number, imageId: string | null) => void
+  labels: { set: string; clear: string; empty: string }
+}) {
+  return (
+    <div className={styles.greetingBackgroundControl}>
+      <button
+        type="button"
+        className={styles.greetingBackgroundButton}
+        onClick={onToggle}
+        title={labels.set}
+        aria-label={labels.set}
+        aria-expanded={open}
+      >
+        {imageId ? (
+          <img src={imagesApi.smallUrl(imageId)} alt="" />
+        ) : (
+          <ImagePlus size={14} />
+        )}
+      </button>
+      {open && (
+        <div className={styles.greetingBackgroundPopover}>
+          {galleryItems.length > 0 ? (
+            <div className={styles.greetingBackgroundGrid}>
+              {galleryItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={clsx(
+                    styles.greetingBackgroundItem,
+                    imageId === item.image_id && styles.greetingBackgroundItemActive,
+                  )}
+                  onClick={() => onSelect(greetingIndex, item.image_id)}
+                  title={item.caption || labels.set}
+                >
+                  <img src={characterGalleryApi.smallUrl(item.image_id)} alt={item.caption || ''} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className={styles.greetingBackgroundEmpty}>{labels.empty}</span>
+          )}
+          {imageId && (
+            <button
+              type="button"
+              className={styles.greetingBackgroundClear}
+              onClick={() => onSelect(greetingIndex, null)}
+            >
+              <X size={11} />
+              {labels.clear}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

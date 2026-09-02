@@ -14,6 +14,7 @@ import type { Character } from '@/types/api'
 import styles from './GroupChatCreatorModal.module.css'
 import clsx from 'clsx'
 import { clearSearchOnEscape } from '@/lib/clearableSearch'
+import { getGreetingTitle } from '@/lib/greetingMetadata'
 
 type Step = 'characters' | 'greeting' | 'settings'
 type GroupCardMode = 'swap' | 'merge_ignore_muted' | 'merge'
@@ -109,7 +110,7 @@ export default function GroupChatCreatorModal() {
           characterId: char.id,
           characterName: char.name,
           greetingIndex: 0,
-          label: t('defaultGreeting'),
+          label: getGreetingTitle(char.extensions, 0) || t('defaultGreeting'),
           content: char.first_mes,
         })
       }
@@ -120,7 +121,8 @@ export default function GroupChatCreatorModal() {
               characterId: char.id,
               characterName: char.name,
               greetingIndex: i + 1,
-              label: tg('greetingNumber', { number: i + 2 }),
+              label: getGreetingTitle(char.extensions, i + 1)
+                || tg('greetingNumber', { number: i + 2 }),
               content: g,
             })
           }
