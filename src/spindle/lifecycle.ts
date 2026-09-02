@@ -1,5 +1,6 @@
 import { WorkerHost } from "./worker-host";
 import * as managerSvc from "./manager.service";
+import * as settingsSvc from "../services/settings.service";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 
@@ -81,6 +82,21 @@ export async function startExtension(id: string): Promise<void> {
     const host = new WorkerHost(freshExt.id, manifest, freshExt);
     await host.start();
     runningExtensions.set(id, host);
+
+    // CHAT_SWITCHED is one-shot, so an extension started while a chat is open
+    // (enable, restart) never learns about it until refresh. Replay each
+    // user's active chat to this worker once it subscribes.
+    try {
+      for (const row of settingsSvc.getSettingAcrossUsers("activeChatId")) {
+        const chatId = typeof row.value === "string" && row.value.length > 0 ? row.value : null;
+        if (chatId) host.queueEventReplay("CHAT_SWITCHED", { chatId }, row.user_id);
+      }
+    } catch (err: any) {
+      console.warn(
+        `[Spindle] Active-chat replay skipped for ${ext.identifier}:`,
+        err?.message ?? err
+      );
+    }
 
     eventBus.emit(EventType.SPINDLE_EXTENSION_LOADED, {
       extensionId: ext.id,

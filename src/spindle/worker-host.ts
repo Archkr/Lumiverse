@@ -871,6 +871,11 @@ function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
 export class WorkerHost {
   private runtime: RuntimeTransport | null = null;
   private eventUnsubscribers = new Map<string, () => void>();
+  // Events queued before the worker subscribes (extension start replays);
+  // flushed by handleSubscribeEvent once the subscription lands. Entries
+  // expire so a late subscriber cannot receive boot-time state as fresh.
+  private pendingEventReplays = new Map<string, Array<{ payload: unknown; userId: string; queuedAt: number }>>();
+  private static readonly EVENT_REPLAY_TTL_MS = 30_000;
   private pendingRequests = new Map<
     string,
     { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
@@ -2609,6 +2614,41 @@ export class WorkerHost {
       });
     });
     this.eventUnsubscribers.set(event, unsub);
+
+    const queued = this.pendingEventReplays.get(event);
+    if (queued) {
+      this.pendingEventReplays.delete(event);
+      const freshAfter = Date.now() - WorkerHost.EVENT_REPLAY_TTL_MS;
+      for (const replay of queued) {
+        if (replay.queuedAt < freshAfter) continue;
+        if (scopedUserId && replay.userId !== scopedUserId) continue;
+        this.postToWorker({
+          type: "event",
+          event,
+          payload: replay.payload,
+          userId: replay.userId,
+        });
+      }
+    }
+  }
+
+  /**
+   * Deliver an event to the worker even though it fired before the worker
+   * subscribed. Used on extension start to replay one-shot state such as the
+   * open chat, which otherwise leaves a restarted extension blind until the
+   * next real event. Posts immediately when already subscribed, else queues
+   * until handleSubscribeEvent lands.
+   */
+  queueEventReplay(event: string, payload: unknown, userId: string): void {
+    if (this.eventUnsubscribers.has(event)) {
+      const scopedUserId = this.getScopedUserId();
+      if (scopedUserId && userId !== scopedUserId) return;
+      this.postToWorker({ type: "event", event, payload, userId });
+      return;
+    }
+    const list = this.pendingEventReplays.get(event) ?? [];
+    list.push({ payload, userId, queuedAt: Date.now() });
+    this.pendingEventReplays.set(event, list);
   }
 
   private handleUnsubscribeEvent(event: string): void {

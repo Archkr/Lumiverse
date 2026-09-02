@@ -78,6 +78,11 @@ export function getSetting(userId: string, key: string): Setting | null {
   return { ...row, value: JSON.parse(row.value) };
 }
 
+export function getSettingAcrossUsers(key: string): Array<{ user_id: string; value: any }> {
+  const rows = getDb().query("SELECT user_id, value FROM settings WHERE key = ?").all(key) as any[];
+  return rows.map((r) => ({ user_id: r.user_id, value: JSON.parse(r.value) }));
+}
+
 /**
  * The `editAndSendAlwaysUseActiveConnection` Productivity setting, read from the
  * persisted per-user `quickToolbarSettings` blob.
