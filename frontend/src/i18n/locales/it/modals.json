@@ -31,10 +31,7 @@
     "defaultGreeting": "Saluto predefinito",
     "greetingNumber": "Saluto #{{number}}",
     "image": "Immagine",
-    "active": "Attivo",
-    "setBackground": "Imposta l’immagine di sfondo per questo saluto",
-    "clearBackground": "Rimuovi sfondo",
-    "noGalleryImages": "Nessuna immagine nella galleria. Aggiungine nell’editor del personaggio."
+    "active": "Attivo"
   },
   "chatPicker": {
     "title": "Riprendi chat · {{name}}",

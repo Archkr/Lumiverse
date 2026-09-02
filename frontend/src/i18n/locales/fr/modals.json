@@ -31,10 +31,7 @@
     "defaultGreeting": "Salut par défaut",
     "greetingNumber": "Salut #{{number}}",
     "image": "Image",
-    "active": "Actif",
-    "setBackground": "Définir l’image d’arrière-plan de cette salutation",
-    "clearBackground": "Effacer l’arrière-plan",
-    "noGalleryImages": "Aucune image dans la galerie. Ajoutez-en dans l’éditeur de personnage."
+    "active": "Actif"
   },
   "chatPicker": {
     "title": "Reprendre le chat · {{name}}",

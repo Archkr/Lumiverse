@@ -31,10 +31,7 @@
     "defaultGreeting": "デフォルトの挨拶",
     "greetingNumber": "ご挨拶 #{{number}}",
     "image": "画像",
-    "active": "アクティブ",
-    "setBackground": "この挨拶の背景画像を設定",
-    "clearBackground": "背景をクリア",
-    "noGalleryImages": "ギャラリー画像がありません。キャラクターエディターで画像を追加してください。"
+    "active": "アクティブ"
   },
   "chatPicker": {
     "title": "チャットを再開 · {{name}}",
