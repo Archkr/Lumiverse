@@ -1122,6 +1122,7 @@
     "greetingName": "Nome del saluto",
     "greetingNamePlaceholder": "Nome facoltativo del saluto...",
     "greetingNameFor": "Nome del saluto #{{number}}",
+    "reorderGreeting": "Trascina per riordinare il saluto",
     "setGreetingBackground": "Imposta l’immagine di sfondo per questo saluto",
     "clearGreetingBackground": "Rimuovi sfondo",
     "noGalleryImages": "Nessuna immagine nella galleria. Aggiungine nella scheda Galleria.",

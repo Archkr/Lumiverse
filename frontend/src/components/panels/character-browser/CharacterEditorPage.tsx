@@ -98,6 +98,8 @@ import CharacterTokenReportModal, { type CharacterTokenReportItem } from './Char
 import { GuideViewer } from '@/components/shared/GuideViewer'
 import {
   getGreetingTitle,
+  moveAlternateGreetingMetadata,
+  remapGreetingIndexForMove,
   removeAlternateGreetingMetadata,
   setGreetingTitle,
 } from '@/lib/greetingMetadata'
@@ -246,6 +248,41 @@ function SortablePerspectiveLayer({ layer, index, disabled, onLabelChange, onInt
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+function SortableGreetingItem({
+  id,
+  disabled,
+  children,
+}: {
+  id: string
+  disabled: boolean
+  children: React.ReactNode
+}) {
+  const { t } = useTranslation('panels')
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id, disabled })
+  const { setNodeRef, style } = useScaledSortableStyle({ setNodeRef: setSortableRef, transform, transition, isDragging })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={clsx(styles.greetingItem, styles.greetingItemSortable, isDragging && styles.greetingItemDragging)}
+    >
+      <button
+        type="button"
+        className={styles.greetingDragHandle}
+        disabled={disabled}
+        title={t('characterEditor.reorderGreeting')}
+        aria-label={t('characterEditor.reorderGreeting')}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={15} />
+      </button>
+      {children}
     </div>
   )
 }
@@ -427,6 +464,7 @@ export default function CharacterEditorPage() {
   const [newTag, setNewTag] = useState('')
   const [guideOpen, setGuideOpen] = useState(false)
   const [alternateGreetings, setAlternateGreetings] = useState<string[]>([])
+  const [alternateGreetingIds, setAlternateGreetingIds] = useState<string[]>([])
   const [greetingBackgroundPickerIndex, setGreetingBackgroundPickerIndex] = useState<number | null>(null)
   const [alternateCharacterName, setAlternateCharacterName] = useState('')
   const [extensionsJson, setExtensionsJson] = useState('')
@@ -524,6 +562,7 @@ export default function CharacterEditorPage() {
     })
     setTags(character.tags || [])
     setAlternateGreetings(character.alternate_greetings || [])
+    setAlternateGreetingIds((character.alternate_greetings || []).map(() => uuidv7()))
     setGreetingBackgroundPickerIndex(null)
     setAlternateCharacterName(character.extensions?.alternate_character_name || '')
     setExtensionsJson(JSON.stringify(character.extensions || {}, null, 2))
@@ -1106,8 +1145,10 @@ export default function CharacterEditorPage() {
   )
 
   const handleAddGreeting = useCallback(() => {
+    clearTimeout(timers.current['alternate_greetings'])
     const updated = [...alternateGreetings, '']
     setAlternateGreetings(updated)
+    setAlternateGreetingIds((current) => [...current, uuidv7()])
     if (editingCharacterId) {
       showSaving()
       browser.updateCharacter(editingCharacterId, { alternate_greetings: updated })
@@ -1116,8 +1157,10 @@ export default function CharacterEditorPage() {
 
   const handleRemoveGreeting = useCallback(
     (index: number) => {
+      clearTimeout(timers.current['alternate_greetings'])
       const updated = alternateGreetings.filter((_, i) => i !== index)
       setAlternateGreetings(updated)
+      setAlternateGreetingIds((current) => current.filter((_, i) => i !== index))
       setGreetingBackgroundPickerIndex(null)
       const removedGreetingIndex = index + 1
       mutateExtensions((ext) => {
@@ -1152,6 +1195,66 @@ export default function CharacterEditorPage() {
       }
     },
     [alternateGreetings, editingCharacterId, browser, mutateExtensions, showSaving]
+  )
+
+  const handleGreetingDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      const oldIndex = alternateGreetingIds.indexOf(String(active.id))
+      const newIndex = alternateGreetingIds.indexOf(String(over.id))
+      if (oldIndex < 0 || newIndex < 0) return
+
+      clearTimeout(timers.current['alternate_greetings'])
+      const reorderedGreetings = arrayMove(alternateGreetings, oldIndex, newIndex)
+      setAlternateGreetings(reorderedGreetings)
+      setAlternateGreetingIds((current) => arrayMove(current, oldIndex, newIndex))
+      setGreetingBackgroundPickerIndex(null)
+
+      const oldGreetingIndex = oldIndex + 1
+      const newGreetingIndex = newIndex + 1
+      mutateExtensions((ext) => {
+        let next = moveAlternateGreetingMetadata(ext, oldIndex, newIndex)
+
+        if (isRecord(next.greeting_backgrounds)) {
+          const backgrounds: Record<string, unknown> = {}
+          for (const [rawIndex, imageId] of Object.entries(next.greeting_backgrounds)) {
+            const greetingIndex = Number(rawIndex)
+            if (!Number.isInteger(greetingIndex) || greetingIndex < 0) {
+              backgrounds[rawIndex] = imageId
+              continue
+            }
+            backgrounds[String(remapGreetingIndexForMove(greetingIndex, oldGreetingIndex, newGreetingIndex))] = imageId
+          }
+          next = { ...next, greeting_backgrounds: backgrounds }
+        }
+
+        if (isRecord(next.avatar_bindings)) {
+          const bindings: AvatarBindings = {}
+          for (const [avatarId, rawBinding] of Object.entries(next.avatar_bindings)) {
+            if (!isRecord(rawBinding)) continue
+            const binding = { ...rawBinding } as AvatarBindings[string]
+            if (typeof binding.greeting_index === 'number') {
+              binding.greeting_index = remapGreetingIndexForMove(
+                binding.greeting_index,
+                oldGreetingIndex,
+                newGreetingIndex,
+              )
+            }
+            bindings[avatarId] = binding
+          }
+          next = { ...next, avatar_bindings: bindings }
+        }
+
+        return next
+      }, false)
+
+      if (editingCharacterId) {
+        showSaving()
+        void browser.updateCharacter(editingCharacterId, { alternate_greetings: reorderedGreetings })
+      }
+    },
+    [alternateGreetingIds, alternateGreetings, browser, editingCharacterId, mutateExtensions, showSaving]
   )
 
   const handleExtensionsChange = useCallback(
@@ -2051,8 +2154,24 @@ export default function CharacterEditorPage() {
                         <span className={styles.fieldHelper}>
                           {t('characterEditor.alternateGreetingsHelper')}
                         </span>
-                        {alternateGreetings.map((greeting, i) => (
-                          <div key={i} className={styles.greetingItem}>
+                        <DndContext
+                          sensors={perspectiveLayerSensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={handleGreetingDragEnd}
+                        >
+                          <SortableContext
+                            items={alternateGreetings.map((_, index) => alternateGreetingIds[index] ?? `greeting-${index}`)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <div className={styles.greetingList}>
+                              {alternateGreetings.map((greeting, i) => {
+                                const greetingId = alternateGreetingIds[i] ?? `greeting-${i}`
+                                return (
+                                  <SortableGreetingItem
+                                    key={greetingId}
+                                    id={greetingId}
+                                    disabled={alternateGreetings.length < 2}
+                                  >
                             <div className={styles.greetingHeader}>
                               <span className={styles.greetingLabel}>{t('characterEditor.greetingNumber', { n: i + 1 })}</span>
                               <div className={styles.greetingActions}>
@@ -2096,8 +2215,12 @@ export default function CharacterEditorPage() {
                               title={t('characterEditor.greetingNumber', { n: i + 1 })}
                               placeholder={t('characterEditor.alternateGreetingPlaceholder')}
                             />
-                          </div>
-                        ))}
+                                  </SortableGreetingItem>
+                                )
+                              })}
+                            </div>
+                          </SortableContext>
+                        </DndContext>
                         <button type="button" className={styles.addBtn} onClick={handleAddGreeting}>
                           <Plus size={12} /> {t('characterEditor.addGreeting')}
                         </button>

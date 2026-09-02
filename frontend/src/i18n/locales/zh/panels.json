@@ -1123,6 +1123,7 @@
     "greetingName": "问候语名称",
     "greetingNamePlaceholder": "可选的问候语名称...",
     "greetingNameFor": "问候语 #{{number}} 的名称",
+    "reorderGreeting": "拖动以重新排列问候语",
     "setGreetingBackground": "为此问候语设置背景图片",
     "clearGreetingBackground": "清除背景",
     "noGalleryImages": "图库中没有图片。请在图库选项卡中添加图片。",

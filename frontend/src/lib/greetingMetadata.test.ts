@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
   getGreetingTitle,
+  moveAlternateGreetingMetadata,
+  remapGreetingIndexForMove,
   removeAlternateGreetingMetadata,
   setGreetingTitle,
 } from './greetingMetadata'
@@ -96,5 +98,27 @@ describe('Greeting Tools metadata compatibility', () => {
       orphan: { id: 'orphan', description: 'Preserve unmapped metadata' },
     })
     expect(getGreetingTitle(next, 2)).toBe('C')
+  })
+
+  test('moves stable alternate metadata IDs and remaps companion greeting indices', () => {
+    const extensions = {
+      greeting_tools: {
+        greetings: {
+          a: { id: 'a', title: 'A' },
+          b: { id: 'b', title: 'B' },
+          c: { id: 'c', title: 'C' },
+        },
+        indexMap: { 0: 'a', 1: 'b', 2: 'c', future: 'keep' },
+      },
+    }
+
+    const next = moveAlternateGreetingMetadata(extensions, 0, 2)
+    expect(next.greeting_tools.indexMap).toEqual({ 0: 'b', 1: 'c', 2: 'a', future: 'keep' })
+    expect(getGreetingTitle(next, 3)).toBe('A')
+
+    expect([1, 2, 3, 4].map((index) => remapGreetingIndexForMove(index, 1, 3)))
+      .toEqual([3, 1, 2, 4])
+    expect([1, 2, 3, 4].map((index) => remapGreetingIndexForMove(index, 3, 1)))
+      .toEqual([2, 3, 1, 4])
   })
 })

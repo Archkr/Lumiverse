@@ -1286,6 +1286,7 @@
     "greetingName": "Greeting Name",
     "greetingNamePlaceholder": "Optional greeting name...",
     "greetingNameFor": "Name for greeting #{{number}}",
+    "reorderGreeting": "Drag to reorder greeting",
     "setGreetingBackground": "Set background image for this greeting",
     "clearGreetingBackground": "Clear background",
     "noGalleryImages": "No gallery images. Add images in the Gallery tab.",

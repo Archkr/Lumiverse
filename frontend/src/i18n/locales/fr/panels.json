@@ -1123,6 +1123,7 @@
     "greetingName": "Nom de la salutation",
     "greetingNamePlaceholder": "Nom facultatif de la salutation...",
     "greetingNameFor": "Nom de la salutation #{{number}}",
+    "reorderGreeting": "Faire glisser pour réorganiser la salutation",
     "setGreetingBackground": "Définir l’image d’arrière-plan de cette salutation",
     "clearGreetingBackground": "Effacer l’arrière-plan",
     "noGalleryImages": "Aucune image dans la galerie. Ajoutez-en dans l’onglet Galerie.",

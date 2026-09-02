@@ -113,6 +113,11 @@ export default function GreetingPickerModal({
               onClick={() => onSelect(i)}
               style={{ animationDelay: `${Math.min(i * 40, 200)}ms` }}
             >
+              {greetingBgs[i] && (
+                <div className={styles.cardBanner} aria-hidden="true">
+                  <img src={imagesApi.smallUrl(greetingBgs[i])} alt="" loading="lazy" />
+                </div>
+              )}
               <div className={styles.cardHeader}>
                 <span className={styles.cardLabel}>{g.label}</span>
                 <span className={styles.badgeRow}>
@@ -130,22 +135,14 @@ export default function GreetingPickerModal({
                   )}
                   <button
                     type="button"
-                    className={styles.bgPickerBtn}
+                    className={clsx(styles.bgPickerBtn, greetingBgs[i] && styles.bgPickerBtnActive)}
                     onClick={(e) => {
                       e.stopPropagation()
                       setGalleryOpenIndex(galleryOpenIndex === i ? null : i)
                     }}
                     title={t('greetingPicker.setBackground')}
                   >
-                    {greetingBgs[i] ? (
-                      <img
-                        src={imagesApi.smallUrl(greetingBgs[i])}
-                        alt=""
-                        className={styles.bgPickerThumb}
-                      />
-                    ) : (
-                      <ImagePlus size={12} />
-                    )}
+                    {greetingBgs[i] ? <ImageIcon size={12} /> : <ImagePlus size={12} />}
                   </button>
                 </span>
               </div>

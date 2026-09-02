@@ -154,3 +154,63 @@ export function removeAlternateGreetingMetadata(
 
   return { ...extensions, greeting_tools: tools }
 }
+
+/** Move a zero-based alternate greeting while preserving its stable metadata ID. */
+export function moveAlternateGreetingMetadata(
+  extensions: Record<string, any>,
+  oldAlternateIndex: number,
+  newAlternateIndex: number,
+): Record<string, any> {
+  if (
+    !Number.isInteger(oldAlternateIndex)
+    || !Number.isInteger(newAlternateIndex)
+    || oldAlternateIndex < 0
+    || newAlternateIndex < 0
+    || oldAlternateIndex === newAlternateIndex
+  ) return extensions
+
+  const existingTools = readGreetingTools(extensions)
+  if (!existingTools || !isRecord(existingTools.indexMap)) return extensions
+
+  const indexMap = { ...existingTools.indexMap } as Record<string, string>
+  const movedId = indexMap[String(oldAlternateIndex)]
+
+  if (oldAlternateIndex < newAlternateIndex) {
+    for (let index = oldAlternateIndex; index < newAlternateIndex; index += 1) {
+      const nextId = indexMap[String(index + 1)]
+      if (typeof nextId === 'string') indexMap[String(index)] = nextId
+      else delete indexMap[String(index)]
+    }
+  } else {
+    for (let index = oldAlternateIndex; index > newAlternateIndex; index -= 1) {
+      const previousId = indexMap[String(index - 1)]
+      if (typeof previousId === 'string') indexMap[String(index)] = previousId
+      else delete indexMap[String(index)]
+    }
+  }
+
+  if (typeof movedId === 'string') indexMap[String(newAlternateIndex)] = movedId
+  else delete indexMap[String(newAlternateIndex)]
+
+  return {
+    ...extensions,
+    greeting_tools: { ...existingTools, indexMap },
+  }
+}
+
+/** Remap an overall greeting index after moving one indexed greeting. */
+export function remapGreetingIndexForMove(
+  greetingIndex: number,
+  oldGreetingIndex: number,
+  newGreetingIndex: number,
+): number {
+  if (greetingIndex === oldGreetingIndex) return newGreetingIndex
+  if (oldGreetingIndex < newGreetingIndex) {
+    return greetingIndex > oldGreetingIndex && greetingIndex <= newGreetingIndex
+      ? greetingIndex - 1
+      : greetingIndex
+  }
+  return greetingIndex >= newGreetingIndex && greetingIndex < oldGreetingIndex
+    ? greetingIndex + 1
+    : greetingIndex
+}

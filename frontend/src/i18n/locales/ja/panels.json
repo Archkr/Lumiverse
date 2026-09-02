@@ -1123,6 +1123,7 @@
     "greetingName": "挨拶名",
     "greetingNamePlaceholder": "任意の挨拶名...",
     "greetingNameFor": "挨拶 #{{number}} の名前",
+    "reorderGreeting": "ドラッグして挨拶を並べ替え",
     "setGreetingBackground": "この挨拶の背景画像を設定",
     "clearGreetingBackground": "背景をクリア",
     "noGalleryImages": "ギャラリー画像がありません。ギャラリータブで画像を追加してください。",
