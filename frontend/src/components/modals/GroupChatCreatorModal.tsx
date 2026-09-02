@@ -7,7 +7,6 @@ import { Button } from '@/components/shared/FormComponents'
 import { ModalShell } from '@/components/shared/ModalShell'
 import { useStore } from '@/store'
 import { chatsApi } from '@/api/chats'
-import { imagesApi } from '@/api/images'
 import { getCharacterAvatarThumbUrl } from '@/lib/avatarUrls'
 import type { GroupResponseOrder } from '@/lib/groupResponseOrder'
 import Pagination from '@/components/shared/Pagination'
@@ -16,6 +15,7 @@ import styles from './GroupChatCreatorModal.module.css'
 import clsx from 'clsx'
 import { clearSearchOnEscape } from '@/lib/clearableSearch'
 import { getGreetingTitle } from '@/lib/greetingMetadata'
+import { getGreetingCellImageUrl } from '@/lib/greetingImage'
 
 type Step = 'characters' | 'greeting' | 'settings'
 type GroupCardMode = 'swap' | 'merge_ignore_muted' | 'merge'
@@ -27,14 +27,7 @@ interface GreetingOption {
   greetingIndex: number
   label: string
   content: string
-  backgroundImageId: string | null
-}
-
-function getGreetingBackground(character: Character, greetingIndex: number): string | null {
-  const backgrounds = character.extensions?.greeting_backgrounds
-  if (!backgrounds || typeof backgrounds !== 'object' || Array.isArray(backgrounds)) return null
-  const imageId = backgrounds[greetingIndex]
-  return typeof imageId === 'string' && imageId ? imageId : null
+  backgroundImageUrl: string | null
 }
 
 export default function GroupChatCreatorModal() {
@@ -121,7 +114,7 @@ export default function GroupChatCreatorModal() {
           greetingIndex: 0,
           label: getGreetingTitle(char.extensions, 0) || t('defaultGreeting'),
           content: char.first_mes,
-          backgroundImageId: getGreetingBackground(char, 0),
+          backgroundImageUrl: getGreetingCellImageUrl(char, 0, char.first_mes),
         })
       }
       if (char.alternate_greetings) {
@@ -134,7 +127,7 @@ export default function GroupChatCreatorModal() {
               label: getGreetingTitle(char.extensions, i + 1)
                 || tg('greetingNumber', { number: i + 2 }),
               content: g,
-              backgroundImageId: getGreetingBackground(char, i + 1),
+              backgroundImageUrl: getGreetingCellImageUrl(char, i + 1, g),
             })
           }
         })
@@ -358,9 +351,9 @@ export default function GroupChatCreatorModal() {
                         })
                       }
                     >
-                      {opt.backgroundImageId && (
+                      {opt.backgroundImageUrl && (
                         <div className={styles.greetingBanner} aria-hidden="true">
-                          <img src={imagesApi.smallUrl(opt.backgroundImageId)} alt="" loading="lazy" />
+                          <img src={opt.backgroundImageUrl} alt="" loading="lazy" />
                         </div>
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>

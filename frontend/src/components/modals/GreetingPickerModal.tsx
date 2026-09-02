@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Check, Image as ImageIcon } from 'lucide-react'
 import { CloseButton } from '@/components/shared/CloseButton'
 import { ModalShell } from '@/components/shared/ModalShell'
-import { imagesApi } from '@/api/images'
 import { getGreetingTitle } from '@/lib/greetingMetadata'
+import { containsGreetingImageMarkup, getGreetingCellImageUrl } from '@/lib/greetingImage'
 import type { Character } from '@/types/api'
 import styles from './GreetingPickerModal.module.css'
 import clsx from 'clsx'
@@ -14,10 +14,6 @@ interface GreetingPickerModalProps {
   activeContent?: string
   onSelect: (greetingIndex: number) => void
   onCancel: () => void
-}
-
-function containsImageMarkup(content: string): boolean {
-  return /<img\b/i.test(content) || /!\[[^\]]*]\([^)]*\)/.test(content)
 }
 
 export default function GreetingPickerModal({
@@ -46,8 +42,6 @@ export default function GreetingPickerModal({
 
   const listRef = useRef<HTMLDivElement>(null)
   const activeCardRef = useRef<HTMLButtonElement>(null)
-  const greetingBgs = (character.extensions?.greeting_backgrounds ?? {}) as Record<number, string>
-
   useEffect(() => {
     if (activeIndex < 0) return
     const list = listRef.current
@@ -69,7 +63,8 @@ export default function GreetingPickerModal({
       <div ref={listRef} className={styles.list}>
         {greetings.map((g, i) => {
           const isActive = i === activeIndex
-          const hasImage = containsImageMarkup(g.content)
+          const hasImage = containsGreetingImageMarkup(g.content)
+          const backgroundUrl = getGreetingCellImageUrl(character, i, g.content)
           return (
             <button
               key={i}
@@ -79,9 +74,9 @@ export default function GreetingPickerModal({
               onClick={() => onSelect(i)}
               style={{ animationDelay: `${Math.min(i * 40, 200)}ms` }}
             >
-              {greetingBgs[i] && (
+              {backgroundUrl && (
                 <div className={styles.cardBanner} aria-hidden="true">
-                  <img src={imagesApi.smallUrl(greetingBgs[i])} alt="" loading="lazy" />
+                  <img src={backgroundUrl} alt="" loading="lazy" />
                 </div>
               )}
               <div className={styles.cardHeader}>
