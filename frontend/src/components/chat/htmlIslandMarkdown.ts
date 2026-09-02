@@ -26,6 +26,22 @@ const SANITIZER_KEPT_TAGS = new Set([
   'var', 'video', 'wbr',
 ])
 
+// Sanitizer-kept tags that flow inside a paragraph. At block level these open
+// a paragraph group (see processMarkdownInHtmlIsland) instead of standing
+// alone; every other kept tag is a block boundary that closes the group.
+const INLINE_FLOW_TAGS = new Set([
+  'a', 'abbr', 'acronym', 'audio', 'b', 'bdi', 'bdo', 'big', 'blink', 'br',
+  'button', 'cite', 'code', 'data', 'datalist', 'del', 'dfn', 'em', 'font',
+  'i', 'img', 'input', 'ins', 'kbd', 'label', 'mark', 'marquee', 'meter',
+  'nobr', 'optgroup', 'option', 'output', 'picture', 'progress', 'q', 'rp',
+  'rt', 'ruby', 's', 'samp', 'select', 'small', 'source', 'spacer', 'span',
+  'strike', 'strong', 'sub', 'sup', 'time', 'track', 'tt', 'u', 'var',
+  'video', 'wbr',
+])
+
+export const ISLAND_BLANK_LINE_RE = /\n[^\S\n]*\n/
+const BLANK_LINE_ALL_RE = /\n[^\S\n]*\n/g
+
 // Only these containers are allowed to promote child text into block markdown
 // like headings or lists. Everything else stays inline to avoid emitting
 // invalid HTML such as <span><h1>…</h1></span>.
@@ -88,6 +104,23 @@ function isMarkdownExcludedSubtree(tagStack: string[]): boolean {
   return tagStack.some((tag) => NO_MARKDOWN_SUBTREE_TAGS.has(tag))
 }
 
+function findLastBlankLine(text: string): { index: number } | null {
+  BLANK_LINE_ALL_RE.lastIndex = 0
+  let last: { index: number } | null = null
+  let m: RegExpExecArray | null
+  while ((m = BLANK_LINE_ALL_RE.exec(text)) !== null) {
+    last = { index: m.index }
+    BLANK_LINE_ALL_RE.lastIndex = m.index + 1
+  }
+  return last
+}
+
+function isInlineOpenTag(part: string | undefined): boolean {
+  if (!part) return false
+  const m = part.match(/^<([a-z][\w:-]*)\b/i)
+  return m != null && INLINE_FLOW_TAGS.has(m[1].toLowerCase())
+}
+
 export function processMarkdownInHtmlIsland(
   html: string,
   renderer: HtmlIslandMarkdownRenderer,
@@ -101,24 +134,172 @@ export function processMarkdownInHtmlIsland(
   const parts = shielded.split(/(<[^>]*>)/)
   const tagStack: string[] = []
   const rawTextState = { depth: 0 }
+  const out: string[] = []
+
+  // Paragraph grouping for islands whose root opts in via data-message-prose,
+  // following markdown's line-based HTML-block rule: a block tag enters raw
+  // HTML, the first blank line exits it, and only content outside raw HTML
+  // groups into <p> paragraphs. Tag balance is deliberately ignored, matching
+  // marked: card HTML with unclosed tags still gets its paragraphs.
+  let group: string[] | null = null
+  let groupHasText = false
+  let messageWrapRoot = false
+  let rawHtml = false
+
+  const closeGroup = (): void => {
+    if (!group) return
+    if (groupHasText) {
+      out.push('<p>', ...group, '</p>')
+    } else {
+      out.push(...group)
+    }
+    group = null
+    groupHasText = false
+  }
+
+  const emit = (piece: string): void => {
+    if (group) group.push(piece)
+    else out.push(piece)
+  }
+
+  const handleBlockTextWithoutGroup = (text: string, nextPart: string | undefined): void => {
+    if (!text.trim()) {
+      out.push(text)
+      return
+    }
+    if (isInlineOpenTag(nextPart) && messageWrapRoot) {
+      // Trailing segment joins the upcoming inline tag as one paragraph. Its
+      // leading blank line stays attached so pure-text fallback keeps its <p>.
+      const lastBlank = findLastBlankLine(text)
+      const head = lastBlank ? text.slice(0, lastBlank.index) : ''
+      const tail = lastBlank ? text.slice(lastBlank.index) : text
+      if (head.trim()) out.push(renderer.renderBlockText(head))
+      else if (head) out.push(head)
+      if (!tail.trim() && tail) out.push(tail)
+      group = []
+      groupHasText = false
+      if (tail.trim()) {
+        group.push(renderer.renderInlineText(tail))
+        groupHasText = true
+      }
+      return
+    }
+    out.push(renderer.renderBlockText(text))
+  }
+
+  const handleBlockText = (text: string, nextPart: string | undefined): void => {
+    if (!group) {
+      handleBlockTextWithoutGroup(text, nextPart)
+      return
+    }
+    const firstBlank = ISLAND_BLANK_LINE_RE.exec(text)
+    if (!firstBlank) {
+      if (text.trim()) {
+        group.push(renderer.renderInlineText(text))
+        groupHasText = true
+      } else {
+        group.push(text)
+      }
+      return
+    }
+    const head = text.slice(0, firstBlank.index)
+    if (head.trim()) {
+      group.push(renderer.renderInlineText(head))
+      groupHasText = true
+    } else if (head) {
+      group.push(head)
+    }
+    closeGroup()
+    const rest = text.slice(firstBlank.index)
+    if (rest) handleBlockTextWithoutGroup(rest, nextPart)
+  }
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]
+    if (!part) continue
 
     if (i % 2 === 1) {
+      if (part.startsWith('<!--')) {
+        if (STYLE_PLACEHOLDER_RE.test(part)) {
+          closeGroup()
+          out.push(part)
+        } else {
+          emit(part)
+        }
+        continue
+      }
+      const nameMatch = part.match(/^<\/?([a-z][\w:-]*)\b/i)
+      const name = nameMatch ? nameMatch[1].toLowerCase() : null
+      if (tagStack.length === 0 && !part.startsWith('</')) {
+        messageWrapRoot = part.includes('data-message-prose')
+      }
+      if (name && SANITIZER_KEPT_TAGS.has(name) && !INLINE_FLOW_TAGS.has(name)) {
+        closeGroup()
+        out.push(part)
+        if (messageWrapRoot && tagStack.length > 0) rawHtml = true
+      } else {
+        if (
+          name !== null
+          && INLINE_FLOW_TAGS.has(name)
+          && !group
+          && !part.startsWith('</')
+          && messageWrapRoot
+          && !rawHtml
+          && rawTextState.depth === 0
+          && !isMarkdownExcludedSubtree(tagStack)
+        ) {
+          group = []
+          groupHasText = false
+        }
+        emit(part)
+      }
       updateTagStack(part, tagStack, rawTextState)
       continue
     }
 
-    if (!part.trim() || rawTextState.depth > 0 || isMarkdownExcludedSubtree(tagStack)) continue
-    if (STYLE_PLACEHOLDER_RE.test(part.trim())) continue
-
-    parts[i] = shouldRenderInlineMarkdown(tagStack)
-      ? renderer.renderInlineText(part)
-      : renderer.renderBlockText(part)
+    if (rawTextState.depth > 0 || isMarkdownExcludedSubtree(tagStack)) {
+      emit(part)
+      continue
+    }
+    if (STYLE_PLACEHOLDER_RE.test(part.trim())) {
+      closeGroup()
+      out.push(part)
+      continue
+    }
+    if (messageWrapRoot) {
+      if (rawHtml) {
+        // Raw HTML runs to the first blank line, verbatim like CommonMark
+        // type-6 blocks. The remainder re-enters document flow.
+        const blank = ISLAND_BLANK_LINE_RE.exec(part)
+        if (!blank) {
+          out.push(part)
+        } else {
+          const head = part.slice(0, blank.index)
+          if (head) out.push(head)
+          rawHtml = false
+          const rest = part.slice(blank.index)
+          if (rest) handleBlockTextWithoutGroup(rest, parts[i + 1])
+        }
+      } else {
+        handleBlockText(part, parts[i + 1])
+      }
+      continue
+    }
+    if (shouldRenderInlineMarkdown(tagStack)) {
+      if (part.trim()) {
+        emit(renderer.renderInlineText(part))
+        if (group) groupHasText = true
+      } else {
+        emit(part)
+      }
+      continue
+    }
+    handleBlockText(part, parts[i + 1])
   }
 
-  let result = parts.join('')
+  closeGroup()
+
+  let result = out.join('')
   for (let i = 0; i < styleBlocks.length; i++) {
     result = result.replace(`<!--ISLAND_STYLE_${i}-->`, styleBlocks[i])
   }

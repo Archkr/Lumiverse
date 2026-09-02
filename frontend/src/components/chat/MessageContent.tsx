@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import { marked } from 'marked'
 import { highlightCode } from '@/lib/codeHighlight'
-import { processMarkdownInHtmlIsland } from './htmlIslandMarkdown'
+import { ISLAND_BLANK_LINE_RE, processMarkdownInHtmlIsland } from './htmlIslandMarkdown'
 import { resolveGalleryImageId } from '@/lib/galleryImageReference'
 import { parseOOC } from '@/lib/oocParser'
 import { createEmphasisAwareRenderer } from '@/lib/markedEmphasisRenderer'
@@ -880,7 +880,7 @@ function getIslandEndAt(raw: string, start: number, isStreaming: boolean): numbe
   return null
 }
 
-function renderIslandMarkdownText(markdown: string): string {
+function renderIslandMarkdownText(markdown: string, messageProse = false): string {
   const leadingWhitespace = markdown.match(/^\s*/)?.[0] ?? ''
   const trailingWhitespace = markdown.match(/\s*$/)?.[0] ?? ''
   const core = markdown.trim()
@@ -890,8 +890,15 @@ function renderIslandMarkdownText(markdown: string): string {
   let html = marked.parse(core, { async: false }) as string
   html = normalizeQuotesInHTML(html)
 
+  // In message-prose islands, text set apart by a blank line is a paragraph:
+  // keep its <p> so it gets paragraph spacing next to images and panels.
+  // Otherwise a lone <p> is marked wrapping a piece of a tag-split sentence,
+  // so unwrap it to keep the sentence inline.
+  const blockSeparated =
+    messageProse
+    && (ISLAND_BLANK_LINE_RE.test(leadingWhitespace) || ISLAND_BLANK_LINE_RE.test(trailingWhitespace))
   const singleParagraphMatch = html.match(/^<p>([\s\S]*)<\/p>\s*$/)
-  if (singleParagraphMatch && !/<\/p>\s*<p\b/i.test(html)) {
+  if (!blockSeparated && singleParagraphMatch && !/<\/p>\s*<p\b/i.test(html)) {
     html = singleParagraphMatch[1]
   }
 
@@ -973,9 +980,12 @@ function extractHtmlIslands(
   return { content, islands }
 }
 
+const MESSAGE_PROSE_WRAP_RE = /^\s*<div[^>]*\bdata-message-prose\b/i
+
 function processMarkdownInIsland(html: string): string {
+  const messageProse = MESSAGE_PROSE_WRAP_RE.test(html)
   return processMarkdownInHtmlIsland(html, {
-    renderBlockText: renderIslandMarkdownText,
+    renderBlockText: (markdown) => renderIslandMarkdownText(markdown, messageProse),
     renderInlineText: renderIslandInlineMarkdownText,
     normalizeHtml: normalizeLegacyFontTags,
   })
