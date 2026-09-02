@@ -36,6 +36,10 @@ import type { Message, MessageAttachment } from "../types/message";
 import type { Preset } from "../types/preset";
 import type { ConnectionProfile } from "../types/connection-profile";
 import {
+  normalizeGuidedGenerations,
+  type GuidedGeneration,
+} from "./guided-generations";
+import {
   evaluate,
   buildEnv,
   cloneEnv,
@@ -1193,15 +1197,6 @@ const SAMPLER_DEFAULTS: Record<string, number> = {
   maxTokens: 16384,
   temperature: 1.0,
 };
-
-interface GuidedGeneration {
-  id: string;
-  name: string;
-  content: string;
-  position: "system" | "user_prefix" | "user_suffix";
-  mode: "persistent" | "oneshot";
-  enabled: boolean;
-}
 
 function isAppendRole(role: string): boolean {
   return role === "user_append" || role === "assistant_append";
@@ -3804,6 +3799,11 @@ export async function assemblePrompt(
   // Guided generations (from batch-loaded settings)
   const guided = normalizeGuidedGenerations(
     settingsMap.get("guidedGenerations"),
+    {
+      connectionProfileId: connection?.id ?? null,
+      chatId: chat.id,
+      characterId,
+    },
   );
   if (guided.length > 0) {
     await applyGuidedGenerations(result, guided, macroEnv, breakdown);
@@ -4343,33 +4343,6 @@ export async function assemblePrompt(
     resolveCortexGate?.();
     profiler.finish();
   }
-}
-
-function normalizeGuidedGenerations(input: unknown): GuidedGeneration[] {
-  if (!Array.isArray(input)) return [];
-  const out: GuidedGeneration[] = [];
-  for (const item of input) {
-    if (!item || typeof item !== "object") continue;
-    const g = item as Partial<GuidedGeneration>;
-    if (!g.enabled) continue;
-    if (typeof g.content !== "string" || !g.content.trim()) continue;
-    const position =
-      g.position === "user_prefix" || g.position === "user_suffix"
-        ? g.position
-        : "system";
-    out.push({
-      id: typeof g.id === "string" ? g.id : "",
-      name:
-        typeof g.name === "string" && g.name.trim()
-          ? g.name
-          : "Guided Generation",
-      content: g.content,
-      position,
-      mode: g.mode === "oneshot" ? "oneshot" : "persistent",
-      enabled: true,
-    });
-  }
-  return out;
 }
 
 async function applyGuidedGenerations(

@@ -91,6 +91,7 @@ import InputAreaCustomizeModal, {
 } from './InputAreaCustomizeModal'
 import { ComposerActionBarLive } from './InputAreaComposerBar'
 import { isExtensionComposerActionId } from './composerActionOwnership'
+import { isGuideActive, isGuideAutoEnabled } from '@/lib/guided-generations'
 
 interface InputAreaProps {
   chatId: string
@@ -1101,8 +1102,18 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
     }
   }, [text, chatId, saveDraftInput])
 
-  const activeGuides = guidedGenerations.filter((g) => g.enabled)
+  const pinnedConnectionId = typeof activeChatMetadata?.connection_profile_id === 'string'
+    && profiles.some((profile) => profile.id === activeChatMetadata.connection_profile_id)
+    ? activeChatMetadata.connection_profile_id
+    : null
+  const guidedGenerationContext = useMemo(() => ({
+    connectionProfileId: pinnedConnectionId || activeProfileId,
+    chatId,
+    characterId: focusedPreviewCharacterId,
+  }), [activeProfileId, chatId, focusedPreviewCharacterId, pinnedConnectionId])
+  const activeGuides = guidedGenerations.filter((guide) => isGuideActive(guide, guidedGenerationContext))
   const activeGuideCount = activeGuides.length
+  const manuallyActiveGuideCount = guidedGenerations.filter((guide) => guide.enabled).length
   const activeQuickReplySets = quickReplySets.filter((s) => s.enabled)
   const activeLoomPresetRegistryUpdatedAt = activeLoomPresetId
     ? loomRegistry[activeLoomPresetId]?.updatedAt ?? null
@@ -1260,13 +1271,18 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
   }), [])
 
   const consumeOneshotGuides = useCallback(() => {
-    const next = guidedGenerations.map((g) =>
-      g.mode === 'oneshot' && g.enabled ? { ...g, enabled: false } : g
-    )
-    if (next.some((g, i) => g.enabled !== guidedGenerations[i].enabled)) {
+    const next = guidedGenerations.map((guide) => {
+      if (guide.mode !== 'oneshot' || !isGuideActive(guide, guidedGenerationContext)) return guide
+      return {
+        ...guide,
+        enabled: false,
+        autoEnable: isGuideAutoEnabled(guide, guidedGenerationContext) ? null : guide.autoEnable,
+      }
+    })
+    if (next.some((guide, index) => guide !== guidedGenerations[index])) {
       setSetting('guidedGenerations', next)
     }
-  }, [guidedGenerations, setSetting])
+  }, [guidedGenerations, guidedGenerationContext, setSetting])
 
   useEffect(() => {
     if (openPopover) {
@@ -3469,7 +3485,7 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
                     type="button"
                     className={styles.popRowBtn}
                     onClick={disableAllGuides}
-                    disabled={activeGuideCount === 0}
+                    disabled={manuallyActiveGuideCount === 0}
                   >
                     <span>{t('quickMenu.disableAllGuidedGenerations')}</span>
                     <span className={styles.popMeta}>{t('quickMenu.activeCount', { count: activeGuideCount })}</span>
@@ -3477,23 +3493,29 @@ function InputAreaNative({ chatId, onNavigateHome, onOpenChatFind }: InputAreaPr
                   <div className={styles.popDivider} />
                 </>
               )}
-              {guidedGenerations.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  className={clsx(styles.popRowBtn, g.enabled && styles.popRowBtnActive)}
-                  onClick={() => toggleGuide(g.id)}
-                  aria-pressed={g.enabled}
-                >
-                  <span className={styles.personaMain}>
-                    <span className={clsx(styles.popState, g.enabled && styles.popStateActive)}>
-                      {g.enabled ? t('on') : t('off')}
+              {guidedGenerations.map((g) => {
+                const autoEnabled = isGuideAutoEnabled(g, guidedGenerationContext)
+                const active = g.enabled || autoEnabled
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className={clsx(styles.popRowBtn, active && styles.popRowBtnActive)}
+                    onClick={() => toggleGuide(g.id)}
+                    aria-pressed={active}
+                    disabled={autoEnabled && !g.enabled}
+                    title={autoEnabled && !g.enabled ? t('quickMenu.autoEnabledHint') : undefined}
+                  >
+                    <span className={styles.personaMain}>
+                      <span className={clsx(styles.popState, active && styles.popStateActive)}>
+                        {autoEnabled && !g.enabled ? t('quickMenu.auto') : active ? t('on') : t('off')}
+                      </span>
+                      <span>{g.name}</span>
                     </span>
-                    <span>{g.name}</span>
-                  </span>
-                  <span className={styles.popMeta}>{g.mode}</span>
-                </button>
-              ))}
+                    <span className={styles.popMeta}>{g.mode}</span>
+                  </button>
+                )
+              })}
               <button type="button" className={styles.popLink} onClick={() => {
                 setOpenPopover(null)
                 useStore.getState().openSettings('guided')

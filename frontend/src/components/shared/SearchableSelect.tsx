@@ -57,6 +57,18 @@ type CommonProps = {
   searchPlaceholder?: string
   /** Hide the search input when options are at or below this count. Default 8. */
   searchThreshold?: number
+  /** Keep the search input visible even when the current result page is small. */
+  forceSearch?: boolean
+  /** Notify a server-backed picker when the search text changes. */
+  onSearchChange?: (value: string) => void
+  /** Options are already filtered by the server; skip the local text filter. */
+  remoteSearch?: boolean
+  /** Optional incremental-page state rendered inside the option list. */
+  loading?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMessage?: string
+  loadMoreLabel?: string
   emptyMessage?: string
   noResultsMessage?: string
   disabled?: boolean
@@ -92,6 +104,14 @@ export default function SearchableSelect(props: SearchableSelectProps) {
     placeholder = t('placeholder'),
     searchPlaceholder = t('searchPlaceholder'),
     searchThreshold = 8,
+    forceSearch = false,
+    onSearchChange,
+    remoteSearch = false,
+    loading = false,
+    hasMore = false,
+    onLoadMore,
+    loadingMessage = t('loading', { defaultValue: 'Loading…' }),
+    loadMoreLabel = t('loadMore', { defaultValue: 'Load more' }),
     emptyMessage = t('emptyMessage'),
     noResultsMessage = t('noResultsMessage'),
     disabled,
@@ -119,6 +139,7 @@ export default function SearchableSelect(props: SearchableSelectProps) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  useEffect(() => onSearchChange?.(search), [onSearchChange, search])
   const isPortalOwnerActive = useCallback(() => {
     if (!portal || !portalOwnerId) return true
     const popover = popoverRef.current
@@ -132,7 +153,7 @@ export default function SearchableSelect(props: SearchableSelectProps) {
     [options],
   )
   const filtered = useMemo(() => {
-    const base = needle
+    const base = !remoteSearch && needle
       ? options.filter(
           (o) =>
             o.label.toLowerCase().includes(needle) ||
@@ -155,7 +176,7 @@ export default function SearchableSelect(props: SearchableSelectProps) {
       ? [...namedKeys, UNCATEGORIZED_KEY]
       : namedKeys
     return orderedKeys.flatMap((k) => buckets.get(k)!)
-  }, [options, needle, hasGroups])
+  }, [options, needle, hasGroups, remoteSearch])
 
   const isSelected = useCallback(
     (v: string) =>
@@ -409,7 +430,7 @@ export default function SearchableSelect(props: SearchableSelectProps) {
   }
 
   const label = renderLabel()
-  const showSearch = options.length > searchThreshold
+  const showSearch = forceSearch || options.length > searchThreshold
 
   const popover = (
     <div
@@ -474,7 +495,7 @@ export default function SearchableSelect(props: SearchableSelectProps) {
         )}
         {filtered.length === 0 ? (
           <div className={styles.emptyMessage}>
-            {options.length === 0 ? emptyMessage : noResultsMessage}
+            {loading ? loadingMessage : options.length === 0 ? emptyMessage : noResultsMessage}
           </div>
         ) : (
           (() => {
@@ -535,6 +556,16 @@ export default function SearchableSelect(props: SearchableSelectProps) {
             })
             return nodes
           })()
+        )}
+        {(hasMore || (loading && filtered.length > 0)) && onLoadMore && (
+          <button
+            type="button"
+            className={styles.loadMore}
+            onClick={onLoadMore}
+            disabled={loading}
+          >
+            {loading ? loadingMessage : loadMoreLabel}
+          </button>
         )}
       </div>
     </div>

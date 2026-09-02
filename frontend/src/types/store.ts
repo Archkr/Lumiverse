@@ -452,6 +452,11 @@ export interface GuidedGeneration {
   mode: 'persistent' | 'oneshot'
   enabled: boolean
   color?: string | null
+  /** Optional context rule that activates this guide in addition to the manual switch. */
+  autoEnable?: {
+    scope: 'connection' | 'chat' | 'character'
+    id: string
+  } | null
 }
 
 export interface QuickReply {

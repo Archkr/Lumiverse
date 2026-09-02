@@ -127,6 +127,8 @@
   "quickMenu": {
     "noGuidedGenerations": "No guided generations configured.",
     "disableAllGuidedGenerations": "Disable all guided generations",
+    "auto": "AUTO",
+    "autoEnabledHint": "Automatically enabled for this context. Change the rule in settings.",
     "manageInSettings": "Manage in settings",
     "noQuickReplySets": "No enabled quick reply sets.",
     "untitledReply": "Untitled reply",
