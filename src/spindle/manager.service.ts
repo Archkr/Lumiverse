@@ -43,7 +43,7 @@ export interface ExtensionUpdateCandidate {
 }
 
 function isManagedPermission(permission: string): permission is SpindlePermission {
-  return isValidPermission(permission);
+  return isValidPermission(permission) || permission === "mcp_servers" || permission === "mcp_servers.create";
 }
 
 type BackendSafetyCheck = {
@@ -855,6 +855,8 @@ export const PRIVILEGED_PERMISSIONS = new Set([
   "providers.tts.register",
   "providers.stt.register",
   "providers.sidecar.register",
+  "mcp_servers",
+  "mcp_servers.create",
 ]);
 
 function grantRequestedPermissionsByDefault(

@@ -74,6 +74,7 @@ import { WorkerHostImageGenApi } from "./worker-host-image-gen-api";
 import { WorkerHostProcessApi } from "./worker-host-process-api";
 import { WorkerHostInteractionApi } from "./worker-host-interaction-api";
 import { WorkerHostPresentationApi } from "./worker-host-presentation-api";
+import { WorkerHostMcpApi } from "./worker-host-mcp-api";
 import { createRuntimeTransport, type RuntimeTransport } from "./runtime-transport";
 import {
   providerRegistry,
@@ -120,6 +121,7 @@ import { join, resolve, sep } from "path";
 const sharedRpcPermissionScope = new AsyncLocalStorage<string | undefined>();
 
 type ManagedSpindlePermission = Parameters<typeof managerSvc.hasPermission>[1];
+type RuntimeSpindlePermission = ManagedSpindlePermission | "mcp_servers" | "mcp_servers.create";
 type TokenModelSource = "main" | "sidecar" | "explicit";
 
 type ChatAppendGenerationOptions = {
@@ -575,6 +577,13 @@ type RuntimeWorkerToHost =
     }
   | { type: "image_gen_generate_stream"; requestId: string; input: Record<string, unknown> }
   | { type: "image_gen_cancel_stream"; requestId: string }
+  | { type: "mcp_servers_list"; requestId: string; limit?: number; offset?: number; userId?: string }
+  | { type: "mcp_servers_get"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_servers_create"; requestId: string; input: import("../types/mcp-server").SpindleMcpServerCreateDTO; userId?: string }
+  | { type: "mcp_servers_connect"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_servers_status"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_tools_list"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_tools_call"; requestId: string; serverId: string; toolName: string; args: Record<string, unknown>; timeoutMs?: number; userId?: string }
   | ProviderWorkerToHost;
 
 type RuntimeHostToWorker =
@@ -900,6 +909,7 @@ export class WorkerHost {
   private readonly processApi: WorkerHostProcessApi;
   private readonly interactionApi: WorkerHostInteractionApi;
   private readonly presentationApi: WorkerHostPresentationApi;
+  private readonly mcpApi: WorkerHostMcpApi;
   private sharedRpcPermissionScopes = new Map<string, Set<string>>();
 
   constructor(
@@ -977,6 +987,12 @@ export class WorkerHost {
       enforceScopedUser: (userId) => this.enforceScopedUser(userId),
       post: (message) => this.postToWorker(message),
     });
+    this.mcpApi = new WorkerHostMcpApi({
+      hasPermission: (permission) => this.hasPermission(permission),
+      resolveEffectiveUserId: (userId) => this.resolveEffectiveUserId(userId),
+      enforceScopedUser: (userId) => this.enforceScopedUser(userId),
+      postResponse: (message) => this.postToWorker(message),
+    });
     providerRegistry.configure({ getSecret, approvedBrokerOrigins: getApprovedBrokerOrigins() });
     providerRegistry.attachWorker(this.extensionId, (message) => {
       this.postToWorker(message);
@@ -998,7 +1014,7 @@ export class WorkerHost {
     }
   }
 
-  private getGrantedPermissions(): ManagedSpindlePermission[] {
+  private getGrantedPermissions(): RuntimeSpindlePermission[] {
     const granted = managerSvc.getGrantedPermissions(this.manifest.identifier);
     const scopeId = sharedRpcPermissionScope.getStore();
     if (!scopeId) return granted;
@@ -1008,12 +1024,12 @@ export class WorkerHost {
     return granted.filter((permission) => scoped.has(permission));
   }
 
-  private hasPermission(permission: ManagedSpindlePermission): boolean {
+  private hasPermission(permission: RuntimeSpindlePermission): boolean {
     const scopeId = sharedRpcPermissionScope.getStore();
-    if (!scopeId) return managerSvc.hasPermission(this.manifest.identifier, permission);
+    if (!scopeId) return managerSvc.hasPermission(this.manifest.identifier, permission as ManagedSpindlePermission);
 
     const scoped = this.sharedRpcPermissionScopes.get(scopeId);
-    return Boolean(scoped?.has(permission)) && managerSvc.hasPermission(this.manifest.identifier, permission);
+    return Boolean(scoped?.has(permission)) && managerSvc.hasPermission(this.manifest.identifier, permission as ManagedSpindlePermission);
   }
 
   private getStorageRootPath(identifier: string = this.manifest.identifier): string {
@@ -1194,6 +1210,7 @@ export class WorkerHost {
         capabilities: Object.freeze({
           ...SPINDLE_HOST_CAPABILITIES,
           "frontend-runtime-capabilities-v1": 1,
+          "mcp-servers-v1": 1,
         }),
         extensionInstallationId: this.extensionId,
       },
@@ -2458,6 +2475,28 @@ export class WorkerHost {
         break;
       case "image_gen_cancel_stream":
         this.imageGenApi.cancelStream(msg.requestId);
+        break;
+      // ─── MCP servers (gated and user-scoped) ───────────────────────────
+      case "mcp_servers_list":
+        this.mcpApi.handleList(msg.requestId, msg.limit, msg.offset, msg.userId);
+        break;
+      case "mcp_servers_get":
+        this.mcpApi.handleGet(msg.requestId, msg.serverId, msg.userId);
+        break;
+      case "mcp_servers_create":
+        this.mcpApi.handleCreate(msg.requestId, msg.input, msg.userId);
+        break;
+      case "mcp_servers_connect":
+        this.mcpApi.handleConnect(msg.requestId, msg.serverId, msg.userId);
+        break;
+      case "mcp_servers_status":
+        this.mcpApi.handleStatus(msg.requestId, msg.serverId, msg.userId);
+        break;
+      case "mcp_tools_list":
+        this.mcpApi.handleListTools(msg.requestId, msg.serverId, msg.userId);
+        break;
+      case "mcp_tools_call":
+        this.mcpApi.handleCallTool(msg.requestId, msg.serverId, msg.toolName, msg.args, msg.timeoutMs, msg.userId);
         break;
       // ─── Chat style mode (gated: "app_manipulation") ────────────────────
       case "chat_set_style_mode":
