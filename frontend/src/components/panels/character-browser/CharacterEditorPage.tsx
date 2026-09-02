@@ -287,6 +287,41 @@ function SortableGreetingItem({
   )
 }
 
+function GreetingNameInput({
+  value,
+  resetKey,
+  placeholder,
+  ariaLabel,
+  onChange,
+}: {
+  value: string
+  resetKey: string
+  placeholder: string
+  ariaLabel?: string
+  onChange: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+
+  useEffect(() => {
+    setDraft(value)
+  }, [resetKey, value])
+
+  return (
+    <input
+      type="text"
+      className={styles.greetingNameInput}
+      value={draft}
+      onChange={(event) => {
+        setDraft(event.target.value)
+        onChange(event.target.value)
+      }}
+      onBlur={() => setDraft(value)}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+    />
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -2111,11 +2146,10 @@ export default function CharacterEditorPage() {
                       <div className={styles.greetingMetaRow}>
                         <label className={styles.greetingNameField}>
                           <span>{t('characterEditor.greetingName')}</span>
-                          <input
-                            type="text"
-                            className={styles.greetingNameInput}
+                          <GreetingNameInput
                             value={getGreetingTitle(workingExtensions, 0) || ''}
-                            onChange={(event) => handleGreetingTitleChange(0, event.target.value)}
+                            resetKey={`${character.id}:default`}
+                            onChange={(value) => handleGreetingTitleChange(0, value)}
                             placeholder={t('characterEditor.greetingNamePlaceholder')}
                           />
                         </label>
@@ -2199,13 +2233,12 @@ export default function CharacterEditorPage() {
                                 </button>
                               </div>
                             </div>
-                            <input
-                              type="text"
-                              className={styles.greetingNameInput}
+                            <GreetingNameInput
                               value={getGreetingTitle(workingExtensions, i + 1) || ''}
-                              onChange={(event) => handleGreetingTitleChange(i + 1, event.target.value)}
+                              resetKey={`${character.id}:${greetingId}`}
+                              onChange={(value) => handleGreetingTitleChange(i + 1, value)}
                               placeholder={t('characterEditor.greetingNamePlaceholder')}
-                              aria-label={t('characterEditor.greetingNameFor', { number: i + 1 })}
+                              ariaLabel={t('characterEditor.greetingNameFor', { number: i + 1 })}
                             />
                             <ExpandableTextarea
                               className={styles.fieldTextarea}
