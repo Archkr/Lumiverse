@@ -315,6 +315,11 @@ describe("PRIVILEGED_PERMISSIONS", () => {
   test("requires explicit approval for unrestricted regex mutation", () => {
     expect(PRIVILEGED_PERMISSIONS.has("regex_scripts_unrestricted")).toBe(true);
   });
+
+  test("requires explicit approval for MCP access and server creation", () => {
+    expect(PRIVILEGED_PERMISSIONS.has("mcp_servers")).toBe(true);
+    expect(PRIVILEGED_PERMISSIONS.has("mcp_servers.create")).toBe(true);
+  });
 });
 
 describe("bunInstallCmd", () => {

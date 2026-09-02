@@ -110,6 +110,13 @@ import {
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Preset, CreatePresetInput, UpdatePresetInput, PromptBlock } from "../types/preset";
 import type { LumiaDlcCatalog } from "../types/pack";
+import type {
+  McpDiscoveredTool,
+  McpServerStatus,
+  SpindleMcpServerCreateDTO,
+  SpindleMcpServerDTO,
+  SpindleMcpToolCallOptionsDTO,
+} from "../types/mcp-server";
 
 const nativeProcessExit = process.exit.bind(process);
 
@@ -561,6 +568,13 @@ type RuntimeWorkerToHost =
     }
   | { type: "image_gen_generate_stream"; requestId: string; input: Record<string, unknown> }
   | { type: "image_gen_cancel_stream"; requestId: string }
+  | { type: "mcp_servers_list"; requestId: string; limit?: number; offset?: number; userId?: string }
+  | { type: "mcp_servers_get"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_servers_create"; requestId: string; input: SpindleMcpServerCreateDTO; userId?: string }
+  | { type: "mcp_servers_connect"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_servers_status"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_tools_list"; requestId: string; serverId: string; userId?: string }
+  | { type: "mcp_tools_call"; requestId: string; serverId: string; toolName: string; args: Record<string, unknown>; timeoutMs?: number; userId?: string }
   | {
       type: "provider_register";
       phase: "register";
@@ -718,6 +732,19 @@ type RuntimeSpindleAPI = Omit<SpindleAPI, "presets" | "imageGen" | "world_books"
      * image result. Breaking out of the iterator aborts the upstream job.
      */
     generateStream(input: ImageGenStreamInput): AsyncGenerator<ImageGenStreamEvent, void, void>;
+  };
+  mcp: {
+    servers: {
+      list(options?: { limit?: number; offset?: number; userId?: string }): Promise<{ data: SpindleMcpServerDTO[]; total: number }>;
+      get(serverId: string, userId?: string): Promise<SpindleMcpServerDTO | null>;
+      create(input: SpindleMcpServerCreateDTO, userId?: string): Promise<SpindleMcpServerDTO>;
+      connect(serverId: string, userId?: string): Promise<McpServerStatus>;
+      status(serverId: string, userId?: string): Promise<McpServerStatus>;
+    };
+    tools: {
+      list(serverId: string, userId?: string): Promise<McpDiscoveredTool[]>;
+      call(serverId: string, toolName: string, args?: Record<string, unknown>, options?: SpindleMcpToolCallOptionsDTO): Promise<string>;
+    };
   };
   contracts: Readonly<Record<string, number>>;
   registerContextHandler(
@@ -3663,6 +3690,64 @@ const spindleApi: RuntimeSpindleAPI = {
       const requestId = crypto.randomUUID();
       const result = await request({ type: "dlc_get_catalog", requestId, userId: options?.userId });
       return result as LumiaDlcCatalog;
+    },
+  },
+
+  mcp: {
+    servers: {
+      async list(options?: { limit?: number; offset?: number; userId?: string }): Promise<{ data: SpindleMcpServerDTO[]; total: number }> {
+        const requestId = crypto.randomUUID();
+        const result = await request({
+          type: "mcp_servers_list",
+          requestId,
+          limit: options?.limit,
+          offset: options?.offset,
+          userId: options?.userId,
+        });
+        return result as { data: SpindleMcpServerDTO[]; total: number };
+      },
+      async get(serverId: string, userId?: string): Promise<SpindleMcpServerDTO | null> {
+        const requestId = crypto.randomUUID();
+        return await request({ type: "mcp_servers_get", requestId, serverId, userId }) as SpindleMcpServerDTO | null;
+      },
+      async create(input: SpindleMcpServerCreateDTO, userId?: string): Promise<SpindleMcpServerDTO> {
+        assertMutationAllowed("spindle.mcp.servers.create()");
+        const requestId = crypto.randomUUID();
+        return await request({ type: "mcp_servers_create", requestId, input, userId }) as SpindleMcpServerDTO;
+      },
+      async connect(serverId: string, userId?: string): Promise<McpServerStatus> {
+        assertMutationAllowed("spindle.mcp.servers.connect()");
+        const requestId = crypto.randomUUID();
+        return await request({ type: "mcp_servers_connect", requestId, serverId, userId }) as McpServerStatus;
+      },
+      async status(serverId: string, userId?: string): Promise<McpServerStatus> {
+        const requestId = crypto.randomUUID();
+        return await request({ type: "mcp_servers_status", requestId, serverId, userId }) as McpServerStatus;
+      },
+    },
+    tools: {
+      async list(serverId: string, userId?: string): Promise<McpDiscoveredTool[]> {
+        const requestId = crypto.randomUUID();
+        return await request({ type: "mcp_tools_list", requestId, serverId, userId }) as McpDiscoveredTool[];
+      },
+      async call(
+        serverId: string,
+        toolName: string,
+        args: Record<string, unknown> = {},
+        options?: SpindleMcpToolCallOptionsDTO,
+      ): Promise<string> {
+        assertMutationAllowed("spindle.mcp.tools.call()");
+        const requestId = crypto.randomUUID();
+        return await request({
+          type: "mcp_tools_call",
+          requestId,
+          serverId,
+          toolName,
+          args,
+          timeoutMs: options?.timeoutMs,
+          userId: options?.userId,
+        }) as string;
+      },
     },
   },
 
