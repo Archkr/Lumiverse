@@ -264,15 +264,15 @@
   position: absolute;
   z-index: -1;
   top: 0;
-  right: 0;
+  left: 0;
   bottom: 0;
   width: 58%;
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
   opacity: 0.62;
-  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.3) 30%, #000 72%);
-  mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.3) 30%, #000 72%);
+  -webkit-mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0.3) 70%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 0%, rgba(0, 0, 0, 0.3) 70%, transparent 100%);
 }
 
 .greetingBanner::after {

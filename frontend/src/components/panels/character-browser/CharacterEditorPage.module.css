@@ -723,7 +723,10 @@
 
 .greetingItemSortable {
   position: relative;
-  padding-left: 38px;
+}
+
+.greetingItemSortable .greetingHeader {
+  padding-left: 28px;
 }
 
 .greetingItemDragging {
