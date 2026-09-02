@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Image as ImageIcon, ImagePlus, X } from 'lucide-react'
+import { Check, Image as ImageIcon } from 'lucide-react'
 import { CloseButton } from '@/components/shared/CloseButton'
 import { ModalShell } from '@/components/shared/ModalShell'
-import { characterGalleryApi } from '@/api/character-gallery'
-import { charactersApi } from '@/api/characters'
 import { imagesApi } from '@/api/images'
-import type { Character, CharacterGalleryItem } from '@/types/api'
+import { getGreetingTitle } from '@/lib/greetingMetadata'
+import type { Character } from '@/types/api'
 import styles from './GreetingPickerModal.module.css'
 import clsx from 'clsx'
 
@@ -30,9 +29,13 @@ export default function GreetingPickerModal({
   const { t } = useTranslation('modals')
 
   const greetings = [
-    { label: t('greetingPicker.defaultGreeting'), content: character.first_mes },
+    {
+      label: getGreetingTitle(character.extensions, 0) || t('greetingPicker.defaultGreeting'),
+      content: character.first_mes,
+    },
     ...(character.alternate_greetings || []).map((g, i) => ({
-      label: t('greetingPicker.greetingNumber', { number: i + 2 }),
+      label: getGreetingTitle(character.extensions, i + 1)
+        || t('greetingPicker.greetingNumber', { number: i + 2 }),
       content: g,
     })),
   ]
@@ -43,36 +46,7 @@ export default function GreetingPickerModal({
 
   const listRef = useRef<HTMLDivElement>(null)
   const activeCardRef = useRef<HTMLButtonElement>(null)
-
-  const [galleryItems, setGalleryItems] = useState<CharacterGalleryItem[]>([])
-  const [galleryOpenIndex, setGalleryOpenIndex] = useState<number | null>(null)
-  const [greetingBgs, setGreetingBgs] = useState<Record<number, string>>(
-    () => (character.extensions?.greeting_backgrounds ?? {}) as Record<number, string>,
-  )
-
-  useEffect(() => {
-    characterGalleryApi.list(character.id).then(setGalleryItems).catch(() => {})
-  }, [character.id])
-
-  useEffect(() => {
-    setGreetingBgs((character.extensions?.greeting_backgrounds ?? {}) as Record<number, string>)
-  }, [character])
-
-  const assignBackground = useCallback(async (greetingIndex: number, imageId: string | null) => {
-    const updated = { ...greetingBgs }
-    if (imageId) {
-      updated[greetingIndex] = imageId
-    } else {
-      delete updated[greetingIndex]
-    }
-    try {
-      await charactersApi.update(character.id, {
-        extensions: { ...character.extensions, greeting_backgrounds: updated },
-      })
-      setGreetingBgs(updated)
-    } catch {}
-    setGalleryOpenIndex(null)
-  }, [character, greetingBgs])
+  const greetingBgs = (character.extensions?.greeting_backgrounds ?? {}) as Record<number, string>
 
   useEffect(() => {
     if (activeIndex < 0) return
@@ -105,6 +79,11 @@ export default function GreetingPickerModal({
               onClick={() => onSelect(i)}
               style={{ animationDelay: `${Math.min(i * 40, 200)}ms` }}
             >
+              {greetingBgs[i] && (
+                <div className={styles.cardBanner} aria-hidden="true">
+                  <img src={imagesApi.smallUrl(greetingBgs[i])} alt="" loading="lazy" />
+                </div>
+              )}
               <div className={styles.cardHeader}>
                 <span className={styles.cardLabel}>{g.label}</span>
                 <span className={styles.badgeRow}>
@@ -120,59 +99,8 @@ export default function GreetingPickerModal({
                       {t('greetingPicker.active')}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className={styles.bgPickerBtn}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setGalleryOpenIndex(galleryOpenIndex === i ? null : i)
-                    }}
-                    title="Set background image for this greeting"
-                  >
-                    {greetingBgs[i] ? (
-                      <img
-                        src={imagesApi.smallUrl(greetingBgs[i])}
-                        alt=""
-                        className={styles.bgPickerThumb}
-                      />
-                    ) : (
-                      <ImagePlus size={12} />
-                    )}
-                  </button>
                 </span>
               </div>
-              {galleryOpenIndex === i && (
-                <div className={styles.bgGalleryPicker} onClick={(e) => e.stopPropagation()}>
-                  <div className={styles.bgGalleryGrid}>
-                    {galleryItems.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={clsx(
-                          styles.bgGalleryItem,
-                          greetingBgs[i] === item.image_id && styles.bgGalleryItemActive,
-                        )}
-                        onClick={() => assignBackground(i, item.image_id)}
-                      >
-                        <img src={characterGalleryApi.smallUrl(item.image_id)} alt={item.caption || ''} />
-                      </button>
-                    ))}
-                  </div>
-                  {greetingBgs[i] && (
-                    <button
-                      type="button"
-                      className={styles.bgGalleryClear}
-                      onClick={() => assignBackground(i, null)}
-                    >
-                      <X size={10} />
-                      Clear background
-                    </button>
-                  )}
-                  {galleryItems.length === 0 && (
-                    <span className={styles.bgGalleryEmpty}>No gallery images. Add images in the character editor.</span>
-                  )}
-                </div>
-              )}
               <div className={styles.cardPreview}>{g.content}</div>
             </button>
           )

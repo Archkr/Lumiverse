@@ -668,6 +668,43 @@
 }
 
 /* Greetings list */
+.greetingMetaRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.greetingNameField {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  font-weight: 600;
+}
+
+.greetingNameInput {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--lumiverse-bg);
+  color: var(--lumiverse-text);
+  font: inherit;
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  font-weight: 400;
+  transition: border-color var(--lumiverse-transition-fast);
+}
+
+.greetingNameInput:focus {
+  border-color: var(--lumiverse-primary);
+}
+
 .greetingItem {
   display: flex;
   flex-direction: column;
@@ -676,6 +713,58 @@
   background: var(--lumiverse-fill-subtle);
   border-radius: 8px;
   border: 1px solid var(--lumiverse-border);
+}
+
+.greetingList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.greetingItemSortable {
+  position: relative;
+}
+
+.greetingItemSortable .greetingHeader {
+  padding-left: 28px;
+}
+
+.greetingItemDragging {
+  z-index: 30;
+  border-color: var(--lumiverse-primary-050);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+}
+
+.greetingDragHandle {
+  position: absolute;
+  top: 10px;
+  left: 9px;
+  display: inline-flex;
+  width: 22px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--lumiverse-text-dim);
+  cursor: grab;
+  touch-action: none;
+}
+
+.greetingDragHandle:hover:not(:disabled) {
+  background: var(--lumiverse-fill);
+  color: var(--lumiverse-text);
+}
+
+.greetingDragHandle:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.greetingDragHandle:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .greetingHeader {
@@ -697,6 +786,104 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.greetingBackgroundControl {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.greetingBackgroundButton {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 7px;
+  background: var(--lumiverse-fill-subtle);
+  color: var(--lumiverse-text-dim);
+  cursor: pointer;
+  transition: border-color var(--lumiverse-transition-fast), color var(--lumiverse-transition-fast);
+}
+
+.greetingBackgroundButton:hover,
+.greetingBackgroundButton[aria-expanded='true'] {
+  border-color: var(--lumiverse-primary);
+  color: var(--lumiverse-primary);
+}
+
+.greetingBackgroundButton img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.greetingBackgroundPopover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  right: 0;
+  width: min(280px, 70vw);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 9px;
+  background: var(--lumiverse-surface, var(--lumiverse-bg));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.greetingBackgroundGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+  gap: 6px;
+}
+
+.greetingBackgroundItem {
+  aspect-ratio: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--lumiverse-fill-subtle);
+  cursor: pointer;
+}
+
+.greetingBackgroundItem:hover,
+.greetingBackgroundItemActive {
+  border-color: var(--lumiverse-primary);
+}
+
+.greetingBackgroundItem img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.greetingBackgroundClear {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--lumiverse-error) 12%, transparent);
+  color: var(--lumiverse-error);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  cursor: pointer;
+}
+
+.greetingBackgroundEmpty {
+  display: block;
+  padding: 8px 4px;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  line-height: 1.4;
+  text-align: center;
 }
 
 .removeBtn {
