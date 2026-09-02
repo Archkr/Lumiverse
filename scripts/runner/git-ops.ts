@@ -1,5 +1,5 @@
 import { join } from "path";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
 import { runGit, getUpstreamRef, getCurrentBranch } from "./lib/git.js";
 import {
   PROJECT_ROOT,
@@ -8,6 +8,7 @@ import {
   TIMEOUT_GIT_PULL_MS,
   TIMEOUT_GIT_CHECKOUT_MS,
   TIMEOUT_BUN_INSTALL_MS,
+  TIMEOUT_BUN_INSTALL_TERMUX_MS,
   TIMEOUT_BUN_BUILD_MS,
 } from "./lib/constants.js";
 import { spawnAsync } from "./lib/spawn-async.js";
@@ -82,14 +83,36 @@ function isProotRuntime(): boolean {
   return process.env.LUMIVERSE_IS_PROOT === "true";
 }
 
-export function bunInstallCmd(platform: NodeJS.Platform = process.platform): string[] {
-  if (isTermuxRuntime() || isProotRuntime()) {
-    // Android filesystem emulation can't hardlink — copyfile is the only
-    // backend that reliably installs without "Cannot find package" corruption.
-    // --ignore-scripts: proot's path translation makes getcwd() fail when bun
-    // forks lifecycle scripts (ssh2, cpu-features), producing spurious
-    // CouldntReadCurrentDirectory errors. Both packages fall back to pure-JS.
-    return ["bun", "install", "--backend=copyfile", "--ignore-scripts"];
+export function bunInstallCmd(
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const installArgs = ["install", "--backend=copyfile", "--ignore-scripts"];
+
+  if (env.LUMIVERSE_IS_TERMUX === "true") {
+    // Native Termux needs syscall interception for bun install even when the
+    // bun-termux wrapper or grun can execute ordinary Bun commands. Mirror
+    // start.sh's _proot_bun path rather than spawning bare Bun from the runner.
+    const bunPath = env.LUMIVERSE_BUN_PATH || "bun";
+    const method = env.LUMIVERSE_BUN_METHOD;
+    if (method === "direct") {
+      return ["proot", "--link2symlink", "-0", bunPath, ...installArgs];
+    }
+    if (method === "grun") {
+      return ["proot", "--link2symlink", "-0", "grun", bunPath, ...installArgs];
+    }
+
+    const prefix = env.PREFIX || "/data/data/com.termux/files/usr";
+    return [
+      "proot", "--link2symlink", "-0",
+      `${prefix}/glibc/lib/ld-linux-aarch64.so.1`,
+      "--library-path", `${prefix}/glibc/lib`,
+      bunPath, ...installArgs,
+    ];
+  }
+  if (env.LUMIVERSE_IS_PROOT === "true") {
+    // A proot-distro shell already provides syscall interception.
+    return ["bun", ...installArgs];
   }
   if (platform === "win32") {
     // Windows normally hardlinks packages from Bun's cache. Filesystem filters
@@ -97,6 +120,14 @@ export function bunInstallCmd(platform: NodeJS.Platform = process.platform): str
     return ["bun", "install", "--backend=copyfile"];
   }
   return ["bun", "install"];
+}
+
+export function bunInstallTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  return env.LUMIVERSE_IS_TERMUX === "true" || env.LUMIVERSE_IS_PROOT === "true"
+    ? TIMEOUT_BUN_INSTALL_TERMUX_MS
+    : TIMEOUT_BUN_INSTALL_MS;
 }
 
 function clearBunInstallCacheIfTermux(): void {
@@ -536,6 +567,7 @@ export async function switchBranch(
 const INSTALL_STAMP = "node_modules/.lumiverse-install-complete";
 const INSTALL_BACKUP_PREFIX = "node_modules.lumiverse-backup-";
 const MAX_MISSING_DEP_PREVIEW = 5;
+const LOCAL_INSTALL_INPUTS = ["package.json", "bun.lock", "bunfig.toml", ".npmrc"];
 
 interface DependencyTreeState {
   hasNodeModules: boolean;
@@ -591,6 +623,29 @@ export function summarizeMissingDependencyPackages(missingPackages: string[]): s
 
 function writeInstallStamp(dir: string): void {
   try { writeFileSync(join(dir, INSTALL_STAMP), `${Date.now()}\n`); } catch {}
+}
+
+/**
+ * Detect an install that began after new dependency inputs landed but never
+ * reached writeInstallStamp(). This lets the next update retry even when the
+ * failed update already advanced HEAD and its manifest delta is no longer in
+ * the next changed-file range. Missing stamps may belong to a healthy manual
+ * install, so only an existing, provably older stamp is considered stale.
+ */
+export function dependencyInstallStampIsStale(dir: string): boolean {
+  const stampPath = join(dir, INSTALL_STAMP);
+  if (!existsSync(stampPath)) return false;
+
+  try {
+    const stampMtime = statSync(stampPath).mtimeMs;
+    return LOCAL_INSTALL_INPUTS.some((relativePath) => {
+      const inputPath = join(dir, relativePath);
+      return existsSync(inputPath) && statSync(inputPath).mtimeMs > stampMtime;
+    });
+  } catch {
+    // A concurrently replaced stamp/input is safest to reconcile by reinstalling.
+    return true;
+  }
 }
 
 export function prepareDependencyInstall(dir: string, label: string): PreparedDependencyInstall {
@@ -688,7 +743,7 @@ async function installDependenciesForDir(
   try {
     await runCommandOrThrow(installCmd, {
       cwd: dir,
-      timeoutMs: TIMEOUT_BUN_INSTALL_MS,
+      timeoutMs: bunInstallTimeoutMs(),
       label: `${label} install`,
     });
     if (postInstall) await postInstall();
@@ -728,19 +783,30 @@ async function ensureChangedDependencies(
     isTermuxRuntime() || isProotRuntime(),
     manifestRefs,
   );
+  const retryBackendInstall = !plan.installBackend && dependencyInstallStampIsStale(PROJECT_ROOT);
+  const retryFrontendInstall = !plan.installFrontend && dependencyInstallStampIsStale(frontendDir);
+  const installBackend = plan.installBackend || retryBackendInstall;
+  const installFrontend = plan.installFrontend || retryFrontendInstall;
 
-  if (plan.installBackend) {
+  if (retryBackendInstall) {
+    log("Backend dependency inputs are newer than the last successful install; retrying.");
+  }
+  if (retryFrontendInstall) {
+    log("Frontend dependency inputs are newer than the last successful install; retrying.");
+  }
+
+  if (installBackend) {
     reportProgress?.("Installing backend dependencies...");
     await ensureBackendDependencies();
   }
-  if (plan.installFrontend) {
+  if (installFrontend) {
     reportProgress?.("Installing frontend dependencies...");
     await ensureFrontendDependencies(frontendDir);
   }
-  if (!plan.installBackend && !plan.installFrontend) {
+  if (!installBackend && !installFrontend) {
     log("Dependency manifests are unchanged; skipping package installation.");
   }
-  if (plan.repairTermuxFrontendNativeDeps) {
+  if (plan.repairTermuxFrontendNativeDeps && !installFrontend) {
     reportProgress?.("Repairing Termux frontend native bindings...");
     await repairTermuxFrontendNativeDeps(frontendDir);
   }

@@ -28,6 +28,10 @@ export const TIMEOUT_BUN_CACHE_MS = 30_000;
 // firm ceiling so an actual hang still recovers, but do not abort a healthy
 // install halfway through its normal work.
 export const TIMEOUT_BUN_INSTALL_MS = 10 * 60_000;
+// Termux installs are deliberately cold-cache, copy every package instead of
+// hardlinking, and may run through proot syscall emulation. On slower Android
+// storage that can legitimately take much longer than the desktop path.
+export const TIMEOUT_BUN_INSTALL_TERMUX_MS = 30 * 60_000;
 // Windows Vite builds can legitimately take longer than five minutes on cold
 // disks or when an antivirus scanner inspects generated assets.
 export const TIMEOUT_BUN_BUILD_MS = 10 * 60_000;
