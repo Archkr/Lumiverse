@@ -144,6 +144,18 @@
   min-height: 0;
 }
 
+/* Opt-in extension-owned presentation. Existing dock panels retain host chrome. */
+.panel.chromeless {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.panel.centerContent > .content {
+  display: grid;
+  place-items: center;
+}
+
 /* ── Resize handles ── */
 
 .resizeHandle {
@@ -260,5 +272,13 @@
   .right,
   .top {
     top: var(--app-interactive-safe-top, env(safe-area-inset-top, 0px)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .panel.chromeless {
+    background: transparent;
+    border: none;
+    border-radius: 0;
   }
 }

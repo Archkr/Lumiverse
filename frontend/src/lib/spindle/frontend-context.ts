@@ -67,6 +67,10 @@ export type FrontendDockPanelOptions = PublishedSpindleDockPanelOptions & {
   respectRequestedEdge?: boolean
   /** Show the panel title while the dock is collapsed. Defaults to false. */
   showCollapsedTitle?: boolean
+  /** Remove the host panel chrome so an extension can render its own surface. */
+  chromeless?: boolean
+  /** Center the extension root within the dock's content area. */
+  centerContent?: boolean
   onGeometryCommit?(rect: SpindleGeometryRect): void
 }
 
