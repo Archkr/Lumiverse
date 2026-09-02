@@ -436,6 +436,8 @@ const panel = ctx.ui.requestDockPanel({
   maxSize: 600,
   resizable: true,
   startCollapsed: false,
+  chromeless: false,     // opt in when the extension renders its own chrome
+  centerContent: false,  // center the extension root in the dock surface
 })
 
 // Render into the panel
@@ -455,6 +457,8 @@ panel.destroy()
 ```
 
 On mobile, left/right dock panels become full-width bottom sheets.
+
+`chromeless` removes the host header, background, border, shadow, and resize chrome. Use it only when the extension supplies its own close/navigation affordances. `centerContent` centers the extension root within the remaining panel area. Both options default to `false`, so existing dock panels are unaffected.
 
 ## App Mounts (requires `app_manipulation`)
 

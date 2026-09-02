@@ -192,27 +192,31 @@ export default function SpindleDockPanel({ panel }: Props) {
         styles.panel,
         styles[effectiveEdge],
         panel.collapsed && styles.collapsed,
+        panel.chromeless && styles.chromeless,
+        panel.centerContent && styles.centerContent,
         isResizing && styles.resizing,
       )}
       style={sizeStyle}
     >
-      <div className={styles.header}>
-        <button
-          className={styles.headerBtn}
-          onClick={handleToggle}
-          title={panel.collapsed ? 'Expand' : 'Collapse'}
-        >
-          <CollapseIcon size={14} />
-        </button>
-        {(!panel.collapsed || panel.showCollapsedTitle) && (
-          <span className={styles.title}>{panel.title}</span>
-        )}
-        {!panel.collapsed && (
-          <button className={styles.headerBtn} onClick={handleClose} title={tc('actions.close')}>
-            <X size={14} />
+      {!panel.chromeless && (
+        <div className={styles.header}>
+          <button
+            className={styles.headerBtn}
+            onClick={handleToggle}
+            title={panel.collapsed ? 'Expand' : 'Collapse'}
+          >
+            <CollapseIcon size={14} />
           </button>
-        )}
-      </div>
+          {(!panel.collapsed || panel.showCollapsedTitle) && (
+            <span className={styles.title}>{panel.title}</span>
+          )}
+          {!panel.collapsed && (
+            <button className={styles.headerBtn} onClick={handleClose} title={tc('actions.close')}>
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
 
       {!panel.collapsed && (
         <>

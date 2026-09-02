@@ -160,6 +160,10 @@ export interface DockPanelState {
   respectRequestedEdge: boolean
   /** Show the panel title while collapsed. */
   showCollapsedTitle: boolean
+  /** Remove the host-provided border, background, shadow, header, and resize chrome. */
+  chromeless: boolean
+  /** Center the extension root within the available content area. */
+  centerContent: boolean
   /** Extension-local persistence segment, or false to disable persistence. */
   persistGeometry?: string | false
 }

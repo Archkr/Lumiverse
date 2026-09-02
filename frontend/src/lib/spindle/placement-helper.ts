@@ -240,6 +240,10 @@ type H6DockPanelOptions = SpindleDockPanelOptions & {
   respectRequestedEdge?: boolean
   /** Show the panel title while the dock is collapsed. Defaults to false. */
   showCollapsedTitle?: boolean
+  /** Remove the host panel chrome so an extension can render its own surface. */
+  chromeless?: boolean
+  /** Center the extension root within the dock's content area. */
+  centerContent?: boolean
   onGeometryCommit?: (rect: GeometryRect) => void
 }
 
@@ -1241,6 +1245,8 @@ export function createDockPanelHandle(
       iconUrl: dockOptions.iconUrl,
       respectRequestedEdge: dockOptions.respectRequestedEdge === true,
       showCollapsedTitle: dockOptions.showCollapsedTitle === true,
+      chromeless: dockOptions.chromeless === true,
+      centerContent: dockOptions.centerContent === true,
       persistGeometry: dockOptions.persistGeometry,
     } satisfies DockPanelState)
     registered = true
