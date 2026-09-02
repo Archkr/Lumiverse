@@ -165,6 +165,38 @@ describe("settings.service world-book vector tracking", () => {
     });
   });
 
+  test("changing only the world-book retrieval count keeps indexed entries ready", () => {
+    insertBook("b1");
+    insertEntry({
+      id: "eligible",
+      world_book_id: "b1",
+      content: "Lore text",
+      vectorized: 1,
+      disabled: 0,
+      vector_index_status: "indexed",
+      vector_indexed_at: 123,
+      vector_index_error: null,
+    });
+
+    putSetting("u1", "worldBookVectorSettings", {
+      presetMode: "custom",
+      chunkTargetTokens: 420,
+      chunkMaxTokens: 700,
+      chunkOverlapTokens: 80,
+      retrievalTopK: 12,
+      maxChunksPerEntry: 8,
+    });
+
+    const row = getDb().query(
+      "SELECT vector_index_status, vector_indexed_at, vector_index_error FROM world_book_entries WHERE id = 'eligible'",
+    ).get();
+    expect(row).toEqual({
+      vector_index_status: "indexed",
+      vector_indexed_at: 123,
+      vector_index_error: null,
+    });
+  });
+
   test("bulk put also resets world-book vector states when the settings payload changes", () => {
     insertBook("b1");
     insertEntry({
@@ -196,5 +228,47 @@ describe("settings.service world-book vector tracking", () => {
       vector_indexed_at: null,
       vector_index_error: null,
     });
+  });
+
+  test("bulk put does not reset world-book vector states for a retrieval-only change", () => {
+    insertBook("b1");
+    insertEntry({
+      id: "eligible",
+      world_book_id: "b1",
+      content: "Lore text",
+      vectorized: 1,
+      disabled: 0,
+      vector_index_status: "indexed",
+      vector_indexed_at: 123,
+      vector_index_error: null,
+    });
+    putSetting("u1", "worldBookVectorSettings", {
+      presetMode: "custom",
+      chunkTargetTokens: 420,
+      chunkMaxTokens: 700,
+      chunkOverlapTokens: 80,
+      retrievalTopK: 6,
+      maxChunksPerEntry: 8,
+    });
+    getDb().run(
+      "UPDATE world_book_entries SET vector_index_status = 'indexed', vector_indexed_at = 999 WHERE id = 'eligible'",
+    );
+
+    putMany("u1", {
+      worldBookVectorSettings: {
+        presetMode: "custom",
+        chunkTargetTokens: 420,
+        chunkMaxTokens: 700,
+        chunkOverlapTokens: 80,
+        retrievalTopK: 12,
+        maxChunksPerEntry: 8,
+      },
+      other: { ok: true },
+    });
+
+    const row = getDb().query(
+      "SELECT vector_index_status, vector_indexed_at FROM world_book_entries WHERE id = 'eligible'",
+    ).get();
+    expect(row).toEqual({ vector_index_status: "indexed", vector_indexed_at: 999 });
   });
 });

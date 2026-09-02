@@ -3,8 +3,10 @@ import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import {
   worldBookVectorDesiredStatusSql,
+  worldBookVectorSettingsFingerprint,
 } from "./world-book-vector-state";
 import { WORLD_BOOK_VECTOR_SETTINGS_KEY } from "./world-book-vector-constants";
+import { normalizeWorldBookVectorSettings } from "./world-book-vector-settings-model";
 
 export interface Setting {
   key: string;
@@ -32,6 +34,18 @@ function markWorldBookVectorStatesStaleForSettingsChange(userId: string): void {
          vector_index_error = NULL
      WHERE world_book_id IN (SELECT id FROM world_books WHERE user_id = ?)`
   ).run(userId);
+}
+
+function worldBookVectorIndexSettingsChanged(existingJson: string | undefined, nextValue: unknown): boolean {
+  try {
+    const previous = normalizeWorldBookVectorSettings(existingJson === undefined ? null : JSON.parse(existingJson));
+    const next = normalizeWorldBookVectorSettings(nextValue);
+    return worldBookVectorSettingsFingerprint(previous) !== worldBookVectorSettingsFingerprint(next);
+  } catch {
+    // A malformed legacy value should be treated conservatively so the next
+    // valid save cannot leave vectors built with unknown chunking settings.
+    return true;
+  }
 }
 
 function assertValidKey(key: unknown): asserts key is string {
@@ -143,7 +157,7 @@ export function putSetting(
     )
     .run(key, json, userId, now);
 
-  if (key === WORLD_BOOK_VECTOR_SETTINGS_KEY && existingRow?.value !== json) {
+  if (key === WORLD_BOOK_VECTOR_SETTINGS_KEY && worldBookVectorIndexSettingsChanged(existingRow?.value, value)) {
     markWorldBookVectorStatesStaleForSettingsChange(userId);
   }
 
@@ -203,7 +217,8 @@ export function putMany(userId: string, settings: Record<string, any>): Setting[
   transaction();
 
   const worldBookVectorSettingsChanged = prepared.some(
-    (entry) => entry.key === WORLD_BOOK_VECTOR_SETTINGS_KEY && existingValues?.get(entry.key) !== entry.json,
+    (entry) => entry.key === WORLD_BOOK_VECTOR_SETTINGS_KEY
+      && worldBookVectorIndexSettingsChanged(existingValues?.get(entry.key), entry.value),
   );
   if (worldBookVectorSettingsChanged) {
     markWorldBookVectorStatesStaleForSettingsChange(userId);
