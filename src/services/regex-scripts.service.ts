@@ -22,6 +22,7 @@ import {
   regexCaptureReplacementsSandboxed,
   regexReplaceSandboxed,
   regexTestSandboxed,
+  RegexSandboxShutdownError,
   RegexTimeoutError,
   type SandboxCaptureReplacement,
   type SandboxMatch,
@@ -1631,6 +1632,10 @@ export async function applyRegexScripts(
   let result = content;
 
   for (const script of scripts) {
+    // Most callers load active scripts from the database, but keep the executor
+    // safe for request-supplied lists and other snapshots too.
+    if (script.disabled) continue;
+
     // Check placement match
     if (!script.placement.includes(placement)) continue;
 
@@ -1836,6 +1841,9 @@ export async function applyRegexScripts(
         }
       }
     } catch (e) {
+      // Pool teardown is expected process-shutdown cancellation, not a broken
+      // user script. Stop this pass quietly and do not try to spawn more work.
+      if (e instanceof RegexSandboxShutdownError) return result;
       if (options?.outFingerprint) options.outFingerprint.cacheable = false;
       if (e instanceof RegexTimeoutError) {
         const elapsedMs = Date.now() - startedAt;

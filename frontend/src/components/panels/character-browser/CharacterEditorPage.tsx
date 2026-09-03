@@ -1969,21 +1969,25 @@ export default function CharacterEditorPage() {
                         <Upload size={14} />
                       )}
                     </div>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*"
-                      className={styles.hiddenInput}
-                      onChange={handleFileSelected}
-                    />
-                    <input
-                      ref={cardReplaceFileRef}
-                      type="file"
-                      accept=".json,application/json,.png,image/png"
-                      className={styles.hiddenInput}
-                      onChange={handleReplaceCard}
-                    />
                   </div>
+
+                  {/* Keep these inputs outside the clickable avatar zone. A
+                      programmatic click on the card input bubbles; nesting it
+                      above would also trigger the avatar's image-only picker. */}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    className={styles.hiddenInput}
+                    onChange={handleFileSelected}
+                  />
+                  <input
+                    ref={cardReplaceFileRef}
+                    type="file"
+                    accept=".json,application/json,.png,image/png"
+                    className={styles.hiddenInput}
+                    onChange={handleReplaceCard}
+                  />
 
                   <div className={styles.headerInfo}>
                     <input
