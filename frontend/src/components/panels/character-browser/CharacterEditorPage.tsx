@@ -103,6 +103,12 @@ import {
   removeAlternateGreetingMetadata,
   setGreetingTitle,
 } from '@/lib/greetingMetadata'
+import {
+  chubSourceUrl,
+  parseChubSourceInput,
+  readChubFullPath,
+  setChubFullPath,
+} from '@/lib/characterSource'
 
 const DEBOUNCE_MS = 2000
 const MAX_PERSPECTIVE_LAYERS = 5
@@ -326,20 +332,6 @@ function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function readChubFullPath(extensions: unknown): string | null {
-  if (!isRecord(extensions)) return null
-
-  const chub = isRecord(extensions.chub) ? extensions.chub : null
-  const fullPath =
-    typeof chub?.full_path === 'string' ? chub.full_path
-      : typeof chub?.fullPath === 'string' ? chub.fullPath
-        : typeof extensions._lumiverse_chub_slug === 'string' ? extensions._lumiverse_chub_slug
-          : ''
-
-  const normalized = fullPath.trim().replace(/^\/+|\/+$/g, '')
-  return normalized || null
-}
-
 function trimTrailingUrlPunctuation(url: string): string {
   let trimmed = url.trim()
 
@@ -484,8 +476,6 @@ export default function CharacterEditorPage() {
 
   const character = allCharacters.find((c) => c.id === editingCharacterId) ?? null
   const isOpen = !!editingCharacterId
-  const chubFullPath = useMemo(() => readChubFullPath(character?.extensions), [character?.extensions])
-  const chubAttributionUrl = chubFullPath ? `https://chub.ai/characters/${chubFullPath}` : null
   const tabs = useMemo<{ id: TabId; label: string }[]>(() => [
     ...builtInTabs,
     ...characterEditorTabs.map((tab) => ({ id: tab.id, label: tab.title })),
@@ -502,6 +492,8 @@ export default function CharacterEditorPage() {
   const [alternateGreetingIds, setAlternateGreetingIds] = useState<string[]>([])
   const [greetingBackgroundPickerIndex, setGreetingBackgroundPickerIndex] = useState<number | null>(null)
   const [alternateCharacterName, setAlternateCharacterName] = useState('')
+  const [sourceLinkDraft, setSourceLinkDraft] = useState('')
+  const [sourceLinkError, setSourceLinkError] = useState<string | null>(null)
   const [extensionsJson, setExtensionsJson] = useState('')
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -600,6 +592,8 @@ export default function CharacterEditorPage() {
     setAlternateGreetingIds((character.alternate_greetings || []).map(() => uuidv7()))
     setGreetingBackgroundPickerIndex(null)
     setAlternateCharacterName(character.extensions?.alternate_character_name || '')
+    setSourceLinkDraft(chubSourceUrl(readChubFullPath(character.extensions)) || '')
+    setSourceLinkError(null)
     setExtensionsJson(JSON.stringify(character.extensions || {}, null, 2))
     setJsonError(null)
     pendingExtensionsRef.current = null
@@ -893,6 +887,8 @@ export default function CharacterEditorPage() {
 
     return pendingExtensionsRef.current ?? character?.extensions ?? {}
   }, [extensionsJson, character?.extensions])
+  const chubFullPath = useMemo(() => readChubFullPath(workingExtensions), [workingExtensions])
+  const chubAttributionUrl = chubSourceUrl(chubFullPath)
 
   // This report intentionally uses the editor's local draft state rather than
   // the saved card, so it remains useful while the user is still typing.
@@ -1106,6 +1102,26 @@ export default function CharacterEditorPage() {
     },
     [mutateExtensions]
   )
+
+  const commitSourceLink = useCallback(() => {
+    const value = sourceLinkDraft.trim()
+    if (!value) {
+      setSourceLinkDraft('')
+      setSourceLinkError(null)
+      mutateExtensions((ext) => setChubFullPath(ext, null), true)
+      return
+    }
+
+    const fullPath = parseChubSourceInput(value)
+    if (!fullPath) {
+      setSourceLinkError(t('characterEditor.originalSourceInvalid'))
+      return
+    }
+
+    setSourceLinkDraft(chubSourceUrl(fullPath) || '')
+    setSourceLinkError(null)
+    mutateExtensions((ext) => setChubFullPath(ext, fullPath), true)
+  }, [mutateExtensions, sourceLinkDraft, t])
 
   const handleAvatarSelect = useCallback(
     async (avatarEntryId: string) => {
@@ -2287,22 +2303,48 @@ export default function CharacterEditorPage() {
                         onChange={(v) => handleFieldChange('creator', v)}
                         multiline={false}
                       />
-                      {chubAttributionUrl && (
-                        <div className={styles.creatorAttribution}>
-                          <span className={styles.fieldHelper}>
-                            {t('characterEditor.chubAttribution', { defaultValue: 'Original source' })}
-                          </span>
+                      <div className={styles.fieldGroup}>
+                        <span className={styles.fieldLabel}>{t('characterEditor.originalSource')}</span>
+                        <span className={styles.fieldHelper}>{t('characterEditor.originalSourceHelper')}</span>
+                        <div className={styles.creatorSourceRow}>
+                          <input
+                            type="text"
+                            inputMode="url"
+                            className={styles.fieldInput}
+                            value={sourceLinkDraft}
+                            onChange={(event) => {
+                              setSourceLinkDraft(event.target.value)
+                              setSourceLinkError(null)
+                            }}
+                            onBlur={commitSourceLink}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault()
+                                event.currentTarget.blur()
+                              } else if (event.key === 'Escape') {
+                                event.preventDefault()
+                                setSourceLinkDraft(chubAttributionUrl || '')
+                                setSourceLinkError(null)
+                              }
+                            }}
+                            placeholder={t('characterEditor.originalSourcePlaceholder')}
+                            aria-invalid={sourceLinkError ? true : undefined}
+                          />
+                          {chubAttributionUrl && (
                           <a
                             href={chubAttributionUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className={styles.creatorAttributionLink}
+                            className={styles.creatorSourceLink}
+                            title={t('characterEditor.openOriginalSource')}
+                            aria-label={t('characterEditor.openOriginalSource')}
                           >
-                            <span>{chubFullPath}</span>
-                            <ExternalLink size={12} />
+                            <ExternalLink size={14} />
                           </a>
+                          )}
                         </div>
-                      )}
+                        {sourceLinkError && <span className={styles.creatorSourceError}>{sourceLinkError}</span>}
+                      </div>
                       <Field
                         label={t('characterEditor.creatorNotes')}
                         helper={t('characterEditor.creatorNotesHelper')}
