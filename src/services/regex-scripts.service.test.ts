@@ -1219,6 +1219,12 @@ describe("raw capture processing", () => {
 });
 
 describe("trim string processing", () => {
+  test("does not execute disabled scripts passed directly to the executor", async () => {
+    const script = runtimeScript({ disabled: true });
+
+    expect(await applyRegexScripts("x", [script], "ai_output")).toBe("x");
+  });
+
   test("treats an empty trim string as a no-op", async () => {
     const script = runtimeScript({ trim_strings: [""] });
 

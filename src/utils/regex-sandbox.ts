@@ -33,6 +33,14 @@ export class RegexSandboxError extends Error {
   }
 }
 
+/** Expected cancellation raised when the process tears down the worker pool. */
+export class RegexSandboxShutdownError extends RegexSandboxError {
+  constructor() {
+    super("Regex sandbox shut down");
+    this.name = "RegexSandboxShutdownError";
+  }
+}
+
 export class RegexWorkerStartupTimeoutError extends RegexSandboxError {
   constructor(public readonly timeoutMs: number) {
     super(`Regex worker did not acknowledge the request within ${timeoutMs}ms`);
@@ -254,24 +262,27 @@ export class RegexWorkerPool {
     this.idle = [];
     for (const flight of this.inflight.values()) {
       this.deps.cancelTimer(flight.timer);
-      flight.reject(new RegexSandboxError("Regex sandbox shut down"));
+      flight.reject(new RegexSandboxShutdownError());
     }
     this.inflight.clear();
     for (const item of this.queue) {
-      item.reject(new RegexSandboxError("Regex sandbox shut down"));
+      item.reject(new RegexSandboxShutdownError());
     }
     this.queue = [];
   }
 }
 
 let _pool: RegexWorkerPool | null = null;
+let sandboxShutDown = false;
 
 function getPool(): RegexWorkerPool {
+  if (sandboxShutDown) throw new RegexSandboxShutdownError();
   if (!_pool) _pool = new RegexWorkerPool(DEFAULT_POOL_SIZE);
   return _pool;
 }
 
 export function shutdownRegexSandbox(): void {
+  sandboxShutDown = true;
   if (_pool) {
     _pool.shutdown();
     _pool = null;

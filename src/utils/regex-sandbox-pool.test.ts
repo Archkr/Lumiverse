@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   RegexTimeoutError,
+  RegexSandboxShutdownError,
   RegexWorkerPool,
   RegexWorkerStartupTimeoutError,
   type RegexWorkerPoolDeps,
@@ -71,6 +72,20 @@ function createHarness() {
 }
 
 describe("regex worker timing attribution", () => {
+  test("shutdown rejects active and queued work with an expected cancellation", async () => {
+    const harness = createHarness();
+    const active = harness.pool.run<boolean>("test", { pattern: "x" }, 7);
+    const queued = harness.pool.run<boolean>("test", { pattern: "y" }, 7);
+    const activeResult = active.catch((caught) => caught);
+    const queuedResult = queued.catch((caught) => caught);
+
+    harness.pool.shutdown();
+
+    expect(await activeResult).toBeInstanceOf(RegexSandboxShutdownError);
+    expect(await queuedResult).toBeInstanceOf(RegexSandboxShutdownError);
+    expect(harness.workers[0]?.terminated).toBe(true);
+  });
+
   test("a worker startup timeout is not reported as a regex timeout", async () => {
     const harness = createHarness();
     const pending = harness.pool.run<boolean>("test", { pattern: "x" }, 7);
