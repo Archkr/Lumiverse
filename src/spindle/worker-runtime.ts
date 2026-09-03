@@ -333,6 +333,7 @@ type RuntimeWorkerToHost =
     }
   | { type: "toast_show"; toastType: "success" | "warning" | "error" | "info"; message: string; title?: string; duration?: number; userId?: string }
   | { type: "prompt_regex_set_owned"; chatIds: string[] }
+  | { type: "image_gen_generate_native"; requestId: string; input: any }
   | { type: "user_storage_read_binary"; requestId: string; path: string; userId?: string }
   | {
       type: "user_storage_write_binary";
@@ -726,6 +727,8 @@ type RuntimeSpindleAPI = Omit<SpindleAPI, "presets" | "imageGen" | "world_books"
   world_books: RuntimeWorldBooksAPI;
   entityExtensions: RuntimeEntityExtensionsAPI;
   imageGen: SpindleAPI["imageGen"] & {
+    /** Native Lumiverse image pipeline; public types are released separately. */
+    generateNative(input: any): Promise<any>;
     /**
      * Generate through a provider that explicitly supports WebSocket preview
      * images and status updates. The terminal `done` event contains the saved
@@ -2392,6 +2395,10 @@ const spindleApi: RuntimeSpindleAPI = {
     async generate(input: any): Promise<any> {
       const requestId = crypto.randomUUID();
       return request({ type: "image_gen_generate", requestId, input });
+    },
+    async generateNative(input: any): Promise<any> {
+      const requestId = crypto.randomUUID();
+      return request({ type: "image_gen_generate_native", requestId, input });
     },
     generateStream(input: ImageGenStreamInput): AsyncGenerator<ImageGenStreamEvent, void, void> {
       return requestImageGenStream(input);
