@@ -608,27 +608,42 @@
   margin-bottom: 2px;
 }
 
-.creatorAttribution {
+.creatorSourceRow {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: -6px;
+  align-items: center;
+  gap: 6px;
 }
 
-.creatorAttributionLink {
+.creatorSourceRow .fieldInput {
+  min-width: 0;
+}
+
+.creatorSourceLink {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  width: fit-content;
-  font-size: calc(11px * var(--lumiverse-font-scale, 1));
-  color: var(--lumiverse-primary);
-  text-decoration: none;
-  word-break: break-all;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 8px;
+  background: var(--lumiverse-fill-subtle);
+  color: var(--lumiverse-text-dim);
+  transition:
+    border-color var(--lumiverse-transition-fast),
+    color var(--lumiverse-transition-fast),
+    background var(--lumiverse-transition-fast);
 }
 
-.creatorAttributionLink:hover {
-  color: var(--lumiverse-text);
-  text-decoration: underline;
+.creatorSourceLink:hover {
+  border-color: var(--lumiverse-primary);
+  background: var(--lumiverse-primary-010);
+  color: var(--lumiverse-primary);
+}
+
+.creatorSourceError {
+  color: var(--lumiverse-error);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
 }
 
 .fieldTextarea {
