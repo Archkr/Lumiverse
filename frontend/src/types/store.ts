@@ -880,7 +880,7 @@ export interface DrawerSettings {
 export interface SpindleSettings {
   interceptorTimeoutMs: number
   dockPanelDesktopSide: 'left' | 'right'
-  /** Show routine Spindle lifecycle and WebSocket events in the browser console. */
+  /** Show routine WebSocket and Spindle lifecycle events in the browser console. */
   infoLoggingEnabled: boolean
   /** Per-extension opt-out for update notification toasts. */
   extensionUpdateToastDisabled: Record<string, boolean>

@@ -769,7 +769,7 @@
     "imageOptimization": "Image Optimization",
     "spindleLogging": "Spindle Logging",
     "spindleInfoLogging": "Log routine Spindle events to the browser console",
-    "spindleInfoLoggingHint": "When off, routine Spindle WebSocket, lifecycle, and runtime-stat messages stay out of the console. Spindle warnings and errors are always shown.",
+    "spindleInfoLoggingHint": "When off, routine WebSocket traces, Spindle lifecycle, and runtime-stat messages stay out of the console. Warnings and errors are always shown.",
     "longTermMemory": "Long-Term Chat Memory",
     "loadingMemory": "Loading memory settings...",
     "loadFailed": "Failed to load chat memory settings",

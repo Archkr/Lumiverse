@@ -328,13 +328,16 @@ describe('WebSocketClient resume watchdog guard', () => {
 })
 
 describe('WebSocketClient Spindle console logging', () => {
-  test('can suppress routine Spindle events without suppressing other WebSocket diagnostics', () => {
+  test('suppresses routine incoming WebSocket traces without suppressing event dispatch', () => {
     const client = new WebSocketClient('ws://localhost:3000/api/ws')
     const originalDebug = console.debug
     const logged: unknown[][] = []
+    const received: string[] = []
     console.debug = (...args: unknown[]) => { logged.push(args) }
 
     try {
+      client.on('SPINDLE_RUNTIME_STATS', () => received.push('spindle'))
+      client.on('MESSAGE_SENT', () => received.push('message'))
       client.setSpindleInfoLogging(false)
       client.connect()
       const socket = MockWebSocket.instances.at(-1)!
@@ -342,7 +345,14 @@ describe('WebSocketClient Spindle console logging', () => {
       ;(socket as any).onmessage({ data: JSON.stringify({ event: 'SPINDLE_RUNTIME_STATS', payload: {} }) })
       ;(socket as any).onmessage({ data: JSON.stringify({ event: 'MESSAGE_SENT', payload: {} }) })
 
+      expect(logged).toEqual([])
+      expect(received).toEqual(['spindle', 'message'])
+
+      client.setSpindleInfoLogging(true)
+      ;(socket as any).onmessage({ data: JSON.stringify({ event: 'MESSAGE_SENT', payload: {} }) })
+
       expect(logged).toEqual([['[WS] ←', 'MESSAGE_SENT', {}]])
+      expect(received).toEqual(['spindle', 'message', 'message'])
     } finally {
       console.debug = originalDebug
       client.disconnect()
