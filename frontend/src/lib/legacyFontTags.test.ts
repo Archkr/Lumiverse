@@ -24,12 +24,14 @@ test('heals 5-digit hex colors into valid 6-digit CSS hex colors', () => {
 })
 
 test('safely handles edge case color attributes', () => {
-  // 7-digit hex is truncated to 6-digit opaque hex rather than becoming transparent
+  // Other malformed lengths need the full legacy color algorithm and must not
+  // be guessed at by this narrowly scoped five-digit repair.
   expect(normalizeLegacyFontTags('<font color="#E8534A0">Notice</font>'))
-    .toBe('<span style="color:#E8534A">Notice</span>')
-  // Overlong 9+ hex is clamped to 6 digits
+    .toBe('<span style="color:#E8534A0">Notice</span>')
   expect(normalizeLegacyFontTags('<font color="#123456789">Long</font>'))
-    .toBe('<span style="color:#123456">Long</span>')
+    .toBe('<span style="color:#123456789">Long</span>')
+  expect(normalizeLegacyFontTags('<font color="#ff">Short</font>'))
+    .toBe('<span style="color:#ff">Short</span>')
   // Lone '#' does not emit invalid color:#
   expect(normalizeLegacyFontTags('<font color="#">Empty</font>'))
     .toBe('<span>Empty</span>')
@@ -39,4 +41,3 @@ test('safely handles edge case color attributes', () => {
   expect(normalizeLegacyFontTags('<font color="rgb(255, 0, 0)">RGB</font>'))
     .toBe('<span style="color:rgb(255, 0, 0)">RGB</span>')
 })
-

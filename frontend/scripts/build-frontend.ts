@@ -1,12 +1,13 @@
 import {
-  cpSync,
+  copyFileSync,
   existsSync,
+  mkdirSync,
   readdirSync,
   rmSync,
   statSync,
 } from 'fs'
 import { rename } from 'fs/promises'
-import { basename, join, resolve } from 'path'
+import { basename, dirname, join, relative, resolve } from 'path'
 
 const REQUIRED_BUILD_FILES = ['index.html', 'sw.js'] as const
 
@@ -14,11 +15,68 @@ const REQUIRED_BUILD_FILES = ['index.html', 'sw.js'] as const
  * Keep the Windows-only retry helper out of non-Windows frontend builds. In
  * particular, Docker copies only `frontend/` into its Linux build stage.
  */
-async function retryWindowsRename<T>(operation: () => Promise<T> | T): Promise<T> {
-  if (process.platform !== 'win32') return operation()
+type RenameRetryOptions = {
+  platform?: NodeJS.Platform
+  sleep?: (milliseconds: number) => Promise<void>
+}
+
+async function retryWindowsRename<T>(
+  operation: () => Promise<T> | T,
+  options: RenameRetryOptions = {},
+): Promise<T> {
+  const platform = options.platform ?? process.platform
+  if (platform !== 'win32') return operation()
 
   const { retryWindowsRename: retry } = await import('../../scripts/windows-fs-retry')
-  return retry(operation)
+  return retry(operation, options.sleep ? { platform, sleep: options.sleep } : { platform })
+}
+
+type PromoteFrontendBuildOptions = RenameRetryOptions & {
+  renamePath?: typeof rename
+}
+
+function buildFilesInPromotionOrder(buildDir: string): string[] {
+  const files: string[] = []
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) visit(path)
+      else if (entry.isFile()) files.push(path)
+      else throw new Error(`Frontend build contains unsupported entry: ${path}`)
+    }
+  }
+  visit(buildDir)
+
+  const priority = (path: string): number => {
+    const name = relative(buildDir, path).replaceAll('\\', '/')
+    if (name === 'sw.js') return 2
+    if (name === 'index.html') return 1
+    return 0
+  }
+  return files.sort((a, b) => priority(a) - priority(b) || a.localeCompare(b))
+}
+
+async function copyBuildOverLockedDirectory(
+  stagedDir: string,
+  distDir: string,
+  renameWithRetry: (source: string, destination: string) => Promise<void>,
+): Promise<void> {
+  const nonce = `${process.pid}-${Date.now()}`
+
+  for (const source of buildFilesInPromotionOrder(stagedDir)) {
+    const destination = join(distDir, relative(stagedDir, source))
+    const temporary = `${destination}.build-${nonce}.tmp`
+    mkdirSync(dirname(destination), { recursive: true })
+    rmSync(temporary, { force: true })
+    try {
+      copyFileSync(source, temporary)
+      await renameWithRetry(temporary, destination)
+    } finally {
+      rmSync(temporary, { force: true })
+    }
+  }
+
+  assertUsableBuild(distDir)
 }
 
 export function resolveViteRuntime(
@@ -73,31 +131,46 @@ export async function recoverInterruptedBuild(frontendDir: string, distDir: stri
 
 /**
  * Promote a validated Vite output directory without exposing a partial bundle.
- * The prior dist is restored if either rename fails.
+ * The prior dist is restored if either directory rename fails. When Windows
+ * locks the live directory, files are replaced atomically with the entry
+ * points promoted last so clients never observe an incomplete bundle.
  */
-export async function promoteFrontendBuild(stagedDir: string, distDir: string, backupDir: string): Promise<void> {
+export async function promoteFrontendBuild(
+  stagedDir: string,
+  distDir: string,
+  backupDir: string,
+  options: PromoteFrontendBuildOptions = {},
+): Promise<void> {
   let movedPreviousBuild = false
+  const platform = options.platform ?? process.platform
+  const renamePath = options.renamePath ?? rename
+  const renameWithRetry = (source: string, destination: string): Promise<void> => retryWindowsRename(
+    () => renamePath(source, destination),
+    { platform, sleep: options.sleep },
+  )
   try {
     assertUsableBuild(stagedDir)
 
     if (existsSync(distDir)) {
       rmSync(backupDir, { recursive: true, force: true })
       try {
-        await retryWindowsRename(() => rename(distDir, backupDir))
+        await renameWithRetry(distDir, backupDir)
         movedPreviousBuild = true
       } catch (error) {
-        if (process.platform === 'win32') {
-          cpSync(stagedDir, distDir, { recursive: true, force: true })
+        const isTransientLock = platform === 'win32'
+          && (await import('../../scripts/windows-fs-retry')).isTransientWindowsRenameError(error)
+        if (isTransientLock) {
+          await copyBuildOverLockedDirectory(stagedDir, distDir, renameWithRetry)
           return
         }
         throw error
       }
     }
 
-    await retryWindowsRename(() => rename(stagedDir, distDir))
+    await renameWithRetry(stagedDir, distDir)
   } catch (error) {
     if (!existsSync(distDir) && movedPreviousBuild && existsSync(backupDir)) {
-      await retryWindowsRename(() => rename(backupDir, distDir))
+      await renameWithRetry(backupDir, distDir)
       movedPreviousBuild = false
     }
     throw error

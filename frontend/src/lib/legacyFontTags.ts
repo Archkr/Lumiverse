@@ -15,24 +15,13 @@ function getAttributeValue(attributes: string, name: string): string | undefined
 
 function healLegacyColor(color: string): string {
   const trimmed = color.trim()
-  const hexMatch = trimmed.match(/^#?([0-9a-fA-F]+)$/)
-  if (!hexMatch) {
-    return trimmed === '#' ? '' : trimmed
-  }
+  const fiveDigitHex = trimmed.match(/^#?([0-9a-fA-F]{5})$/)
 
-  const hex = hexMatch[1]
-  const len = hex.length
-
-  // Valid standard CSS hex: 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA)
-  if (len === 3 || len === 4 || len === 6 || len === 8) {
-    return `#${hex}`
-  }
-  // 1, 2, or 5 digits (LLM truncation & WHATWG legacy zero-padding): pad to 6 digits (#RRGGBB)
-  if (len < 6) {
-    return `#${hex.padEnd(6, '0')}`
-  }
-  // 7 or >8 digits: truncate to standard 6-digit #RRGGBB (avoids accidental CSS alpha transparency)
-  return `#${hex.slice(0, 6)}`
+  // This is the one malformed length whose legacy HTML parsing result can be
+  // represented by simply appending a zero. Leave every other value alone so
+  // this compatibility repair does not invent a different color.
+  if (fiveDigitHex) return `#${fiveDigitHex[1]}0`
+  return trimmed === '#' ? '' : trimmed
 }
 
 /**

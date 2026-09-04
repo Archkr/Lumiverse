@@ -14,7 +14,7 @@ type RetryOptions = {
   sleep?: (milliseconds: number) => Promise<void>;
 };
 
-function isTransientWindowsRenameError(error: unknown): boolean {
+export function isTransientWindowsRenameError(error: unknown): boolean {
   return !!error
     && typeof error === "object"
     && "code" in error
