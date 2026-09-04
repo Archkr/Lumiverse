@@ -16,26 +16,23 @@ function getAttributeValue(attributes: string, name: string): string | undefined
 function healLegacyColor(color: string): string {
   const trimmed = color.trim()
   const hexMatch = trimmed.match(/^#?([0-9a-fA-F]+)$/)
-  if (hexMatch) {
-    const hex = hexMatch[1]
-    // Valid standard CSS hex lengths: 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA)
-    if (hex.length === 3 || hex.length === 4 || hex.length === 6 || hex.length === 8) {
-      return `#${hex}`
-    }
-    // 5-digit hex (frequent LLM truncation): pad with 0 to 6 digits (#RRGGB0)
-    if (hex.length === 5) {
-      return `#${hex}0`
-    }
-    // 1 or 2 digits: pad to 6 digits
-    if (hex.length < 6) {
-      return `#${hex.padEnd(6, '0')}`
-    }
-    // 7 digits: pad with 0 to 8 digits
-    if (hex.length === 7) {
-      return `#${hex}0`
-    }
+  if (!hexMatch) {
+    return trimmed === '#' ? '' : trimmed
   }
-  return trimmed
+
+  const hex = hexMatch[1]
+  const len = hex.length
+
+  // Valid standard CSS hex: 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA)
+  if (len === 3 || len === 4 || len === 6 || len === 8) {
+    return `#${hex}`
+  }
+  // 1, 2, or 5 digits (LLM truncation & WHATWG legacy zero-padding): pad to 6 digits (#RRGGBB)
+  if (len < 6) {
+    return `#${hex.padEnd(6, '0')}`
+  }
+  // 7 or >8 digits: truncate to standard 6-digit #RRGGBB (avoids accidental CSS alpha transparency)
+  return `#${hex.slice(0, 6)}`
 }
 
 /**

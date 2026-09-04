@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   readdirSync,
   rmSync,
@@ -81,8 +82,16 @@ export async function promoteFrontendBuild(stagedDir: string, distDir: string, b
 
     if (existsSync(distDir)) {
       rmSync(backupDir, { recursive: true, force: true })
-      await retryWindowsRename(() => rename(distDir, backupDir))
-      movedPreviousBuild = true
+      try {
+        await retryWindowsRename(() => rename(distDir, backupDir))
+        movedPreviousBuild = true
+      } catch (error) {
+        if (process.platform === 'win32') {
+          cpSync(stagedDir, distDir, { recursive: true, force: true })
+          return
+        }
+        throw error
+      }
     }
 
     await retryWindowsRename(() => rename(stagedDir, distDir))
