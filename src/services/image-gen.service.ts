@@ -24,7 +24,7 @@ import { EventType } from "../ws/events";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
 import { getComfyUIObjectInfo, resolveComfyTarget } from "../image-gen/comfyui-discovery";
 import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
-import { readComfyUIConfig } from "../image-gen/comfyui-workflow-storage";
+import { readComfyUIConfig, readComfyUIWorkflowLibrary } from "../image-gen/comfyui-workflow-storage";
 import { patchWorkflow, type ComfyUIPatchValues, type LoraEntry } from "../image-gen/comfyui-workflow-patch";
 import { uploadComfyImage } from "../image-gen/providers/comfy-runner";
 import type { ImageParameterSchemaMap } from "../image-gen/param-schema";
@@ -919,7 +919,12 @@ export async function applyActiveComfyUIWorkflowConfig(
   useLegacySingleLora: boolean,
   apiKey?: string,
 ): Promise<void> {
-  const config = readComfyUIConfig(connection.metadata);
+  const library = readComfyUIWorkflowLibrary(connection.metadata);
+  const targetId = (typeof params.workflow_id === "string" && params.workflow_id)
+    || (typeof params.workflowId === "string" && params.workflowId)
+    || library.activeId;
+  const explicitEntry = targetId ? library.entries.find((e) => e.id === targetId) : null;
+  const config = explicitEntry?.config ?? readComfyUIConfig(connection.metadata);
   if (!config) return;
 
   // `default_parameters` can retain a workflow from older connection

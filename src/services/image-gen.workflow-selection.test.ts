@@ -112,4 +112,80 @@ describe("active ComfyUI workflow selection", () => {
       "active-node": { class_type: "CLIPTextEncode", inputs: { text: "new workflow prompt" } },
     });
   });
+
+  test("selects the active workflow from comfyui_workflows library over initial comfyui config", async () => {
+    const defaultWf = { "node-default": { class_type: "CLIPTextEncode", inputs: { text: "default wf" } } };
+    const activeWf = { "node-active": { class_type: "CLIPTextEncode", inputs: { text: "active wf" } } };
+    const connection = await imageGenConnSvc.createConnection(USER_ID, {
+      name: "ComfyUI Multi-Workflow",
+      provider: "comfyui",
+      model: "",
+      api_url: "http://127.0.0.1:1",
+      is_default: true,
+      metadata: {
+        comfyui: {
+          workflow_json: defaultWf,
+          workflow_api_json: defaultWf,
+          workflow_format: "api_prompt",
+          field_mappings: [{ nodeId: "node-default", fieldName: "text", mappedAs: "positive_prompt" }],
+          imported_at: 1000,
+        },
+        comfyui_active_workflow_id: "wf-active-id",
+        comfyui_workflows: [
+          {
+            id: "wf-default-id",
+            name: "Initial Workflow",
+            updated_at: 1000,
+            config: {
+              workflow_json: defaultWf,
+              workflow_api_json: defaultWf,
+              workflow_format: "api_prompt",
+              field_mappings: [{ nodeId: "node-default", fieldName: "text", mappedAs: "positive_prompt" }],
+              imported_at: 1000,
+            },
+          },
+          {
+            id: "wf-active-id",
+            name: "Active Workflow",
+            updated_at: 2000,
+            config: {
+              workflow_json: activeWf,
+              workflow_api_json: activeWf,
+              workflow_format: "api_prompt",
+              field_mappings: [{ nodeId: "node-active", fieldName: "text", mappedAs: "positive_prompt" }],
+              imported_at: 2000,
+            },
+          },
+        ],
+      },
+    });
+    settingsSvc.putSetting(USER_ID, "imageGeneration", {
+      enabled: true,
+      activeImageGenConnectionId: connection.id,
+      promptMode: "custom",
+      outputTarget: "preview",
+      forceGeneration: true,
+      addToGallery: false,
+    });
+
+    const character = charactersSvc.createCharacter(USER_ID, { name: "Character" });
+    const chatId = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    getDb()
+      .query("INSERT INTO chats (id, user_id, character_id, name, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(chatId, USER_ID, character.id, "workflow test", "{}", now, now);
+
+    await generateSceneBackground(USER_ID, chatId, {
+      promptMode: "custom",
+      prompt: "my prompt",
+      skipParse: true,
+      outputTarget: "preview",
+      forceGeneration: true,
+    });
+
+    expect(capturedRequest?.parameters?.workflow).toEqual({
+      "node-active": { class_type: "CLIPTextEncode", inputs: { text: "my prompt" } },
+    });
+  });
+
 });
