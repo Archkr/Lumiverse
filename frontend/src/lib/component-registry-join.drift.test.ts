@@ -42,6 +42,8 @@ describe('component registry join drift guard', () => {
   test('keeps CSS and prop extraction consumers on the canonical join', () => {
     expect(cssRegistrySource).toContain('joinComponentRegistryPaths')
     expect(extractPropsSource).toContain('joinComponentRegistryPaths')
+    expect(extractPropsSource).toContain('componentRegistryKeyFromPath(entry.tsxPath!)')
+    expect(extractPropsSource).toContain('componentRegistryKeyFromPath(filePath)')
     expect(cssRegistrySource).not.toMatch(/function\s+(?:nameFromPath|categoryFromPath|isExcluded)\s*\(/)
     expect(extractPropsSource).not.toMatch(/path\.join\(dir,\s*`\$\{componentName\}\.module\.css`\)/)
   })

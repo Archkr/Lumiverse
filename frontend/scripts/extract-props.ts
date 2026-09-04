@@ -1,7 +1,10 @@
 import ts from "typescript";
 import path from "path";
 import { Glob } from "bun";
-import { joinComponentRegistryPaths } from "../src/lib/componentRegistryJoin";
+import {
+  componentRegistryKeyFromPath,
+  joinComponentRegistryPaths,
+} from "../src/lib/componentRegistryJoin";
 
 // A script to extract props AND module css for components
 console.time("Total Extraction Time");
@@ -14,7 +17,7 @@ const cssFiles = Array.from(
 const cssPathByTsxPath = new Map(
   joinComponentRegistryPaths(cssFiles, componentFiles)
     .filter((entry) => entry.cssPath && entry.tsxPath)
-    .map((entry) => [entry.tsxPath!, entry.cssPath!] as const),
+    .map((entry) => [componentRegistryKeyFromPath(entry.tsxPath!), entry.cssPath!] as const),
 );
 
 console.time("createProgram");
@@ -48,7 +51,7 @@ function serializeType(type: ts.Type, depth = 0): any[] {
     
     // Get doc comments
     const docTags = prop.getDocumentationComment(checker);
-    const description = docTags.map(tag => tag.text).join('\n').trim();
+    const description = docTags.map(tag => tag.text).join('\n').replace(/[ \t]+$/gm, '').trim();
 
     const propDoc: any = {
       name: propName,
@@ -86,7 +89,7 @@ async function processAST() {
       }
 
       const checkAndAddCss = (componentName: string, filePath: string) => {
-        const cssPath = cssPathByTsxPath.get(filePath);
+        const cssPath = cssPathByTsxPath.get(componentRegistryKeyFromPath(filePath));
         if (!cssPath) return;
         promises.push(Bun.file(cssPath).text().then(text => {
           cssResult[componentName] = text;

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { rename } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { promoteFrontendBuild, recoverInterruptedBuild, resolveViteRuntime } from './build-frontend'
@@ -81,5 +82,89 @@ describe('atomic frontend build promotion', () => {
     expect(readFileSync(join(dist, 'index.html'), 'utf8')).toBe('old')
     expect(existsSync(staged)).toBe(false)
     expect(existsSync(backup)).toBe(false)
+  })
+
+  test('atomically copies files when a transient Windows lock blocks the directory rename', async () => {
+    const root = makeTempDir()
+    const staged = join(root, 'staged')
+    const dist = join(root, 'dist')
+    const backup = join(root, 'backup')
+    writeBuild(staged, 'new')
+    writeBuild(dist, 'old')
+    writeFileSync(join(dist, 'assets', 'old-hash.js'), 'old asset retained for active clients')
+
+    const renamePath: typeof rename = async (source, destination) => {
+      if (source === dist && destination === backup) {
+        throw Object.assign(new Error('directory is in use'), { code: 'EPERM' })
+      }
+      return rename(source, destination)
+    }
+
+    await promoteFrontendBuild(staged, dist, backup, {
+      platform: 'win32',
+      renamePath,
+      sleep: async () => {},
+    })
+
+    expect(readFileSync(join(dist, 'assets', 'index.js'), 'utf8')).toBe('new')
+    expect(readFileSync(join(dist, 'index.html'), 'utf8')).toBe('new')
+    expect(readFileSync(join(dist, 'sw.js'), 'utf8')).toBe('new')
+    expect(existsSync(join(dist, 'assets', 'old-hash.js'))).toBe(true)
+    expect(existsSync(staged)).toBe(false)
+    expect(existsSync(backup)).toBe(false)
+  })
+
+  test('leaves the live entry points unchanged when the Windows copy fallback fails', async () => {
+    const root = makeTempDir()
+    const staged = join(root, 'staged')
+    const dist = join(root, 'dist')
+    const backup = join(root, 'backup')
+    writeBuild(staged, 'new')
+    writeBuild(dist, 'old')
+
+    const renamePath: typeof rename = async (source, destination) => {
+      if (source === dist && destination === backup) {
+        throw Object.assign(new Error('directory is in use'), { code: 'EPERM' })
+      }
+      if (source.includes('assets/index.js.build-')) {
+        throw Object.assign(new Error('file is in use'), { code: 'EPERM' })
+      }
+      return rename(source, destination)
+    }
+
+    await expect(promoteFrontendBuild(staged, dist, backup, {
+      platform: 'win32',
+      renamePath,
+      sleep: async () => {},
+    })).rejects.toThrow('file is in use')
+
+    expect(readFileSync(join(dist, 'assets', 'index.js'), 'utf8')).toBe('old')
+    expect(readFileSync(join(dist, 'index.html'), 'utf8')).toBe('old')
+    expect(readFileSync(join(dist, 'sw.js'), 'utf8')).toBe('old')
+  })
+
+  test('does not copy over dist after a non-transient Windows rename error', async () => {
+    const root = makeTempDir()
+    const staged = join(root, 'staged')
+    const dist = join(root, 'dist')
+    const backup = join(root, 'backup')
+    writeBuild(staged, 'new')
+    writeBuild(dist, 'old')
+
+    const renamePath: typeof rename = async (source, destination) => {
+      if (source === dist && destination === backup) {
+        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' })
+      }
+      return rename(source, destination)
+    }
+
+    await expect(promoteFrontendBuild(staged, dist, backup, {
+      platform: 'win32',
+      renamePath,
+      sleep: async () => {},
+    })).rejects.toThrow('disk full')
+
+    expect(readFileSync(join(dist, 'index.html'), 'utf8')).toBe('old')
+    expect(readFileSync(join(dist, 'sw.js'), 'utf8')).toBe('old')
   })
 })

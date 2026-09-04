@@ -13,6 +13,17 @@ function getAttributeValue(attributes: string, name: string): string | undefined
   return match?.slice(1).find((value) => value !== undefined)
 }
 
+function healLegacyColor(color: string): string {
+  const trimmed = color.trim()
+  const fiveDigitHex = trimmed.match(/^#?([0-9a-fA-F]{5})$/)
+
+  // This is the one malformed length whose legacy HTML parsing result can be
+  // represented by simply appending a zero. Leave every other value alone so
+  // this compatibility repair does not invent a different color.
+  if (fiveDigitHex) return `#${fiveDigitHex[1]}0`
+  return trimmed === '#' ? '' : trimmed
+}
+
 /**
  * Converts deprecated HTML font tags to spans before rich HTML sanitization.
  * DOMPurify then applies the usual policy to the resulting style attribute.
@@ -22,7 +33,8 @@ export function normalizeLegacyFontTags(html: string): string {
     .replace(/<font\b([^>]*)>/gi, (_match, attributes: string) => {
       const color = getAttributeValue(attributes, 'color')
       const style = getAttributeValue(attributes, 'style')
-      const safeColor = color && /^[#\w\s(),.%+-]+$/.test(color) ? color : null
+      const healedColor = color ? healLegacyColor(color) : null
+      const safeColor = healedColor && /^[#\w\s(),.%+-]+$/.test(healedColor) ? healedColor : null
       const declarations = [
         safeColor ? `color:${safeColor}` : null,
         style?.trim() || null,
