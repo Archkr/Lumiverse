@@ -55,6 +55,7 @@ import {
   SECRET_SETTING_KEY_PATTERNS,
 } from "./table-registry";
 import { sanitizeEntry, safeJoin, SanitizeError, type SanitizedEntry } from "./sanitize";
+import { markConnectionSecretRestored } from "./connection-secret-restore";
 
 // ---------------------------------------------------------------------------
 // Tunables / safety caps
@@ -2202,6 +2203,7 @@ async function applySecrets(
     }
     try {
       await putSecret(ctx.userId, entry.key, plaintext);
+      if (plaintext.length > 0) markConnectionSecretRestored(ctx.userId, entry.key);
       restored++;
     } catch (err) {
       console.warn(`[user-data import] secret re-encrypt failed for ${entry.key}:`, err);

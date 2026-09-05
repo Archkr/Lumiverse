@@ -66,6 +66,11 @@ function parseComfyUIConfigValue(value: unknown): ComfyUIWorkflowConfig | null {
 
 export function readComfyUIConfig(metadata: unknown): ComfyUIWorkflowConfig | null {
   if (!metadata || typeof metadata !== "object") return null;
+  const library = readComfyUIWorkflowLibrary(metadata);
+  if (library.activeId) {
+    const active = library.entries.find((e) => e.id === library.activeId);
+    if (active) return active.config;
+  }
   return parseComfyUIConfigValue((metadata as Record<string, unknown>).comfyui);
 }
 

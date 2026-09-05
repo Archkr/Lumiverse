@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react'
 import { marked } from 'marked'
 import { highlightCode } from '@/lib/codeHighlight'
 import { ISLAND_BLANK_LINE_RE, processMarkdownInHtmlIsland } from './htmlIslandMarkdown'
-import { resolveGalleryImageId } from '@/lib/galleryImageReference'
+import { resolveGalleryImageId, resolveGalleryImageSourcesInHtml } from '@/lib/galleryImageReference'
 import { parseOOC } from '@/lib/oocParser'
 import { createEmphasisAwareRenderer } from '@/lib/markedEmphasisRenderer'
 import { createStrictTildeTokenizer } from '@/lib/markedTokenizer'
@@ -1414,6 +1414,10 @@ function resolveRisuAssetTags(text: string, assetMap: Record<string, string>): s
  *  custom renderer (proseImageWrap, lightbox) as Risu <img="..."> tags.
  *  Already-resolved URLs (absolute paths, http, data:) are left as raw HTML. */
 function resolveImgSrcAssetTags(text: string, assetMap: Record<string, string>): string {
+  // Gallery sources retain their original HTML tag so display-regex styling
+  // and wrapper behavior survive. Other legacy asset references continue to
+  // use the standard Markdown image renderer below.
+  text = resolveGalleryImageSourcesInHtml(text, assetMap)
   IMG_SRC_ASSET_RE.lastIndex = 0
   return text.replace(IMG_SRC_ASSET_RE, (match, before: string, src: string, after: string) => {
     // Skip already-resolved URLs — these are valid img tags that should render as-is

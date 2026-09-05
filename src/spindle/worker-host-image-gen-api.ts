@@ -4,6 +4,7 @@ import type { ImageProvider } from "../image-gen/provider";
 import type { ImageGenRequest, ImageGenResponse } from "../image-gen/types";
 import * as imageGenConnSvc from "../services/image-gen-connections.service";
 import { applyActiveComfyUIWorkflowConfig } from "../services/image-gen.service";
+import * as nativeImageGenSvc from "../services/image-gen.service";
 import { PERMISSION_DENIED_PREFIX, type SpindlePermission } from "lumiverse-spindle-types";
 
 type ImageGenStreamEvent =
@@ -213,6 +214,116 @@ export class WorkerHostImageGenApi {
         generation.request,
       );
       this.postResponse(requestId, await this.persistResult(result, generation, input));
+    } catch (err: any) {
+      this.postResponse(requestId, undefined, err?.message ?? String(err));
+    }
+  }
+
+  async handleGenerateNative(requestId: string, input: any): Promise<void> {
+    try {
+      this.requirePermission();
+      const userId = this.context.resolveEffectiveUserId(input?.userId);
+      if (!userId) throw new Error("userId is required for operator-scoped extensions");
+      this.context.enforceScopedUser(userId);
+
+      const chatId = typeof input?.chat_id === "string" ? input.chat_id.trim() : "";
+      if (!chatId) throw new Error("chat_id is required for native image generation");
+
+      let characterLora: nativeImageGenSvc.ImageGenCharacterLoraSelection | undefined;
+      const requested = input?.characterLora;
+      if (requested && typeof requested === "object") {
+        if (requested.source === "chat" || requested.source === "none") {
+          characterLora = { source: requested.source };
+        } else if (requested.source === "character") {
+          if (!this.context.hasPermission("characters")) {
+            throw new Error(`${PERMISSION_DENIED_PREFIX} characters — Character access permission not granted`);
+          }
+          const characterId = typeof requested.characterId === "string"
+            ? requested.characterId.trim()
+            : "";
+          if (!characterId) throw new Error("characterLora.characterId is required");
+          characterLora = { source: "character", characterId };
+        } else if (requested.source === "explicit") {
+          const lora = requested.lora;
+          if (!lora || typeof lora !== "object") throw new Error("characterLora.lora is required");
+          characterLora = {
+            source: "explicit",
+            lora: {
+              lora_name: typeof lora.lora_name === "string" ? lora.lora_name : "",
+              weight_model: Number(lora.weight_model),
+              weight_clip: lora.weight_clip === undefined ? undefined : Number(lora.weight_clip),
+            },
+            baseTags: typeof requested.base_tags === "string" ? requested.base_tags : undefined,
+          };
+        } else {
+          throw new Error(`Unknown characterLora source: ${String(requested.source)}`);
+        }
+      }
+
+      const extraLoras = Array.isArray(input?.extraLoras)
+        ? input.extraLoras.map((entry: any) => ({
+            lora_name: typeof entry?.lora_name === "string" ? entry.lora_name : "",
+            weight_model: Number(entry?.weight_model),
+            weight_clip: entry?.weight_clip === undefined ? undefined : Number(entry.weight_clip),
+          }))
+        : undefined;
+
+      const promptMode = input?.promptMode === "scene"
+        || input?.promptMode === "custom"
+        || input?.promptMode === "parsed_custom"
+        ? input.promptMode
+        : undefined;
+
+      const result = await nativeImageGenSvc.generateSceneBackground(userId, chatId, {
+        forceGeneration: input?.forceGeneration !== false,
+        promptMode,
+        prompt: typeof input?.prompt === "string" ? input.prompt : undefined,
+        negativePrompt: typeof input?.negativePrompt === "string" ? input.negativePrompt : undefined,
+        promptPresetId: input?.promptPresetId === null || typeof input?.promptPresetId === "string"
+          ? input.promptPresetId
+          : undefined,
+        skipParse: input?.skipParse === true,
+        characterLora,
+        bypassCharacterLora: characterLora?.source === "none"
+          ? true
+          : characterLora
+            ? false
+            : undefined,
+        bypassActiveLoraPreset: typeof input?.bypassActiveLoraPreset === "boolean"
+          ? input.bypassActiveLoraPreset
+          : undefined,
+        extraLoras,
+        extraBaseTags: typeof input?.extraBaseTags === "string" ? input.extraBaseTags : undefined,
+        loraStrengthScale: typeof input?.loraStrengthScale === "number"
+          ? input.loraStrengthScale
+          : undefined,
+        parameters: input?.parameters && typeof input.parameters === "object" && !Array.isArray(input.parameters)
+          ? input.parameters
+          : undefined,
+        outputTarget: "preview",
+        clientJobId: typeof input?.clientJobId === "string" ? input.clientJobId : undefined,
+        promptGenerationTimeoutSeconds: input?.promptGenerationTimeoutSeconds,
+        generationTimeoutSeconds: input?.generationTimeoutSeconds,
+        ownerExtensionIdentifier: this.context.extensionIdentifier,
+        ownerChatId: chatId,
+        addToGallery: false,
+      });
+
+      const exposed: Record<string, unknown> = {
+        generated: result.generated,
+        reason: result.reason,
+        prompt: result.prompt,
+        negativePrompt: result.negativePrompt,
+        provider: result.provider,
+        imageDataUrl: result.imageDataUrl,
+        imageId: result.imageId,
+        imageUrl: result.imageUrl,
+        jobId: result.jobId,
+      };
+      this.postResponse(
+        requestId,
+        applyDataUrlInclusion(exposed, input?.includeDataUrl !== false),
+      );
     } catch (err: any) {
       this.postResponse(requestId, undefined, err?.message ?? String(err));
     }

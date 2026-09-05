@@ -24,7 +24,7 @@ import { EventType } from "../ws/events";
 import { getImageProvider, getImageProviderList } from "../image-gen/registry";
 import { getComfyUIObjectInfo, resolveComfyTarget } from "../image-gen/comfyui-discovery";
 import { normalizeComfyUIWorkflow } from "../image-gen/comfyui-import";
-import { readComfyUIConfig } from "../image-gen/comfyui-workflow-storage";
+import { readComfyUIConfig, readComfyUIWorkflowLibrary } from "../image-gen/comfyui-workflow-storage";
 import { patchWorkflow, type ComfyUIPatchValues, type LoraEntry } from "../image-gen/comfyui-workflow-patch";
 import { uploadComfyImage } from "../image-gen/providers/comfy-runner";
 import type { ImageParameterSchemaMap } from "../image-gen/param-schema";
@@ -236,6 +236,12 @@ export interface ImageGenPromptPreset {
   kind?: ImageGenPresetKind;
 }
 
+export type ImageGenCharacterLoraSelection =
+  | { source: "chat" }
+  | { source: "none" }
+  | { source: "character"; characterId: string }
+  | { source: "explicit"; lora: LoraEntry; baseTags?: string };
+
 export interface GenerateImageOptions {
   forceGeneration?: boolean;
   promptMode?: ImageGenPromptMode;
@@ -245,6 +251,19 @@ export interface GenerateImageOptions {
   bypassCharacterLora?: boolean;
   bypassActiveLoraPreset?: boolean;
   loraStrengthScale?: number;
+  /** Select the identity LoRA independently from the active chat owner. */
+  characterLora?: ImageGenCharacterLoraSelection;
+  /** Ordered LoRA layers appended after active preset + selected character. */
+  extraLoras?: LoraEntry[];
+  /** Additional positive anchor tags appended to preset/character base tags. */
+  extraBaseTags?: string;
+  /** Provider parameters merged over the active native connection defaults. */
+  parameters?: Record<string, unknown>;
+  /** Persistence owner supplied only by trusted host bridges. */
+  ownerExtensionIdentifier?: string;
+  ownerChatId?: string;
+  /** Override native gallery linkage; omitted preserves settings behavior. */
+  addToGallery?: boolean;
   outputTarget?: ImageGenOutputTarget;
   /** Existing message to attach the generated image to (output target = attach_to_message). */
   attachToMessageId?: string;
@@ -369,7 +388,7 @@ export async function generateSceneBackground(
       : opts?.promptMode || settings.promptMode || "scene";
     const outputTarget = opts?.outputTarget || settings.outputTarget || "background";
     const params = normalizeGenerationParameters(
-      { ...connection.default_parameters },
+      { ...connection.default_parameters, ...(opts?.parameters ?? {}) },
       provider.capabilities.parameters,
     );
     normalizeRandomSeed(params, !!provider.capabilities.parameters.seed);
@@ -419,19 +438,17 @@ export async function generateSceneBackground(
     // provider sees the same prompt tags; Comfy/Swarm/SD API consume params.
     const bypassChar = opts?.bypassCharacterLora ?? settings.bypassCharacterLora ?? false;
     const bypassPreset = opts?.bypassActiveLoraPreset ?? settings.bypassActiveLoraPreset ?? false;
-    const characterLora = bypassChar ? null : resolveCharacterLoraForChat(userId, chatId);
+    const characterLayer = bypassChar
+      ? null
+      : resolveImageCharacterLayer(userId, chatId, opts?.characterLora);
     const activePreset = bypassPreset ? null : resolveActiveLoraPreset(settings);
+    const extraLoras = (opts?.extraLoras ?? []).map((entry, index) =>
+      normalizeRequestedImageLora(entry, `Extra native image LoRA #${index + 1}`)
+    );
     let combinedLoras: LoraEntry[] = [
       ...(activePreset?.loras ?? []),
-      ...(characterLora
-        ? [
-            {
-              lora_name: characterLora.lora_name,
-              weight_model: characterLora.weight_model,
-              weight_clip: characterLora.weight_clip,
-            },
-          ]
-        : []),
+      ...(characterLayer ? [characterLayer.lora] : []),
+      ...extraLoras,
     ];
     const rawScale = opts?.loraStrengthScale ?? settings.loraStrengthScale ?? 1;
     const scale = Number.isFinite(rawScale) ? Math.min(2, Math.max(0, rawScale)) : 1;
@@ -442,8 +459,11 @@ export async function generateSceneBackground(
         weight_clip: Math.max(0, (entry.weight_clip ?? entry.weight_model) * scale),
       }));
     }
-
-    const tags = [activePreset?.base_tags, characterLora?.base_tags].filter(Boolean).join(", ");
+    const tags = [
+      activePreset?.base_tags,
+      characterLayer?.baseTags,
+      opts?.extraBaseTags,
+    ].filter(Boolean).join(", ");
     if (tags) promptResult.prompt = composeWithBaseTags(tags, promptResult.prompt);
 
     if (!promptResult.prompt.trim()) throw new Error("Image generation prompt is required");
@@ -498,7 +518,7 @@ export async function generateSceneBackground(
         promptResult.prompt,
         promptResult.negativePrompt,
         combinedLoras,
-        !activePreset,
+        !activePreset && combinedLoras.length <= 1,
         apiKey ?? undefined,
       );
     }
@@ -545,7 +565,10 @@ export async function generateSceneBackground(
         userId,
         response.imageDataUrl,
         `image-gen-${connection.provider}-${Date.now()}.png`,
-        { owner_chat_id: chatId },
+        {
+          owner_extension_identifier: opts?.ownerExtensionIdentifier,
+          owner_chat_id: opts?.ownerChatId ?? chatId,
+        },
       );
       imageId = image.id;
       imageUrl = `/api/v1/image-gen/results/${image.id}`;
@@ -612,7 +635,8 @@ export async function generateSceneBackground(
       // Gallery linkage is best-effort and not on the response's critical
       // path — defer to a microtask so the HTTP response (and the chat
       // re-render that follows from MESSAGE_EDITED) lands sooner.
-      if (settings.addToGallery !== false) {
+      const shouldAddToGallery = opts?.addToGallery ?? (settings.addToGallery !== false);
+      if (shouldAddToGallery) {
         const characterId = chatsSvc.getChat(userId, chatId)?.character_id;
         if (characterId) {
           scheduleLowPriorityTask(() => {
@@ -895,7 +919,12 @@ export async function applyActiveComfyUIWorkflowConfig(
   useLegacySingleLora: boolean,
   apiKey?: string,
 ): Promise<void> {
-  const config = readComfyUIConfig(connection.metadata);
+  const library = readComfyUIWorkflowLibrary(connection.metadata);
+  const targetId = (typeof params.workflow_id === "string" && params.workflow_id)
+    || (typeof params.workflowId === "string" && params.workflowId)
+    || library.activeId;
+  const explicitEntry = targetId ? library.entries.find((e) => e.id === targetId) : null;
+  const config = explicitEntry?.config ?? readComfyUIConfig(connection.metadata);
   if (!config) return;
 
   // `default_parameters` can retain a workflow from older connection
@@ -988,6 +1017,56 @@ function resolveCharacterLoraForChat(
   const chat = chatsSvc.getChat(userId, chatId);
   if (!chat?.character_id) return null;
   return characterLoraSvc.getCharacterLora(userId, chat.character_id);
+}
+
+type ResolvedImageCharacterLayer = { lora: LoraEntry; baseTags?: string };
+
+function normalizeRequestedImageLora(value: LoraEntry, label: string): LoraEntry {
+  const name = stringParam(value?.lora_name);
+  const model = numberParam(value?.weight_model);
+  const clip = numberParam(value?.weight_clip);
+  if (!name) throw new Error(`${label} requires lora_name`);
+  if (model === undefined) throw new Error(`${label} requires a finite weight_model`);
+  return {
+    lora_name: name,
+    weight_model: Math.max(0, model),
+    weight_clip: Math.max(0, clip ?? model),
+  };
+}
+
+function characterBindingToImageLayer(
+  binding: characterLoraSvc.CharacterLoraBinding | null,
+): ResolvedImageCharacterLayer | null {
+  if (!binding) return null;
+  return {
+    lora: {
+      lora_name: binding.lora_name,
+      weight_model: binding.weight_model,
+      weight_clip: binding.weight_clip,
+    },
+    baseTags: binding.base_tags,
+  };
+}
+
+function resolveImageCharacterLayer(
+  userId: string,
+  chatId: string,
+  selection?: ImageGenCharacterLoraSelection,
+): ResolvedImageCharacterLayer | null {
+  const resolved = selection ?? { source: "chat" as const };
+  if (resolved.source === "none") return null;
+  if (resolved.source === "chat") {
+    return characterBindingToImageLayer(resolveCharacterLoraForChat(userId, chatId));
+  }
+  if (resolved.source === "character") {
+    const characterId = resolved.characterId.trim();
+    if (!characterId) throw new Error("Native image character LoRA selection requires characterId");
+    return characterBindingToImageLayer(characterLoraSvc.getCharacterLora(userId, characterId));
+  }
+  return {
+    lora: normalizeRequestedImageLora(resolved.lora, "Explicit native image LoRA"),
+    baseTags: resolved.baseTags,
+  };
 }
 
 /**

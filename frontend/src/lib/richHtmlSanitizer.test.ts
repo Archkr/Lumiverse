@@ -2,6 +2,7 @@
 
 import { afterAll, describe, expect, test } from 'bun:test'
 import { JSDOM } from 'jsdom'
+import { resolveGalleryImageSourcesInHtml } from './galleryImageReference'
 import { normalizeLegacyFontTags } from './legacyFontTags'
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -180,6 +181,21 @@ describe('richHtmlSanitizer inline SVG support', () => {
     )
 
     expect(root.querySelector('img')?.getAttribute('src')).toBe('/api/v1/images/local-id')
+  })
+
+  test('preserves styled gallery images after resolving their local source', () => {
+    const resolved = resolveGalleryImageSourcesInHtml(
+      '<div class="frame"><img src="gallery://image-1" class="scene" style="width: 42%; border-radius: 8px"></div>',
+      { 'gallery://image-1': 'local-id' },
+    )
+    const root = parseFragment(sanitizeRichHtml(resolved))
+    const image = root.querySelector('img')
+
+    expect(image?.getAttribute('src')).toBe('/api/v1/images/local-id')
+    expect(image?.getAttribute('class')).toBe('scene')
+    expect(image?.style.width).toBe('42%')
+    expect(image?.style.borderRadius).toBe('8px')
+    expect(image?.closest('.frame')).not.toBeNull()
   })
 
   test('keeps island style blocks while sanitizing inline svg content', () => {

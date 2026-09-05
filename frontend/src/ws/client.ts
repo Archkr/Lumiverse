@@ -145,11 +145,10 @@ export class WebSocketClient {
           return
         }
         const eventName = data.event || data.type
-        const isRoutineSpindleEvent = typeof eventName === 'string' && eventName.startsWith('SPINDLE_')
         if (
-          eventName !== 'CONNECTED'
+          this.spindleInfoLoggingEnabled
+          && eventName !== 'CONNECTED'
           && eventName !== 'STREAM_TOKEN_RECEIVED'
-          && (!isRoutineSpindleEvent || this.spindleInfoLoggingEnabled)
         ) {
           console.debug('[WS] ←', eventName, data.payload)
         }
@@ -209,7 +208,7 @@ export class WebSocketClient {
     }
   }
 
-  /** Controls browser-console output for routine Spindle WebSocket events. */
+  /** Controls browser-console output for routine inbound WebSocket events. */
   setSpindleInfoLogging(enabled: boolean): void {
     this.spindleInfoLoggingEnabled = enabled
   }
