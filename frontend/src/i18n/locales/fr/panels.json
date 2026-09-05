@@ -1142,7 +1142,7 @@
     "creator": "Créateur",
     "creatorHelper": "Qui a créé ce personnage.",
     "originalSource": "Source d’origine",
-    "originalSourceHelper": "Collez une URL Chub, CharacterHub, LumiHub (lumi.spot) ou Illarin (illarin.xyz), ou un chemin Chub créateur/personnage.",
+    "originalSourceHelper": "Collez une URL Chub, CharacterHub, LumiHub ou Illarin, ou un chemin Chub créateur/personnage.",
     "originalSourcePlaceholder": "https://chub.ai/characters/createur/personnage",
     "originalSourceInvalid": "Saisissez une URL source Chub, CharacterHub, LumiHub ou Illarin valide.",
     "openOriginalSource": "Ouvrir la source d’origine",

@@ -1142,7 +1142,7 @@
     "creator": "創作者",
     "creatorHelper": "誰創建了此角色。",
     "originalSource": "原始來源",
-    "originalSourceHelper": "貼上 Chub、CharacterHub、LumiHub（lumi.spot）或 Illarin（illarin.xyz）連結，或 Chub 的 creator/character 格式路徑。",
+    "originalSourceHelper": "貼上 Chub、CharacterHub、LumiHub 或 Illarin 連結，或 Chub 的 creator/character 格式路徑。",
     "originalSourcePlaceholder": "https://chub.ai/characters/creator/character",
     "originalSourceInvalid": "請輸入有效的 Chub、CharacterHub、LumiHub 或 Illarin 來源連結。",
     "openOriginalSource": "開啟原始來源",

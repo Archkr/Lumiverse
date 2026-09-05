@@ -1142,7 +1142,7 @@
     "creator": "クリエイター",
     "creatorHelper": "このキャラクターの作成者。",
     "originalSource": "元の配布元",
-    "originalSourceHelper": "Chub、CharacterHub、LumiHub（lumi.spot）、Illarin（illarin.xyz）の URL、または Chub の creator/character 形式のパスを貼り付けます。",
+    "originalSourceHelper": "Chub、CharacterHub、LumiHub、Illarin の URL、または Chub の creator/character 形式のパスを貼り付けます。",
     "originalSourcePlaceholder": "https://chub.ai/characters/creator/character",
     "originalSourceInvalid": "有効な Chub、CharacterHub、LumiHub、または Illarin のソース URL を入力してください。",
     "openOriginalSource": "元の配布元を開く",
