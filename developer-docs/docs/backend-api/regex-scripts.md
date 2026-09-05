@@ -229,6 +229,37 @@ Every mode except `"none"` resolves macros in `find_regex`. The selected mode al
 
 The one observable difference from `"raw"`: stateful macros (`{{counter::*}}`, `{{addvar::*::1}}{{getvar::*}}` patterns, etc.) accumulate left-to-right across matches in `"after"` mode rather than running in isolation per match. A counter that emitted `1, 1, 1, 1` under `"raw"` emits `1, 2, 3, 4` under `"after"`. The `"after"` behavior is almost always what you actually want; stay on `"raw"` only if you specifically need per-match isolation.
 
+### Preset prompt activation metadata (native API)
+
+Preset-bound scripts can store `metadata.prompt_activation`:
+
+```ts
+{
+  source: "user_input" | "ai_output",
+  lifetime: "latest" | "chat",
+  mappings: [{
+    capture: "mode",        // "0" = full match, "1"–"99" = numbered group, or a named group
+    value: ["combat", "fight"], // any exact trimmed match; also accepts a single literal string
+    block_ids: ["rules", "format"], // IDs in this script's linked preset
+    enabled: true
+  }]
+}
+```
+
+Creation and update validate the preset's ownership and each target ID. Activation is unavailable on unbound scripts, including ordinary extension-owned scripts. Unlinking and standalone duplication remove this configuration. Preset exports preserve it and preset imports bind it to the imported preset; block IDs must be preserved or remapped by the importer.
+
+Mapping `value` accepts a literal string or an array of 1–64 nonblank strings, each at most 1,000 characters. Alternatives use OR semantics with trimming and the script's `i` flag; duplicates apply the row only once per capture. Legacy strings remain literal, including commas and newlines. The editor parses comma/newline-separated input (with CSV-style quoting) into this string-or-array representation; API clients should submit arrays for alternatives, not a comma-separated string. The same representation is used by preview, generation, and preset import/export. Captured text is still compared exactly; neither capture contents nor value entries are interpreted as regex patterns or split into words.
+
+Activation runs before prompt variables/rendering, independent of replacement Placement/Target. All mapped targets start disabled, regardless of profile defaults, and valid captures apply ordered runtime overrides. Category IDs expand to their category and children; radio exclusivity remains enforced. There are at most 64 mappings, 128 target IDs per row, 1000 matches per source, and 500,000 characters per source; regex execution uses the existing worker timeout.
+
+Find patterns accept only these bounded substitutions: `{{char}}`, `{{user}}`, `{{getchatvar::key}}`, and `{{presetvar::block-id::variable-id}}`. Arguments must be explicit, static IDs/keys. Preset references are checked against the linked preset on save. The latter uses typed, profile-over-preset-over-default values from the identified schema, even when its block is disabled. It does not read local/global runtime variables, render blocks, call extension interceptors, or recursively evaluate returned text. Every substituted value becomes a noncapturing literal atom, preserving capture numbering and preventing regex injection. Templates are forbidden inside character classes or immediately after an escape. Limits: 10,000 source-pattern characters, 32 inputs, 1,024 characters per value, 100,000 resolved-pattern characters. Missing, blank, non-scalar, and oversized inputs fail the entire rule closed with a diagnostic; numeric zero and boolean false remain valid.
+
+Assembly takes one pre-render input snapshot, resolving each rule once before history replay. Response processing reuses that snapshot. Display replacements use an owned server-side persisted snapshot, bypassing unrestricted find-macro evaluation and display caches for these templates; ordinary replacement macro behavior is unchanged. This bounded find behavior is independent of `substitute_macros` and available only on preset-linked activation scripts. Current inputs reinterpret old matches on each assembly; no event-time activation state is persisted.
+
+`latest` evaluates only the most recent visible message of the configured source; `chat` replays selected visible history. Message order, scoped script order, match order, then mapping order resolve conflicts. Existing min/max depth bounds apply. Assistant matches must finish at the true end of a successfully completed message, allowing trailing whitespace. Their effects become available to subsequent generations. The combined message is checked after Continue. Stopped output is ineligible; source text removed by response replacements is preserved per swipe and invalidated when the saved message is edited.
+
+`POST /api/v1/regex-scripts/test-activation` accepts `{ preset_id, find_regex, flags, content, prompt_activation, chat_id?, character_id?, persona_id?, connection_id? }` and returns `{ matches: [{ mapping_index, value, index }], resolved_find_regex?: string, error?: string }`. Context IDs must belong to the authenticated user. Preview reads saved state using the same resolver and coercion as assembly, applies matching profile values (otherwise the linked preset's defaults), and performs no writes, including no cleanup of stale profile bindings. Unsaved preset edits are excluded. Without a chat, chat keys are unavailable. Activation diagnostics are also available internally as `AssemblyResult.macroEnv.extra.promptActivation` with `states` and `errors`.
+
 ### Match behavior metadata
 
 The regex editor stores these optional host fields in `metadata`:

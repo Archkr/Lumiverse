@@ -85,6 +85,33 @@
   border-bottom: 1px solid color-mix(in srgb, var(--lumiverse-border) 50%, transparent);
 }
 
+.activationTargets {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 6px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.activationValues {
+  resize: vertical;
+  min-height: 3.5rem;
+}
+
+.actionTitleRow.activationMappingRow {
+  align-items: flex-start;
+}
+
+.activationTarget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  overflow-wrap: anywhere;
+}
+
 .sectionToggle {
   display: flex;
   align-items: center;

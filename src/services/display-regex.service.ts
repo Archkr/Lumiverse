@@ -14,6 +14,7 @@ import { populateLumiaLoomContext } from "./prompt-assembly.service";
 import { applyRegexScripts, hasRegexMatchAction } from "./regex-scripts.service";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
+import { readPromptActivation } from "../utils/regex-prompt-activation";
 
 initMacros();
 
@@ -290,6 +291,9 @@ export async function applyDisplayRegex(input: ApplyDisplayRegexInput): Promise<
   const env = buildEnvFromContext(input.userId, input.context);
   const dyn: Record<string, string> = { ...(input.dynamicMacros ?? {}) };
   if (env) {
+    env.extra.activationPreviewContext = {
+      chat_id: input.context.chat_id, character_id: input.context.character_id, persona_id: input.context.persona_id,
+    };
     if (input.context.role && dyn.role === undefined) {
       dyn.role = input.context.role;
     }
@@ -301,7 +305,8 @@ export async function applyDisplayRegex(input: ApplyDisplayRegexInput): Promise<
       mergeDynamicMacros(env, dyn);
     }
   }
-  const noCache = (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env?.LUMIVERSE_DISPLAY_REGEX_NO_CACHE === "1";
+  const noCache = input.scripts.some((script) => script.preset_id && readPromptActivation(script.metadata) && script.find_regex.includes("{{"))
+    || (globalThis as { Bun?: { env?: Record<string, string | undefined> } }).Bun?.env?.LUMIVERSE_DISPLAY_REGEX_NO_CACHE === "1";
   const cacheKey = displayRegexCacheKey(input.context.chat_id, content, placement, input.context.depth, input.scripts, dyn, input.resolvedFindPatterns, input.resolvedReplacements);
   if (!noCache) {
     const cached = DISPLAY_REGEX_CACHE.get(cacheKey);

@@ -280,6 +280,12 @@ function normalizeStoredMessageExtra(
     normalized.reasoningCarrierBySwipe,
     safeSwipeCount,
   );
+  const promptActivationBySwipe = normalizeObjectEntries(normalized.promptActivationBySwipe, safeSwipeCount);
+  if (normalized.promptActivation === null) promptActivationBySwipe[safeLegacySwipeId] = null;
+  else if (isPlainObject(normalized.promptActivation)) promptActivationBySwipe[safeLegacySwipeId] = normalized.promptActivation;
+  delete normalized.promptActivation;
+  if (promptActivationBySwipe.some((entry) => entry !== null)) normalized.promptActivationBySwipe = promptActivationBySwipe;
+  else delete normalized.promptActivationBySwipe;
 
   if (normalized.reasoning === null) {
     reasoningBySwipe[safeLegacySwipeId] = null;
@@ -377,6 +383,9 @@ function projectActiveSwipeExtra(
   swipeId: number,
 ): Record<string, unknown> {
   const projected: Record<string, unknown> = { ...extra };
+  const activation = Array.isArray(extra.promptActivationBySwipe) ? extra.promptActivationBySwipe[swipeId] : null;
+  if (isPlainObject(activation)) projected.promptActivation = activation;
+  else delete projected.promptActivation;
   const activeReasoning = Array.isArray(extra.reasoningBySwipe)
     ? extra.reasoningBySwipe[swipeId]
     : null;
@@ -450,6 +459,12 @@ function removeSwipeScopedExtraEntry(
   removedSwipeId: number,
 ): Record<string, unknown> {
   const normalized = normalizeStoredMessageExtra(extra, swipeCount, legacySwipeId);
+  if (Array.isArray(normalized.promptActivationBySwipe)) {
+    const entries = [...normalized.promptActivationBySwipe];
+    entries.splice(removedSwipeId, 1);
+    if (entries.some((entry) => entry !== null)) normalized.promptActivationBySwipe = entries;
+    else delete normalized.promptActivationBySwipe;
+  }
 
   if (Array.isArray(normalized.reasoningBySwipe)) {
     const reasoningBySwipe = [
@@ -546,6 +561,7 @@ function rowToMessage(row: any): Message {
 }
 
 const SWIPE_SCOPED_EXTRA_ARRAY_KEYS = [
+  "promptActivationBySwipe",
   "reasoningBySwipe",
   "reasoningDurationBySwipe",
   "tokenCountBySwipe",
@@ -2647,6 +2663,7 @@ export function patchMessageExtra(userId: string, id: string, extra: Record<stri
 
 /** Top-level extra keys that are persisted per-swipe (folded into `*BySwipe[]`). */
 const SWIPE_SCOPED_EXTRA_KEYS = [
+  "promptActivation",
   "reasoning",
   "reasoningDuration",
   "tokenCount",

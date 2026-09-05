@@ -90,6 +90,8 @@ function canTreatMacroSensitiveModesAsNativeReplace(
 }
 
 function isWorkerCapable(script: RegexScript, macroSensitiveModesAreSafe = false): boolean {
+  // Bounded preset inputs must be resolved against owned server-side snapshots.
+  if (script.preset_id && script.metadata?.prompt_activation && script.find_regex.includes('{{')) return false
   if (script.actions.length > 0) return false
   if (Array.isArray(script.metadata?.match_actions) && script.metadata.match_actions.length > 0) return false
   if (

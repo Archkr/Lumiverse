@@ -449,6 +449,34 @@ export function resolveProfile(
 // Block state application — mutates block enabled states in place
 // ---------------------------------------------------------------------------
 
+/** Read-only projection for regex previews; unlike normal resolution, never cleans up settings. */
+export function readActivationProfileVariables(userId: string, presetId: string, context: {
+  chatId?: string; personaId?: string; characterId?: string; connectionId?: string; isGroup?: boolean;
+}): PromptVariableValues | undefined {
+  const read = (key: string) => {
+    const binding = settingsSvc.getSetting(userId, key)?.value as PresetProfileBinding | undefined;
+    return binding?.preset_id && presetsSvc.getPreset(userId, binding.preset_id) ? binding : undefined;
+  };
+  const defaults = () => {
+    const current = read(defaultsKey(presetId));
+    const binding = current?.preset_id === presetId ? current : read(LEGACY_DEFAULTS_KEY);
+    return binding?.preset_id === presetId ? getProfilePromptVariables(userId, defaultsVariablesKey(presetId), binding) : undefined;
+  };
+  const candidates: Array<["chat" | "persona" | "character" | "connection", string | undefined]> = [
+    ["chat", context.chatId], ["persona", context.personaId],
+    ["character", context.isGroup ? undefined : context.characterId], ["connection", context.connectionId],
+  ];
+  for (const [scope, id] of candidates) {
+    if (!id) continue;
+    const binding = read(`presetProfile:${scope}:${id}`);
+    if (!binding) continue;
+    // A preview stays in the explicitly linked preset; never borrow another preset's values.
+    if (binding.preset_id !== presetId || binding.linked_to_defaults) return defaults();
+    return getProfilePromptVariables(userId, variablesKey(scope, id), binding);
+  }
+  return defaults();
+}
+
 export function applyProfileToBlocks(
   blocks: PromptBlock[],
   binding: PresetProfileBinding

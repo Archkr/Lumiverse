@@ -4,6 +4,23 @@ export type RegexTarget = "prompt" | "response" | "display";
 export type RegexMacroMode = "none" | "find" | "raw" | "escaped" | "after";
 export type RegexActionType = "send" | "append" | "effects";
 
+/** Stored in metadata.prompt_activation; only meaningful on preset-bound scripts. */
+export interface RegexPromptActivation {
+  source: "user_input" | "ai_output";
+  lifetime: "latest" | "chat";
+  mappings: RegexPromptActivationMapping[];
+}
+
+export interface RegexPromptActivationMapping {
+  /** 0 = full match, 1..99 = numbered group, otherwise a named capture. */
+  capture: string;
+  /** One exact capture value, or any of a list; trimmed and compared using the script's i flag. */
+  value: string | string[];
+  /** Stable block IDs in the linked preset. Category IDs include their children. */
+  block_ids: string[];
+  enabled: boolean;
+}
+
 export interface RegexActionSetStateEffect {
   type: "set_state";
   /** Fixed creator-defined chat-variable key. Capture references are not allowed. */

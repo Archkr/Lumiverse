@@ -24,6 +24,7 @@ export interface RegexCollectRequest {
   pattern: string;
   flags: string;
   input: string;
+  maxMatches?: number;
 }
 
 export interface RegexCaptureReplacementsRequest {
@@ -114,11 +115,12 @@ function substituteRegexCapturesFromArrayLike(
   );
 }
 
-function collectMatches(input: string, re: RegExp): CollectedMatch[] {
+function collectMatches(input: string, re: RegExp, maxMatches = Infinity): CollectedMatch[] {
   const matches: CollectedMatch[] = [];
   if (re.global || re.sticky) {
     let match: RegExpExecArray | null;
     while ((match = re.exec(input)) !== null) {
+      if (matches.length >= maxMatches) throw new Error("Regex match limit exceeded");
       matches.push({
         fullMatch: match[0],
         index: match.index,
@@ -206,7 +208,7 @@ export function runRegexRequest(data: RegexRequest): unknown {
   }
 
   if (data.op === "collect") {
-    return collectMatches(input, re);
+    return collectMatches(input, re, data.maxMatches);
   }
 
   if (data.op === "capture-replacements") {

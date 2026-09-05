@@ -4,6 +4,20 @@ export type RegexTarget = 'prompt' | 'response' | 'display'
 export type RegexMacroMode = 'none' | 'find' | 'raw' | 'escaped' | 'after'
 export type RegexActionType = 'send' | 'append' | 'effects'
 
+export interface RegexPromptActivation {
+  source: 'user_input' | 'ai_output'
+  lifetime: 'latest' | 'chat'
+  mappings: RegexPromptActivationMapping[]
+}
+
+export interface RegexPromptActivationMapping {
+  capture: string
+  /** Exact value or any of a list; strings remain literal for backward compatibility. */
+  value: string | string[]
+  block_ids: string[]
+  enabled: boolean
+}
+
 export interface RegexActionSetStateEffect {
   type: 'set_state'
   key: string

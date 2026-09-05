@@ -76,6 +76,67 @@ You can select multiple placements for the same script.
 
 ---
 
+## Activate Prompt Blocks from Matches
+
+A regex linked to a preset can automatically activate that preset's prompt blocks. In the Regex Scripts panel, link the script to the intended preset, edit it, and enable **Activate prompt blocks from matches**.
+
+1. Set **Find regex** and **Flags**. Activation uses the original message text. Patterns can include the bounded inputs described below.
+2. Choose **User message** or **Assistant capture block** as the source.
+3. Add a mapping: choose a capture, one or more values in **Equals (any of)**, and the prompt blocks to enable or disable. Separate alternatives with commas or put one per line. `0` means the full match, `1`–`99` select numbered groups, and a name such as `mode` selects a named group.
+4. Choose **Latest message from this source**, or **Until changed by another match** to replay state across the conversation.
+5. Enter sample text in **Live Test**. **Activation preview** shows matched values and their mapped targets.
+
+Any listed value can trigger the row's action. Values are trimmed before exact comparison; the `i` flag makes both matching and mapping case-insensitive. For example, `combat, fight, battle` enables or disables the same blocks when any one is captured. The find pattern must still match the desired words; adding Equals values does not expand the regex. Each row supports up to 64 values of 1,000 characters each. Blank separators are ignored. To match a literal comma, quote the value: `"hello, world", greetings`. Inside quotes, use `""` for a literal quote. Existing single-value mappings retain their exact meaning, including commas.
+
+Use separate rows for different captures, targets, or actions. Select a category to address the category and its contents. Radio categories retain only one enabled child.
+
+### Bounded find-pattern inputs
+
+For preset-linked activation scripts, Find regex supports these read-only inputs:
+
+| Input | Value |
+| --- | --- |
+| `{{char}}` | Character's effective name |
+| `{{user}}` | Persona name, or `User` |
+| `{{getchatvar::desired_mode}}` | The explicitly named saved chat variable |
+| `{{presetvar::block-id::variable-id}}` | That block's typed variable selection or default, including when the block is disabled |
+
+Use **Bounded find-pattern inputs** in the editor to append names, a chat key, or a preset variable selected by block/name. The preset picker inserts stable IDs, not a potentially ambiguous variable name. Saved profile selections override preset selections; missing selections use the creator's default. Select variables insert the option's value, not its label or ID.
+
+For example, `<mode>(?<mode>{{getchatvar::desired_mode}})</mode>\s*$` can capture the saved desired mode in an assistant's terminal control block. Map capture `mode`, value `combat`, to the combat blocks.
+
+Inputs are resolved once before activation from saved state. They are escaped as literal regex atoms: a saved `combat|peace` matches those exact characters, not either alternative. Inputs cannot appear inside character classes. Missing, blank, or oversized values skip the whole rule and appear as preview/assembly diagnostics. Zero and false are valid values. There is no recursive macro expansion, setter execution, or access to runtime `getvar`/`var` values. Text that looks like a macro inside a saved value remains literal text.
+
+This works independently of **Macro substitution**. The script's replacement actions use the same bounded find resolver; their replacement settings remain unchanged. Inputs are limited to 32 per pattern and 1,024 characters per value.
+
+Preview reads the current chat, character, persona, connection, and matching profile's saved values. When the current profile belongs to a different preset, it uses the linked preset's defaults instead. Unsaved Loom edits are not included. Changing a saved input re-evaluates earlier matches on the next generation; it does not preserve an event-time snapshot.
+
+### User keywords
+
+Use `\b(combat|fight)\b` with flags `gi`. Map capture `0`, Equals `combat, fight`, to your combat instruction blocks. A user message containing either word activates those blocks for its reply.
+
+### Assistant capture blocks
+
+An always-enabled prompt should tell the assistant when to end its message with a control block, for example:
+
+```xml
+<prompt-state>combat</prompt-state>
+```
+
+Use `<prompt-state>(?<mode>[^<]+)</prompt-state>` as the pattern. Map capture `mode`, value `combat`, to the blocks to enable. An additional mapping for `peace` can disable those blocks. For multiple independent captures, include them in one complete control-block pattern and map each capture separately.
+
+Assistant activation requires the match to end at the actual end of the completed message, apart from whitespace. Partial or stopped generations do not activate blocks. Activation applies to the next generation. Continuing a response checks the combined message. Keep the instructions describing the control format outside the blocks waiting for activation.
+
+### State and text replacement
+
+Mapped blocks start off until activated, even if preset/profile defaults enable them. A matching rule can also enable a block whose saved default is off. Existing generation-type and character-tag restrictions still apply. Unmapped blocks keep their normal state. Disabling/removing the activation rule restores ordinary preset/profile behavior.
+
+The latest source message replaces earlier matches in **Latest message** mode. **Until changed** preserves activation until a later mapping disables it; a non-match makes no change. Later messages win conflicts, then script order (global, character, chat), then match and mapping order. State belongs to the selected conversation history: edits, deletions, swipes, and forks are reflected on the next assembly, and previews never change saved preset states. Depth limits still constrain which messages are eligible.
+
+Activation is independent of the normal Placement/Target replacement settings. Use `$&` as the replacement to preserve matched text. A response-target cleanup can remove an assistant control block: its source is preserved per swipe for activation. Editing the saved message invalidates that preserved source and evaluates the edited text.
+
+Only blocks belonging to the linked preset can be targeted. Preset exports include mappings; standalone duplication and unlinking remove them. If a target is deleted or replaced with a new ID, update the mapping in the editor.
+
 ## Associative Regex Actions
 
 Associative regex actions turn elements in replacement HTML into choices. This is useful for interactive scene cards, CYOA responses, suggested dialogue, loadout selectors, and similar interfaces.

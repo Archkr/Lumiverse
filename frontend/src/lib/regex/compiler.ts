@@ -519,6 +519,8 @@ export function applyDisplayRegex(
     if (script.max_depth !== null && context.depth > script.max_depth) continue
 
     let findRegex = script.find_regex
+    // Owned bounded inputs are backend-only; legacy local callers must fail closed.
+    if (script.preset_id && script.metadata?.prompt_activation && findRegex.includes('{{')) continue
     if (resolvesFindMacros(script)) {
       const preResolvedFind = context.resolvedFindPatterns?.get(script.id)
       if (preResolvedFind !== undefined) {
@@ -712,6 +714,7 @@ export async function applyDisplayRegexLocalLoop(
     if (script.max_depth !== null && context.depth > script.max_depth) continue
 
     let findRegex = script.find_regex
+    if (script.preset_id && script.metadata?.prompt_activation && findRegex.includes('{{')) continue
     if (resolvesFindMacros(script)) {
       const preResolvedFind = context.resolvedFindPatterns?.get(script.id)
       if (preResolvedFind !== undefined) {

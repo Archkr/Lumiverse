@@ -7,6 +7,7 @@ import type {
   UpdateRegexScriptInput,
   RegexScriptExport,
   RegexTarget,
+  RegexPromptActivation,
 } from '@/types/regex'
 
 export const regexApi = {
@@ -98,6 +99,11 @@ export const regexApi = {
     match_actions?: string[]
   }) {
     return post<{ result: string; matches: number; error?: string }>('/regex-scripts/test', params)
+  },
+
+  testActivation(params: { preset_id: string; find_regex: string; flags: string; content: string; prompt_activation: RegexPromptActivation;
+    chat_id?: string; character_id?: string; persona_id?: string; connection_id?: string }) {
+    return post<{ matches: Array<{ mapping_index: number; value: string; index: number }>; error?: string; resolved_find_regex?: string }>('/regex-scripts/test-activation', params)
   },
 
   reportPerformance(id: string, payload: { elapsed_ms: number; timed_out?: boolean; threshold_ms?: number; source?: RegexPerformanceMetadata['source'] }) {

@@ -11,7 +11,8 @@ import { regexApi } from '@/api/regex'
 import { toast } from '@/lib/toast'
 import { useFolders } from '@/hooks/useFolders'
 import FolderDropdown from '@/components/shared/FolderDropdown'
-import type { RegexPlacement, RegexTarget, RegexScope, RegexMacroMode, RegexAction, RegexActionEffect } from '@/types/regex'
+import type { RegexPlacement, RegexTarget, RegexScope, RegexMacroMode, RegexAction, RegexActionEffect, RegexPromptActivation } from '@/types/regex'
+import RegexPromptActivationEditor from './RegexPromptActivationEditor'
 import styles from './RegexEditorModal.module.css'
 import clsx from 'clsx'
 
@@ -109,6 +110,8 @@ export default function RegexEditorModal() {
   const updateRegexScript = useStore((s) => s.updateRegexScript)
   const activeCharacterId = useStore((s) => s.activeCharacterId)
   const activeChatId = useStore((s) => s.activeChatId)
+  const activePersonaId = useStore((s) => s.activePersonaId)
+  const activeProfileId = useStore((s) => s.activeProfileId)
 
   const findPresets = useMemo(
     () =>
@@ -159,6 +162,7 @@ export default function RegexEditorModal() {
   const [findRegex, setFindRegex] = useState('')
   const [replaceString, setReplaceString] = useState('')
   const [actions, setActions] = useState<RegexAction[]>([])
+  const [promptActivation, setPromptActivation] = useState<RegexPromptActivation | null>(null)
   const [flags, setFlags] = useState('gi')
   const [placement, setPlacement] = useState<RegexPlacement[]>(['ai_output'])
   const [target, setTarget] = useState<RegexTarget[]>(['response'])
@@ -182,6 +186,7 @@ export default function RegexEditorModal() {
   // Live test
   const [testInput, setTestInput] = useState('')
   const [testResult, setTestResult] = useState<{ result: string; matches: number; error?: string } | null>(null)
+  const [resolvedActivationFind, setResolvedActivationFind] = useState<string | null>(null)
 
   useEffect(() => {
     if (script) {
@@ -190,6 +195,7 @@ export default function RegexEditorModal() {
       setFindRegex(script.find_regex)
       setReplaceString(script.replace_string)
       setActions(script.actions || [])
+      setPromptActivation(script.preset_id ? script.metadata?.prompt_activation ?? null : null)
       setFlags(script.flags)
       setPlacement([...script.placement])
       setTarget([...script.target])
@@ -218,7 +224,10 @@ export default function RegexEditorModal() {
 
   // Live test effect
   useEffect(() => {
-    if (!testInput || !findRegex) {
+    let current = true
+    setTestResult(null)
+    const testPattern = promptActivation && script?.preset_id && findRegex.includes('{{') ? resolvedActivationFind : findRegex
+    if (!testInput || !testPattern) {
       setTestResult(null)
       return
     }
@@ -229,19 +238,19 @@ export default function RegexEditorModal() {
           ...(repeatBack ? ['repeat_back'] : []),
         ]
         const res = await regexApi.testRegex({
-          find_regex: findRegex,
+          find_regex: testPattern,
           replace_string: replaceString,
           flags,
           content: testInput,
           match_actions: matchActions,
         })
-        setTestResult(res)
+        if (current) setTestResult(res)
       } catch {
-        setTestResult(null)
+        if (current) setTestResult(null)
       }
     }, 300)
-    return () => clearTimeout(timer)
-  }, [testInput, findRegex, replaceString, flags, moveBehavior, repeatBack])
+    return () => { current = false; clearTimeout(timer) }
+  }, [testInput, findRegex, replaceString, flags, moveBehavior, repeatBack, promptActivation, script?.preset_id, resolvedActivationFind])
 
   const handleSave = useCallback(async () => {
     if (!scriptId) return
@@ -275,13 +284,13 @@ export default function RegexEditorModal() {
         min_depth: minDepth ? parseInt(minDepth) : null,
         max_depth: maxDepth ? parseInt(maxDepth) : null,
         substitute_macros: substituteMacros,
-        metadata: updateRegexMetadata(
+        metadata: { ...updateRegexMetadata(
           script.metadata,
           moveBehavior,
           repeatBack,
           repeatPosition,
           repeatRawMatch,
-        ),
+        ), prompt_activation: promptActivation },
         trim_strings: trimStrings ? trimStrings.split(',').map((s) => s.trim()).filter(Boolean) : [],
         sort_order: sortOrder === '' ? 0 : (parseInt(sortOrder, 10) || 0),
         run_on_edit: runOnEdit,
@@ -292,7 +301,7 @@ export default function RegexEditorModal() {
     } catch (err: any) {
       toast.error(err.body?.error || err.message)
     }
-  }, [scriptId, script, activeCharacterId, activeChatId, name, userScriptId, findRegex, replaceString, actions, flags, placement, target, scope, minDepth, maxDepth, substituteMacros, moveBehavior, repeatBack, repeatPosition, repeatRawMatch, trimStrings, sortOrder, runOnEdit, description, folder, updateRegexScript, closeModal, tr])
+  }, [scriptId, script, activeCharacterId, activeChatId, name, userScriptId, findRegex, replaceString, actions, promptActivation, flags, placement, target, scope, minDepth, maxDepth, substituteMacros, moveBehavior, repeatBack, repeatPosition, repeatRawMatch, trimStrings, sortOrder, runOnEdit, description, folder, updateRegexScript, closeModal, tr])
 
   if (!script) return null
 
@@ -514,6 +523,31 @@ export default function RegexEditorModal() {
               />
             </div>
           </div>
+
+          <RegexPromptActivationEditor
+            presetId={script.preset_id ?? null}
+            value={promptActivation}
+            onChange={setPromptActivation}
+            findRegex={findRegex}
+            flags={flags}
+            testInput={testInput}
+            chatId={activeChatId ?? undefined}
+            characterId={activeCharacterId ?? undefined}
+            personaId={activePersonaId ?? undefined}
+            connectionId={activeProfileId ?? undefined}
+            onInsertFindInput={(token) => setFindRegex((pattern) => pattern + token)}
+            onResolvedFindPattern={setResolvedActivationFind}
+            onExample={(source) => {
+              setFindRegex(source === 'user_input' ? '\\b(fight|combat)\\b' : '<prompt-state>(?<mode>[^<]+)</prompt-state>')
+              setFlags('gi')
+              setReplaceString('$&')
+              setPromptActivation({ source, lifetime: 'latest', mappings: [{
+                capture: source === 'user_input' ? '0' : 'mode', value: source === 'user_input' ? ['combat', 'fight'] : 'combat',
+                block_ids: promptActivation?.mappings[0]?.block_ids ?? [], enabled: true,
+              }] })
+              setTestInput(source === 'user_input' ? 'Prepare for combat.' : 'The battle begins.\n<prompt-state>combat</prompt-state>')
+            }}
+          />
 
           {/* Associative actions */}
           <div className={styles.section}>

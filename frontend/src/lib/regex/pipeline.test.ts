@@ -187,6 +187,11 @@ describe('isolated regex pipeline', () => {
     expect(canApplyDisplayRegexInWorker('ordinary response', [
       script('match-action', { metadata: { match_actions: ['move_top'] } }),
     ])).toBe(false)
+    expect(canApplyDisplayRegexInWorker('combat', [
+      script('bounded', { find_regex: '{{getchatvar::mode}}', preset_id: 'preset', metadata: { prompt_activation: {
+        source: 'user_input', lifetime: 'latest', mappings: [{ capture: '0', value: 'combat', block_ids: ['rules'], enabled: true }],
+      } } }),
+    ])).toBe(false)
   })
 
   test('an edit re-syncs the session overlay from the persisted row instead of dropping quarantine', () => {

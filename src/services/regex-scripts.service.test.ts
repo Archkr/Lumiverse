@@ -10,6 +10,8 @@ import {
   getRegexScript,
   getRegexScriptByScriptId,
   getRegexScriptsByPresetId,
+  getPresetActivationScripts,
+  duplicateRegexScript,
   getSpindleExtensionRegexFolderVersion,
   importRegexScripts,
   importCharacterBoundRegexScripts,
@@ -25,6 +27,7 @@ import {
   updateRegexScript,
 } from "./regex-scripts.service";
 import { initMacros } from "../macros";
+import { createActivationInputSnapshot } from "../utils/regex-activation-inputs";
 import type { RegexScript } from "../types/regex-script";
 
 const USER_ID = "u1";
@@ -82,6 +85,7 @@ beforeAll(() => {
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (key, user_id)
   )`);
+  db.run("CREATE TABLE presets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, prompt_order TEXT NOT NULL)");
 
   db.run(`CREATE TABLE regex_scripts (
     id TEXT PRIMARY KEY,
@@ -123,6 +127,75 @@ beforeEach(() => {
   const db = getDb();
   db.query("DELETE FROM regex_scripts").run();
   db.query("DELETE FROM settings").run();
+  db.query("DELETE FROM presets").run();
+});
+
+describe("preset prompt activation mappings", () => {
+  const activation = { source: "user_input", lifetime: "latest", mappings: [
+    { capture: "0", value: "combat", block_ids: ["rules"], enabled: true },
+  ] };
+  function seedPreset(id = "preset-a", user = USER_ID) {
+    getDb().query("INSERT INTO presets VALUES (?, ?, ?)").run(id, user, JSON.stringify([{ id: "rules" }]));
+  }
+  function create(preset_id: string | null = "preset-a", metadata = { prompt_activation: activation }) {
+    return createRegexScript(USER_ID, { name: "Activation", find_regex: "combat", preset_id, metadata }, { activePresetId: "preset-a" });
+  }
+  test("requires an owned preset and targets belonging to it", () => {
+    expect(create(null)).toBe("Prompt activation requires a linked preset");
+    seedPreset("private", "someone-else");
+    expect(create("private")).toBe("Linked prompt activation preset not found");
+    seedPreset();
+    expect(create("preset-a", { prompt_activation: { ...activation, mappings: [{ ...activation.mappings[0], block_ids: ["foreign"] }] } }))
+      .toBe("Prompt activation targets must belong to the linked preset");
+    expect(typeof create()).toBe("object");
+  });
+  test("rejects malformed mappings and unsupported macro patterns", () => {
+    seedPreset();
+    expect(create("preset-a", { prompt_activation: { ...activation, mappings: [] } })).toContain("mappings");
+    expect(createRegexScript(USER_ID, { name: "Bad", find_regex: "{{getvar::pattern}}", preset_id: "preset-a", metadata: { prompt_activation: activation } })).toContain("Unsupported activation input");
+    expect(typeof createRegexScript(USER_ID, { name: "Bounded", find_regex: "{{getchatvar::mode}}", flags: "u", preset_id: "preset-a", metadata: { prompt_activation: activation } })).toBe("object");
+    expect(createRegexScript(USER_ID, { name: "Unknown", find_regex: "{{presetvar::rules::missing}}", preset_id: "preset-a", metadata: { prompt_activation: activation } })).toContain("Unknown linked preset variable");
+  });
+  test("unlinking and standalone duplication remove the preset-only capability", () => {
+    seedPreset();
+    const original = create() as RegexScript;
+    expect(duplicateRegexScript(USER_ID, original.id)?.metadata.prompt_activation).toBeUndefined();
+    const unlinked = updateRegexScript(USER_ID, original.id, { preset_id: null }) as RegexScript;
+    expect(unlinked.metadata.prompt_activation).toBeUndefined();
+    expect(updateRegexScript(USER_ID, unlinked.id, { metadata: { prompt_activation: activation } })).toContain("linked preset");
+  });
+  test("uses per-preset enablement across tab switches and respects script scope", () => {
+    seedPreset();
+    const original = create() as RegexScript;
+    const scoped = createRegexScript(USER_ID, { name: "Chat", find_regex: "combat", preset_id: "preset-a", scope: "chat", scope_id: "chat-1", metadata: { prompt_activation: activation } }, { activePresetId: "preset-a" }) as RegexScript;
+    switchPresetBoundRegexScripts(USER_ID, { previousPresetId: "preset-a", presetId: "other" });
+    expect(mustGetScript(original.id).disabled).toBe(true);
+    expect(getPresetActivationScripts(USER_ID, "preset-a", { chatId: "chat-1" }).map((s) => s.id)).toEqual([original.id, scoped.id]);
+    expect(getPresetActivationScripts(USER_ID, "preset-a", { chatId: "chat-2" }).map((s) => s.id)).toEqual([original.id]);
+    expect(getPresetActivationScripts(USER_ID, "other", { chatId: "chat-1" })).toEqual([]);
+    expect(mustGetScript(original.id).disabled).toBe(true);
+  });
+  test("preset exports round-trip mappings into the new preset", () => {
+    seedPreset();
+    seedPreset("preset-b");
+    create();
+    const exported = exportRegexScripts(USER_ID, { presetId: "preset-a" });
+    expect(exported.scripts[0].metadata.prompt_activation).toEqual(activation);
+    const imported = importPresetBoundRegexScripts(USER_ID, "preset-b", "Imported", exported.scripts);
+    expect(imported.imported).toBe(1);
+    expect(getPresetActivationScripts(USER_ID, "preset-b", { chatId: "chat" })[0].metadata.prompt_activation).toEqual(activation);
+  });
+  test("persists multi-value edits and preserves them through preset export/import", () => {
+    seedPreset();
+    seedPreset("preset-b");
+    const original = create() as RegexScript;
+    const next = { ...activation, mappings: [{ ...activation.mappings[0], value: ["combat", "fight", "hello, world"] }] };
+    expect(typeof updateRegexScript(USER_ID, original.id, { metadata: { prompt_activation: next } })).toBe("object");
+    expect(mustGetScript(original.id).metadata.prompt_activation).toEqual(next);
+    const exported = exportRegexScripts(USER_ID, { presetId: "preset-a" });
+    expect(importPresetBoundRegexScripts(USER_ID, "preset-b", "Imported", exported.scripts).imported).toBe(1);
+    expect(getPresetActivationScripts(USER_ID, "preset-b", { chatId: "chat" })[0].metadata.prompt_activation).toEqual(next);
+  });
 });
 
 describe("extension regex ownership", () => {
@@ -1233,6 +1306,19 @@ describe("trim string processing", () => {
 });
 
 describe("find-only macro processing", () => {
+  test("activation replacements use the bounded assembly snapshot regardless of macro mode or supplied templates", async () => {
+    const snapshot = createActivationInputSnapshot({ chatVariables: { mode: "combat.*" } });
+    for (const substitute_macros of ["none", "find", "raw", "escaped", "after"] as const) {
+      const script = runtimeScript({ preset_id: "preset", find_regex: "{{getchatvar::mode}}", replace_string: "matched", substitute_macros,
+        metadata: { prompt_activation: { source: "user_input", lifetime: "latest", mappings: [{ capture: "0", value: "combat.*", block_ids: ["rules"], enabled: true }] } } });
+      const env = { commit: false, variables: { local: new Map(), global: new Map(), chat: new Map([["mode", "changed"]]) },
+        dynamicMacros: {}, extra: { activationInputSnapshots: new Map([["preset", snapshot]]) } } as any;
+      const templates = { resolvedFindPatterns: new Map([[script.id, ".*"]]) };
+      expect(await applyRegexScripts("combat.* combatXYZ changed", [script], "ai_output", undefined, env, templates)).toBe("matched combatXYZ changed");
+      expect(env.variables.chat.get("mode")).toBe("changed");
+    }
+  });
+
   test("resolves the find pattern without resolving the replacement", async () => {
     const script = runtimeScript({
       find_regex: "{{upper::a}}",

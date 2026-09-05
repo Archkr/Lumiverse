@@ -1018,7 +1018,7 @@ export function useDisplayRegex(
   const templateCacheKey = useMemo(() => {
     const templates: Record<string, string> = {}
     for (const s of scriptsNeedingResolution) {
-      if (hasMacroSyntax(s.find_regex)) {
+      if (!(s.preset_id && s.metadata?.prompt_activation) && hasMacroSyntax(s.find_regex)) {
         templates[`find:${s.id}`] = s.find_regex
       }
       if (
@@ -1068,7 +1068,7 @@ export function useDisplayRegex(
 
     const templates: Record<string, string> = {}
     for (const s of scriptsNeedingResolution) {
-      if (hasMacroSyntax(s.find_regex)) {
+      if (!(s.preset_id && s.metadata?.prompt_activation) && hasMacroSyntax(s.find_regex)) {
         templates[`find:${s.id}`] = s.find_regex
       }
       if (

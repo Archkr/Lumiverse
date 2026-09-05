@@ -5,6 +5,8 @@ import { EventType, type EventMessage } from "../ws/events";
 import {
   addGroupMember,
   addSwipe,
+  deleteSwipe,
+  setSwipeScopedExtra,
   applyChatAppearance,
   branchChat,
   convertSoloChatToGroup,
@@ -27,6 +29,7 @@ import {
   setGroupMemberAlternateFields,
   updateMessage,
 } from "./chats.service";
+import { makePromptActivationSource, promptActivationSource } from "./prompt-activation.service";
 
 function initChatsTestDb(): void {
   closeDatabase();
@@ -472,6 +475,36 @@ describe("recent chats", () => {
     expect(result.total).toBe(2);
     expect(result.data.map((chat) => chat.latest_chat_id)).toEqual(["group", "c2-only"]);
     expect(result.data[0].is_group).toBe(true);
+  });
+
+  test("keeps activation source on the generated swipe through navigation, deletion, and edits", () => {
+    seedChat("chat-1", "c1", "Swipe chat", "{}", 100);
+    seedMessage("msg-1", "chat-1", "first swipe", {});
+    addSwipe("u1", "msg-1", "second swipe");
+    cycleSwipe("u1", "msg-1", "left");
+    setSwipeScopedExtra("u1", "msg-1", 1, {
+      promptActivation: makePromptActivationSource("second swipe", "preset", true, "second swipe\n<state>combat</state>"),
+    });
+    expect(getMessage("u1", "msg-1")!.extra.promptActivation).toBeUndefined();
+    const second = cycleSwipe("u1", "msg-1", "right")!;
+    expect(promptActivationSource(second, "preset")).toBe("second swipe\n<state>combat</state>");
+    deleteSwipe("u1", "msg-1", 0);
+    expect(getMessage("u1", "msg-1")!.swipe_id).toBe(0);
+    expect(promptActivationSource(getMessage("u1", "msg-1")!, "preset")).toContain("<state>combat</state>");
+    updateMessage("u1", "msg-1", { content: "Edited", skipChunkRebuild: true });
+    expect(promptActivationSource(getMessage("u1", "msg-1")!, "preset")).toBe("Edited");
+  });
+
+  test("a branch only inherits activation sources up to its fork point", () => {
+    seedChat("chat-1", "c1", "Branch chat", "{}", 100);
+    seedMessage("msg-1", "chat-1", "before activation", {}, { index: 0 });
+    seedMessage("msg-2", "chat-1", "after activation", {
+      promptActivation: makePromptActivationSource("after activation", "preset", true, "after activation\n<state>combat</state>"),
+    }, { index: 1 });
+    const branch = branchChat("u1", "chat-1", "msg-1")!;
+    const messages = getMessages("u1", branch.id);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].extra.promptActivation).toBeUndefined();
   });
 
   test("keeps reasoning scoped to the swipe it belongs to", () => {

@@ -321,11 +321,12 @@ export async function regexCollectSandboxed(
   flags: string,
   input: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  maxMatches?: number,
 ): Promise<SandboxMatch[]> {
   assertCompilable(pattern, flags);
   return getPool().run<SandboxMatch[]>(
     "collect",
-    { pattern, flags, input },
+    { pattern, flags, input, maxMatches },
     timeoutMs,
   );
 }

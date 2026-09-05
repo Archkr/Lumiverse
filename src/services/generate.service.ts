@@ -91,6 +91,8 @@ import * as councilProfilesSvc from "./council/council-profiles.service";
 import * as tokenizerSvc from "./tokenizer.service";
 import * as breakdownSvc from "./breakdown.service";
 import * as regexScriptsSvc from "./regex-scripts.service";
+import { makePromptActivationSource } from "./prompt-activation.service";
+import { readPromptActivation } from "../utils/regex-prompt-activation";
 import * as pool from "./generation-pool.service";
 import * as summarizePool from "./summarize-pool.service";
 import {
@@ -3331,8 +3333,10 @@ export async function startGeneration(
             (mergedParams.seed + lifecycle.targetSwipeIdx) % MAX_SEED;
         }
 
-        // Resolve preset name for breakdown display
-        const presetId = input.preset_id || connection.preset_id;
+        // Use the preset assembly actually selected, including profile overrides.
+        const presetId = typeof pipeline.macroEnv?.extra.presetId === "string"
+          ? pipeline.macroEnv.extra.presetId
+          : input.messages ? input.preset_id || connection.preset_id : undefined;
         if (presetId) {
           const preset = presetsSvc.getPreset(input.userId, presetId);
           if (preset) {
@@ -4024,6 +4028,13 @@ async function runGeneration(
       messageId = created.id;
     }
 
+    if (messageId && lifecycle.generationType !== "impersonate") {
+      const saved = chatsSvc.getMessage(userId, messageId);
+      const savedContent = saved?.swipes[lifecycle.streamingSwipeId ?? saved.swipe_id] ?? closedContent;
+      chatsSvc.setSwipeScopedExtra(userId, messageId, lifecycle.streamingSwipeId, {
+        promptActivation: makePromptActivationSource(savedContent, lifecycle.presetId, false),
+      });
+    }
     return { messageId, content: closedContent };
   }
 
@@ -4397,6 +4408,16 @@ async function runGeneration(
         fullContent = trimIncompleteStreamTail(fullContent);
       }
 
+      // Capture the complete, combined source before response regex can hide control blocks.
+      const preserveActivationSource = lifecycle.presetId && regexScriptsSvc.getPresetActivationScripts(
+        userId, lifecycle.presetId, { chatId, characterId: lifecycle.targetCharacterId },
+      ).some((script) => readPromptActivation(script.metadata)?.source === "ai_output");
+      const activationSource = preserveActivationSource
+        ? (lifecycle.continueMessageId
+          ? (lifecycle.continueOriginalContent ?? "") + (lifecycle.continuePostfix ?? "") + fullContent
+          : fullContent)
+        : undefined;
+
       // Apply regex scripts (response target) to completed content
       {
         const responseScripts = regexScriptsSvc.getActiveScripts(userId, {
@@ -4561,6 +4582,9 @@ async function runGeneration(
       // button as soon as the message itself is safely stored.
       {
         const immediateExtra: Record<string, any> = {};
+        if (lifecycle.generationType !== "impersonate") {
+          immediateExtra.promptActivation = makePromptActivationSource(fullContent, lifecycle.presetId, true, activationSource);
+        }
         if (fullReasoning) immediateExtra.reasoning = fullReasoning;
         const carrier = storedReasoningCarrier();
         if (carrier && lifecycle.generationType !== "impersonate") {

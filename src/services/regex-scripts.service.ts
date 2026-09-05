@@ -33,6 +33,9 @@ import {
   decorateRegexActionReplacements,
 } from "../utils/regex-actions";
 import { applyRegexTrimStrings } from "../utils/regex-trim";
+import { readPromptActivation, validatePromptActivation } from "../utils/regex-prompt-activation";
+import { activationPatternForValidation, resolveActivationFindPattern, type ActivationInputSnapshot } from "../utils/regex-activation-inputs";
+import type { PromptBlock } from "../types/preset";
 
 const REGEX_SCRIPT_TIMEOUT_MS = 500;
 const REGEX_SLOW_WARNING_MS = 5_000;
@@ -515,11 +518,13 @@ function validateRegex(
   pattern: string,
   flags: string,
   substituteMacros: RegexScript["substitute_macros"] = "none",
+  activation = false,
 ): string | null {
   if (pattern.length > MAX_PATTERN_LENGTH) return "find_regex exceeds maximum length";
   if (!validateFlags(flags)) return "Invalid flags — allowed: d, g, i, m, s, u, v, y";
   try {
-    const compilePattern = substituteMacros !== "none" && hasMacroSyntax(pattern)
+    const compilePattern = activation ? activationPatternForValidation(pattern)
+      : substituteMacros !== "none" && hasMacroSyntax(pattern)
       ? sanitizeRegexPatternForValidation(pattern)
       : pattern;
     new RegExp(compilePattern, flags);
@@ -904,8 +909,10 @@ export function createRegexScript(
   }
   const err = validateInput(nextInput, true);
   if (err) return err;
+  const activationError = validatePromptActivationBinding(userId, nextInput);
+  if (activationError) return activationError;
 
-  const regexErr = validateRegex(nextInput.find_regex, nextInput.flags ?? "gi", nextInput.substitute_macros ?? "none");
+  const regexErr = validateRegex(nextInput.find_regex, nextInput.flags ?? "gi", nextInput.substitute_macros ?? "none", !!readPromptActivation(nextInput.metadata));
   if (regexErr) return regexErr;
 
   const id = crypto.randomUUID();
@@ -1033,12 +1040,20 @@ export function updateRegexScript(
     const pattern = nextInput.find_regex ?? existing.find_regex;
     const flags = nextInput.flags ?? existing.flags;
     const substituteMacros = nextInput.substitute_macros ?? existing.substitute_macros;
-    const regexErr = validateRegex(pattern, flags, substituteMacros);
+    const regexErr = validateRegex(pattern, flags, substituteMacros, !!nextPresetId && !!readPromptActivation(nextInput.metadata ?? existing.metadata));
     if (regexErr) return regexErr;
   }
 
   const err = validateInput(nextInput, false);
   if (err) return err;
+
+  // Unlinking removes the preset-only capability. Other edits cannot install it unbound.
+  if (hasPresetIdUpdate && !nextPresetId) {
+    nextInput.metadata = { ...(nextInput.metadata ?? existing.metadata) };
+    delete nextInput.metadata.prompt_activation;
+  }
+  const activationError = validatePromptActivationBinding(userId, { ...existing, ...nextInput, preset_id: nextPresetId });
+  if (activationError) return activationError;
 
   const fields: string[] = [];
   const values: any[] = [];
@@ -1158,6 +1173,8 @@ export function duplicateRegexScript(userId: string, id: string): RegexScript | 
 
   const newId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
+  const metadata = { ...existing.metadata };
+  delete metadata.prompt_activation; // Duplicates are unbound.
 
   getDb()
     .query(
@@ -1186,7 +1203,7 @@ export function duplicateRegexScript(userId: string, id: string): RegexScript | 
       existing.sort_order,
       existing.description,
       existing.folder,
-      JSON.stringify(existing.metadata),
+      JSON.stringify(metadata),
       now,
       now
     );
@@ -1412,6 +1429,49 @@ export function getRegexScriptByScriptId(
 
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
+export function validatePromptActivationBinding(userId: string, input: CreateRegexScriptInput): string | null {
+  const raw = input.metadata?.prompt_activation;
+  const error = validatePromptActivation(raw);
+  if (error || raw == null) return error;
+  if (typeof input.preset_id !== "string" || !input.preset_id.trim() || input.preset_id.length > 200) return "Prompt activation requires a linked preset";
+  const preset = getDb().query("SELECT prompt_order FROM presets WHERE id = ? AND user_id = ?")
+    .get(input.preset_id, userId) as { prompt_order: string } | null;
+  if (!preset) return "Linked prompt activation preset not found";
+  const blocks = JSON.parse(preset.prompt_order) as PromptBlock[];
+  try {
+    activationPatternForValidation(input.find_regex, blocks);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const ids = new Set(blocks.map((block) => block.id));
+  const config = readPromptActivation(input.metadata)!;
+  if (config.mappings.some((mapping) => mapping.block_ids.some((id) => !ids.has(id)))) {
+    return "Prompt activation targets must belong to the linked preset";
+  }
+  return null;
+}
+
+/** Use the resolved preset's own enabled list, independent of another tab's active preset. */
+export function getPresetActivationScripts(
+  userId: string,
+  presetId: string,
+  context: { chatId: string; characterId?: string | null },
+): RegexScript[] {
+  const scripts = getRegexScriptsByPresetId(userId, presetId);
+  if (!scripts.some((script) => readPromptActivation(script.metadata))) return [];
+  const saved = readStoredPresetRegexIdsRecord(userId, presetId);
+  const enabledIds = new Set(saved.ids);
+  const scopeOrder = { global: 0, character: 1, chat: 2 };
+  return scripts.filter((script) =>
+    (saved.exists ? enabledIds.has(script.id) : !script.disabled)
+    && readPromptActivation(script.metadata)
+    && (script.scope === "global"
+      || (script.scope === "chat" && script.scope_id === context.chatId)
+      || (script.scope === "character" && script.scope_id === context.characterId)),
+  ).sort((a, b) => scopeOrder[a.scope] - scopeOrder[b.scope] || a.sort_order - b.sort_order || a.created_at - b.created_at)
+    .map((script) => ({ ...script, disabled: false }));
+}
+
 /**
  * Active scripts for a chat context, ordered global → character → chat then
  * sort_order, created_at. matchConditions/matchParams are the caller's column
@@ -1631,6 +1691,11 @@ export async function applyRegexScripts(
 ): Promise<string> {
   let result = content;
 
+  // Keep the assembly's pre-render snapshot through response processing. Other passes
+  // load owned, persisted inputs once per preset, never mutable macro variables.
+  const activationSnapshots: Map<string, ActivationInputSnapshot> = macroEnv?.extra.activationInputSnapshots ?? new Map();
+  if (macroEnv) macroEnv.extra.activationInputSnapshots = activationSnapshots;
+
   for (const script of scripts) {
     // Most callers load active scripts from the database, but keep the executor
     // safe for request-supplied lists and other snapshots too.
@@ -1650,7 +1715,20 @@ export async function applyRegexScripts(
       const macroOptions = macroOptionsForRegexScript(script);
       let findRegex = script.find_regex;
       const preResolvedFind = resolvedTemplates?.resolvedFindPatterns?.get(script.id);
-      if (preResolvedFind !== undefined) {
+      if (script.preset_id && readPromptActivation(script.metadata) && findRegex.includes("{{")) {
+        if (options?.outFingerprint) options.outFingerprint.cacheable = false;
+        let snapshot = activationSnapshots.get(script.preset_id);
+        if (!snapshot) {
+          const { loadActivationInputSnapshot } = await import("./regex-activation-inputs.service");
+          snapshot = loadActivationInputSnapshot(script.user_id, script.preset_id, {
+            chat_id: macroEnv?.chat?.id || undefined,
+            character_id: macroEnv?.extra.characterId || undefined,
+            ...(macroEnv?.extra.activationPreviewContext ?? {}),
+          }, scripts.filter((candidate) => candidate.preset_id === script.preset_id && readPromptActivation(candidate.metadata)).map((candidate) => candidate.find_regex));
+          activationSnapshots.set(script.preset_id, snapshot);
+        }
+        findRegex = resolveActivationFindPattern(findRegex, snapshot);
+      } else if (preResolvedFind !== undefined) {
         findRegex = preResolvedFind;
       } else if (macroEnv && script.substitute_macros !== "none") {
         findRegex = await resolveFindMacros(
