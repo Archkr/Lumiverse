@@ -7,6 +7,17 @@ const CHUB_HOSTS = new Set([
   'www.characterhub.org',
 ])
 
+const HUB_HOSTS = new Map<string, 'lumihub' | 'illarin'>([
+  ['lumi.spot', 'lumihub'],
+  ['www.lumi.spot', 'lumihub'],
+  ['illarin.xyz', 'illarin'],
+  ['www.illarin.xyz', 'illarin'],
+])
+
+export type CharacterSource =
+  | { provider: 'chub'; url: string; fullPath: string }
+  | { provider: 'lumihub' | 'illarin'; url: string }
+
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -72,6 +83,57 @@ export function chubSourceUrl(fullPath: string | null): string | null {
   if (!fullPath) return null
   const encodedPath = fullPath.split('/').map(encodeURIComponent).join('/')
   return `https://chub.ai/characters/${encodedPath}`
+}
+
+/** Accept supported attribution URLs, including hub profiles, or a Chub path. */
+export function parseCharacterSourceInput(value: string): CharacterSource | null {
+  let trimmed = value.trim()
+  if (!trimmed) return null
+
+  const host = trimmed.split(/[/?#]/, 1)[0].toLowerCase()
+  if (CHUB_HOSTS.has(host) || HUB_HOSTS.has(host)) trimmed = `https://${trimmed}`
+  if (trimmed.startsWith('//')) trimmed = `https:${trimmed}`
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed)
+      if (!['https:', 'http:'].includes(parsed.protocol) || parsed.username || parsed.password) return null
+
+      const provider = HUB_HOSTS.get(parsed.hostname)
+      if (provider) {
+        if (!parsed.pathname.split('/').some(Boolean)) return null
+        return { provider, url: parsed.href }
+      }
+      if (!CHUB_HOSTS.has(parsed.hostname)) return null
+      trimmed = parsed.href
+    } catch {
+      return null
+    }
+  }
+
+  const fullPath = parseChubSourceInput(trimmed)
+  return fullPath ? { provider: 'chub', fullPath, url: chubSourceUrl(fullPath)! } : null
+}
+
+/** Prefer an explicit source URL, falling back to legacy Chub card metadata. */
+export function readCharacterSourceUrl(extensions: unknown): string | null {
+  if (!isRecord(extensions)) return null
+  if (typeof extensions._lumiverse_source_url === 'string') {
+    const source = parseCharacterSourceInput(extensions._lumiverse_source_url)
+    if (source) return source.url
+  }
+  return chubSourceUrl(readChubFullPath(extensions))
+}
+
+/** Replace attribution without storing another provider's URL as a Chub slug. */
+export function setCharacterSource(
+  extensions: Record<string, any>,
+  source: CharacterSource | null,
+): Record<string, any> {
+  const next = setChubFullPath(extensions, source?.provider === 'chub' ? source.fullPath : null)
+  delete next._lumiverse_source_url
+  if (source && source.provider !== 'chub') next._lumiverse_source_url = source.url
+  return next
 }
 
 /** Update only source attribution fields, preserving all unrelated metadata. */

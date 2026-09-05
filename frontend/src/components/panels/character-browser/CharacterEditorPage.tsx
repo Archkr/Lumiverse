@@ -104,10 +104,9 @@ import {
   setGreetingTitle,
 } from '@/lib/greetingMetadata'
 import {
-  chubSourceUrl,
-  parseChubSourceInput,
-  readChubFullPath,
-  setChubFullPath,
+  parseCharacterSourceInput,
+  readCharacterSourceUrl,
+  setCharacterSource,
 } from '@/lib/characterSource'
 
 const DEBOUNCE_MS = 2000
@@ -592,7 +591,7 @@ export default function CharacterEditorPage() {
     setAlternateGreetingIds((character.alternate_greetings || []).map(() => uuidv7()))
     setGreetingBackgroundPickerIndex(null)
     setAlternateCharacterName(character.extensions?.alternate_character_name || '')
-    setSourceLinkDraft(chubSourceUrl(readChubFullPath(character.extensions)) || '')
+    setSourceLinkDraft(readCharacterSourceUrl(character.extensions) || '')
     setSourceLinkError(null)
     setExtensionsJson(JSON.stringify(character.extensions || {}, null, 2))
     setJsonError(null)
@@ -887,8 +886,7 @@ export default function CharacterEditorPage() {
 
     return pendingExtensionsRef.current ?? character?.extensions ?? {}
   }, [extensionsJson, character?.extensions])
-  const chubFullPath = useMemo(() => readChubFullPath(workingExtensions), [workingExtensions])
-  const chubAttributionUrl = chubSourceUrl(chubFullPath)
+  const attributionUrl = useMemo(() => readCharacterSourceUrl(workingExtensions), [workingExtensions])
 
   // This report intentionally uses the editor's local draft state rather than
   // the saved card, so it remains useful while the user is still typing.
@@ -1108,19 +1106,19 @@ export default function CharacterEditorPage() {
     if (!value) {
       setSourceLinkDraft('')
       setSourceLinkError(null)
-      mutateExtensions((ext) => setChubFullPath(ext, null), true)
+      mutateExtensions((ext) => setCharacterSource(ext, null), true)
       return
     }
 
-    const fullPath = parseChubSourceInput(value)
-    if (!fullPath) {
+    const source = parseCharacterSourceInput(value)
+    if (!source) {
       setSourceLinkError(t('characterEditor.originalSourceInvalid'))
       return
     }
 
-    setSourceLinkDraft(chubSourceUrl(fullPath) || '')
+    setSourceLinkDraft(source.url)
     setSourceLinkError(null)
-    mutateExtensions((ext) => setChubFullPath(ext, fullPath), true)
+    mutateExtensions((ext) => setCharacterSource(ext, source), true)
   }, [mutateExtensions, sourceLinkDraft, t])
 
   const handleAvatarSelect = useCallback(
@@ -2327,16 +2325,16 @@ export default function CharacterEditorPage() {
                                 event.currentTarget.blur()
                               } else if (event.key === 'Escape') {
                                 event.preventDefault()
-                                setSourceLinkDraft(chubAttributionUrl || '')
+                                setSourceLinkDraft(attributionUrl || '')
                                 setSourceLinkError(null)
                               }
                             }}
                             placeholder={t('characterEditor.originalSourcePlaceholder')}
                             aria-invalid={sourceLinkError ? true : undefined}
                           />
-                          {chubAttributionUrl && (
+                          {attributionUrl && (
                           <a
-                            href={chubAttributionUrl}
+                            href={attributionUrl}
                             target="_blank"
                             rel="noreferrer"
                             className={styles.creatorSourceLink}

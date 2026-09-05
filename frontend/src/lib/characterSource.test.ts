@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
   chubSourceUrl,
+  parseCharacterSourceInput,
   parseChubSourceInput,
+  readCharacterSourceUrl,
   readChubFullPath,
+  setCharacterSource,
   setChubFullPath,
 } from './characterSource'
 
@@ -55,5 +58,91 @@ describe('character source attribution', () => {
       unrelated: true,
       chub: { description: 'keep' },
     })
+  })
+
+  test.each([
+    ['https://lumi.spot/@archkr', 'lumihub', 'https://lumi.spot/@archkr'],
+    ['lumi.spot/@archkr', 'lumihub', 'https://lumi.spot/@archkr'],
+    [' https://LUMI.SPOT/characters/card-id?view=full#details ', 'lumihub', 'https://lumi.spot/characters/card-id?view=full#details'],
+    ['https://www.lumi.spot/characters/card-id/', 'lumihub', 'https://www.lumi.spot/characters/card-id/'],
+    ['https://illarin.xyz/a/card-id/card-name', 'illarin', 'https://illarin.xyz/a/card-id/card-name'],
+    ['illarin.xyz/a/card-id/card-name', 'illarin', 'https://illarin.xyz/a/card-id/card-name'],
+    ['https://www.illarin.xyz/@creator', 'illarin', 'https://www.illarin.xyz/@creator'],
+    ['//illarin.xyz/a/card-id/card-name?version=2#details', 'illarin', 'https://illarin.xyz/a/card-id/card-name?version=2#details'],
+  ] as const)('preserves hub source %s through saving and reloading', (input, provider, url) => {
+    const source = parseCharacterSourceInput(input)
+    expect(source).toEqual({ provider, url })
+    const extensions = setCharacterSource({ unrelated: { keep: true } }, source)
+    expect(extensions).toEqual({ unrelated: { keep: true }, _lumiverse_source_url: url })
+    expect(readCharacterSourceUrl(JSON.parse(JSON.stringify(extensions)))).toBe(url)
+  })
+
+  test.each([
+    'https://chub.ai/characters/Creator/Card?view=full',
+    'https://characterhub.org/characters/Creator/Card/',
+    'chub.ai/characters/Creator/Card',
+    'characters/Creator/Card',
+    'Creator/Card',
+  ])('keeps Chub source compatibility for %s', (input) => {
+    const source = parseCharacterSourceInput(input)
+    expect(source).toEqual({ provider: 'chub', fullPath: 'Creator/Card', url: 'https://chub.ai/characters/Creator/Card' })
+    const extensions = setCharacterSource({}, source)
+    expect(extensions).toEqual({ chub: { full_path: 'Creator/Card' } })
+    expect(readCharacterSourceUrl(extensions)).toBe('https://chub.ai/characters/Creator/Card')
+  })
+
+  test.each([
+    '',
+    'not-a-source',
+    'https://lumi.spot/',
+    'https://illarin.xyz/',
+    'https://chub.ai/characters/Creator',
+    'https://lumi.spot.evil.example/@archkr',
+    'https://example.com/characters/card',
+    'https://lumi.spot@evil.example/@archkr',
+    'https://someone:secret@illarin.xyz/a/card-id/card-name',
+    'ftp://lumi.spot/@archkr',
+    'javascript:alert(1)//card',
+    'https://[invalid]/card',
+  ])('rejects invalid source %s', (input) => {
+    expect(parseCharacterSourceInput(input)).toBeNull()
+  })
+
+  test('reads legacy Chub sources and ignores invalid explicit source metadata', () => {
+    expect(readCharacterSourceUrl({ chub: { fullPath: 'legacy/card' } })).toBe('https://chub.ai/characters/legacy/card')
+    expect(readCharacterSourceUrl({ _lumiverse_chub_slug: 'fallback/card' })).toBe('https://chub.ai/characters/fallback/card')
+    expect(readCharacterSourceUrl({
+      _lumiverse_source_url: 'javascript:alert(1)',
+      chub: { full_path: 'fallback/card' },
+    })).toBe('https://chub.ai/characters/fallback/card')
+    expect(readCharacterSourceUrl({ _lumiverse_source_url: 42 })).toBeNull()
+    expect(readCharacterSourceUrl(null)).toBeNull()
+  })
+
+  test('switches providers and clears attribution without losing other metadata', () => {
+    const original = {
+      unrelated: { keep: true },
+      _lumiverse_chub_slug: 'old/card',
+      chub: { full_path: 'old/card', fullPath: 'older/card', description: 'keep' },
+    }
+    const lumi = setCharacterSource(original, parseCharacterSourceInput('https://lumi.spot/@archkr'))
+    expect(lumi).toEqual({
+      unrelated: { keep: true },
+      chub: { description: 'keep' },
+      _lumiverse_source_url: 'https://lumi.spot/@archkr',
+    })
+    expect(original.chub.full_path).toBe('old/card')
+    expect(original._lumiverse_chub_slug).toBe('old/card')
+
+    const illarin = setCharacterSource(lumi, parseCharacterSourceInput('https://illarin.xyz/a/card-id/card-name'))
+    expect(readCharacterSourceUrl(illarin)).toBe('https://illarin.xyz/a/card-id/card-name')
+
+    const chub = setCharacterSource(illarin, parseCharacterSourceInput('new/card'))
+    expect(chub).toEqual({ unrelated: { keep: true }, chub: { description: 'keep', full_path: 'new/card' } })
+    for (const extensions of [lumi, illarin, chub]) {
+      const cleared = setCharacterSource(extensions, null)
+      expect(cleared).toEqual({ unrelated: { keep: true }, chub: { description: 'keep' } })
+      expect(readCharacterSourceUrl(cleared)).toBeNull()
+    }
   })
 })

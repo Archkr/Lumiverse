@@ -74,6 +74,12 @@ Similar to the system prompt, but injected *after* the chat history instead of b
 
 Notes for other users (or yourself) about the character. These are **never sent to the AI** — they're purely informational. Use them for usage tips, recommended settings, or changelog notes.
 
+### Original Source
+
+Link back to the character's source on Chub, CharacterHub, LumiHub (`lumi.spot`), or Illarin (`illarin.xyz`). LumiHub and Illarin links can point to a character or a creator's profile. You can also enter a Chub `creator/character` path.
+
+Press Enter or leave the field to save it. The link button opens the saved source, and the source travels with exported character cards. Clear the field to remove it.
+
 ### Tags
 
 Labels for organizing your library. Add tags like "fantasy," "sci-fi," "male," "OC," etc. You can filter your Character Browser by tags.
