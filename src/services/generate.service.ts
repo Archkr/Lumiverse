@@ -1073,6 +1073,7 @@ async function executeInlineCouncilToolCalls(
           __deadlineMs: Date.now() + timeoutMs,
         },
         timeoutMs,
+        userId,
         memberContext,
         contextMessages,
       );

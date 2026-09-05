@@ -4545,7 +4545,7 @@ async function handleHostMessage(msg: RuntimeHostToWorker): Promise<void> {
         };
         let result: string | undefined;
         for (const handler of handlers) {
-          const val = await Promise.resolve(handler(payload));
+          const val = await Promise.resolve(handler(payload, msg.userId));
           if (val !== undefined && val !== null && result === undefined) {
             result = String(val);
           }

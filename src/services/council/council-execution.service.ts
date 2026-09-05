@@ -344,12 +344,13 @@ async function executeMemberTools(
             bareToolName,
             {
               context: contextSummary,
-              // Deadline hint is opaque and useful for the extension; userId is
-              // intentionally NOT included here — the worker host strips any
-              // attempted __userId injection before posting to the worker.
+              // Deadline hint is opaque and useful for the extension. Authenticated
+              // userId is intentionally NOT included in model-controlled args; it
+              // travels separately below as trusted host-owned transport metadata.
               __deadlineMs: Date.now() + settings.toolsSettings.timeoutMs,
             },
             settings.toolsSettings.timeoutMs,
+            input.userId,
             memberContext,
             contextMessages
           );
@@ -601,15 +602,15 @@ export function appendCouncilDeliberationHistory(input: {
 }
 
 /**
- * Route a tool call to the extension worker that registered it. We never
- * forward the authenticated userId — extensions run in their own user-scoped
- * worker and reach back via the RPC bridge under that identity. Passing the
- * raw userId to the tool handler would let a malicious extension impersonate
- * the user via its own internal state, defeating the worker boundary.
+ * Extension tool invocations receive authenticated user context only as
+ * trusted host-owned transport metadata. It is never sourced from or merged
+ * into model-controlled tool args. The worker runtime exposes that context as
+ * the TOOL_INVOCATION handler's second argument so operator-scoped extensions
+ * can safely reach user-scoped Spindle APIs.
  *
- * `councilMember` is a trusted host-built snapshot of the assigned member's
- * identity/personality fields — delivered to the extension handler alongside
- * the invocation args so the tool can tailor its output to that member.
+ * `councilMember` remains a separate trusted host-built snapshot of the
+ * assigned member's identity/personality fields so the tool can tailor output
+ * without mixing either host-owned context object into user-space args.
  */
 /** Call the sidecar LLM for a single tool. */
 async function invokeSidecarTool(

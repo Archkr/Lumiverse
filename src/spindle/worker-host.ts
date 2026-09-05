@@ -1470,20 +1470,26 @@ export class WorkerHost {
    * Forwarded on its own top-level field (same rationale as `councilMember`:
    * host-provided truth that must not collide with user-space `args`).
    * Multipart content is flattened to its text portion via `getTextContent`.
+   *
+   * `userId` is authenticated host context supplied by the generation path. It is
+   * transported separately from model-controlled `args` and must never be sourced
+   * from an invocation argument.
    */
   invokeExtensionTool(
     toolName: string,
     args: Record<string, unknown>,
     timeoutMs = 30_000,
+    userId: string,
     councilMember?: CouncilMemberContext,
     contextMessages?: LlmMessage[]
   ): Promise<string> {
+    if (!userId) return Promise.reject(new Error("Extension tool invocation requires authenticated user context"));
     const requestId = crypto.randomUUID();
 
-    // Defensive strip: never forward authentication-style metadata to the
-    // worker. Even if a caller leaks `__userId` or similar in args, the
-    // extension handler must not see it — extensions identify themselves via
-    // their worker context, not a string parameter they could exfiltrate.
+    // Defensive strip: never trust authentication-shaped metadata from tool
+    // args. Even if model-controlled input leaks `__userId` or similar, keep
+    // it out of the payload. The only user identity delivered to the worker is
+    // authenticated host context on the top-level invocation envelope.
     const sanitizedArgs: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(args)) {
       if (key === "__userId" || key === "__user_id" || key === "userId") continue;
@@ -1503,6 +1509,7 @@ export class WorkerHost {
       requestId,
       toolName,
       args: sanitizedArgs,
+      userId,
       ...(councilMember ? { councilMember } : {}),
       ...(contextMessagesDTO ? { contextMessages: contextMessagesDTO } : {}),
     });
