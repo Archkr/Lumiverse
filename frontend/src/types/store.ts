@@ -91,7 +91,7 @@ export interface ChatSlice {
   /** Current raw (unflushed) streaming buffers — used to request pool deltas. */
   getStreamBuffers: () => { content: string; reasoning: string }
   setStreamingReasoningStartedAt: (ts: number | null) => void
-  /** Set the swipe index the active generation streams into (null when unknown). */
+  /** Set the confirmed streaming swipe index and recover its slot if a staging event was missed. */
   setStreamingSwipeId: (swipeId: number | null) => void
   /** Flag a freshly-generated swipe as unseen (drives the "new swipe ready" badge). */
   setUnseenSwipe: (messageId: string, swipeId: number) => void

@@ -93,6 +93,36 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     }
   }
 
+  function reconcileStreamingSwipe(state: ChatSlice, messages: Message[]): Message[] {
+    const swipeId = state.streamingSwipeId
+    if (
+      !state.isStreaming ||
+      (state.streamingGenerationType !== 'swipe' && state.streamingGenerationType !== 'regenerate') ||
+      !state.regeneratingMessageId ||
+      swipeId == null
+    ) return messages
+
+    const index = messages.findIndex((message) => message.id === state.regeneratingMessageId)
+    if (index < 0 || messages[index].swipes.length > swipeId) return messages
+
+    // The server confirms this slot before publishing the stream anchor. A
+    // snapshot without it predates staging. Keep the current message (including
+    // any intentional navigation) when we already have the slot; otherwise
+    // recover the missing slot even if MESSAGE_SWIPED was missed entirely.
+    const current = state.messages.find((message) => message.id === state.regeneratingMessageId)
+    const message = messages[index]
+    const missing = swipeId - message.swipes.length + 1
+    const next = [...messages]
+    next[index] = current && current.swipes.length > swipeId ? current : {
+      ...message,
+      swipes: [...message.swipes, ...Array<string>(missing).fill('')],
+      swipe_dates: [...message.swipe_dates, ...Array<number>(missing).fill(Math.floor(Date.now() / 1000))],
+      swipe_id: swipeId,
+      content: '',
+    }
+    return next
+  }
+
   return {
     activeChatId: null,
     activeCharacterId: null,
@@ -201,29 +231,7 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
 
     setMessages: (messages, total?) =>
       set((state) => {
-        let nextMessages = messages
-
-        // A list request can begin just before a swipe is staged and resolve
-        // just after its MESSAGE_SWIPED event. Do not let that older snapshot
-        // erase the streaming target; the final reconciliation will replace it
-        // once the server response contains that swipe slot.
-        if (
-          state.isStreaming &&
-          state.streamingGenerationType === 'swipe' &&
-          state.regeneratingMessageId &&
-          state.streamingSwipeId != null
-        ) {
-          const current = state.messages.find((message) => message.id === state.regeneratingMessageId)
-          const incomingIndex = nextMessages.findIndex((message) => message.id === state.regeneratingMessageId)
-          if (
-            current &&
-            incomingIndex >= 0 &&
-            nextMessages[incomingIndex].swipes.length <= state.streamingSwipeId
-          ) {
-            nextMessages = [...nextMessages]
-            nextMessages[incomingIndex] = current
-          }
-        }
+        const nextMessages = reconcileStreamingSwipe(state, messages)
 
         return {
           messages: sortMessagesByPosition(nextMessages),
@@ -233,11 +241,11 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
 
     reconcileMessagesTail: (page) =>
       set((state) => ({
-        messages: sortMessagesByPosition(reconcileMessageTail(
+        messages: sortMessagesByPosition(reconcileStreamingSwipe(state, reconcileMessageTail(
           state.messages,
           state.totalChatLength,
           page,
-        )),
+        ))),
         totalChatLength: page.total,
       })),
 
@@ -397,7 +405,10 @@ export const createChatSlice: StateCreator<ChatSlice> = (set, get) => {
     },
 
     setStreamingSwipeId: (swipeId) => {
-      set({ streamingSwipeId: swipeId })
+      set((state) => ({
+        streamingSwipeId: swipeId,
+        messages: reconcileStreamingSwipe({ ...state, streamingSwipeId: swipeId }, state.messages),
+      }))
     },
 
     pauseStreamingForNavigation: () => {
