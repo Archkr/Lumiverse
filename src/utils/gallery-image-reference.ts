@@ -81,3 +81,30 @@ export function findCanonicalGalleryImageReference(
     );
   return matches[0]?.[0] ?? null;
 }
+
+/**
+ * Replace image identifiers in a greeting-background map while preserving its
+ * greeting indices and any unknown entries. CHARX export uses this to replace
+ * local image IDs with portable gallery references; import applies the inverse
+ * mapping after the bundled gallery images receive their new local IDs.
+ */
+export function remapGreetingBackgrounds(
+  backgrounds: unknown,
+  replacements: ReadonlyMap<string, string>,
+): unknown {
+  if (!backgrounds || typeof backgrounds !== "object" || Array.isArray(backgrounds)) {
+    return backgrounds;
+  }
+
+  const current = backgrounds as Record<string, unknown>;
+  let remapped: Record<string, unknown> | null = null;
+  for (const [greetingIndex, imageId] of Object.entries(current)) {
+    if (typeof imageId !== "string") continue;
+    const replacement = replacements.get(imageId);
+    if (!replacement || replacement === imageId) continue;
+    remapped ??= { ...current };
+    remapped[greetingIndex] = replacement;
+  }
+
+  return remapped ?? backgrounds;
+}

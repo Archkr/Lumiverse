@@ -8,6 +8,7 @@ import { listGallery } from "./character-gallery.service";
 import {
   galleryArchiveStem,
   parseGalleryImageReference,
+  remapGreetingBackgrounds,
 } from "../utils/gallery-image-reference";
 import { getImage, getImageFilePath } from "./images.service";
 import { exportWorldBook, getWorldBook } from "./world-books.service";
@@ -433,7 +434,22 @@ export async function exportAsCharx(
   const character = getCharacter(userId, characterId);
   if (!character) return null;
 
+  // listGallery also ensures every image has a stable gallery:// reference.
+  // Replace local database IDs in the CHARX card payload with those portable
+  // references; JSON and PNG exports intentionally remain plain CCSv3 cards
+  // because those formats cannot bundle the corresponding gallery assets.
+  const galleryItems = listGallery(userId, characterId);
   const ccsv3 = buildCCSv3Json(userId, character);
+  const exportedExtensions = ccsv3.data?.extensions;
+  if (exportedExtensions && typeof exportedExtensions === "object" && !Array.isArray(exportedExtensions)) {
+    const localToPortable = new Map(
+      galleryItems.map((item) => [item.image_id, item.reference] as const),
+    );
+    exportedExtensions.greeting_backgrounds = remapGreetingBackgrounds(
+      exportedExtensions.greeting_backgrounds,
+      localToPortable,
+    );
+  }
   const entries: Record<string, Uint8Array> = {};
   const assetTasks: Array<() => Promise<void>> = [];
 
@@ -501,7 +517,6 @@ export async function exportAsCharx(
   }
 
   // Gallery images
-  const galleryItems = listGallery(userId, characterId);
   for (const item of galleryItems) {
     assetTasks.push(async () => {
       const img = await readImageBytes(userId, item.image_id);
