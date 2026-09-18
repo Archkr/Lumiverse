@@ -49,7 +49,7 @@ export interface QuietGenerateInput {
   tools?: ToolDefinition[];
   /** Cancels the in-flight provider request when aborted. */
   signal?: AbortSignal;
-  /** Reserved caller context; quiet generation does not currently use it. */
+  /** Chat context used to scope provider routing sessions. */
   chat_id?: string;
   /** Per-request reasoning settings, or the inherited connection/global settings. */
   reasoning?: GenerationReasoningOverrideDTO;
@@ -201,7 +201,7 @@ async function prepareQuietCall(
     ? (mergedParams as any).model.trim()
     : "";
   if ("model" in mergedParams) delete (mergedParams as any).model;
-  injectConnectionMetadataFlags(connection, mergedParams);
+  injectConnectionMetadataFlags(connection, mergedParams, input.chat_id);
   const resolvedModel = paramModel || connection.model;
   const cached = applyPromptCaching(
     {

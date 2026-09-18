@@ -3129,6 +3129,7 @@ export class WorkerHost {
         case "quiet":
           result = await generateSvc.quietGenerate(resolvedUserId, {
             messages: input.messages || [],
+            chat_id: input.chat_id,
             connection_id: input.connection_id,
             parameters: input.parameters,
             tools: input.tools,
@@ -3232,6 +3233,7 @@ export class WorkerHost {
         case "quiet":
           stream = await generateSvc.quietGenerateStream(resolvedUserId, {
             messages: input.messages || [],
+            chat_id: input.chat_id,
             connection_id: input.connection_id,
             parameters: input.parameters,
             tools: input.tools,
