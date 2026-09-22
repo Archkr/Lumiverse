@@ -704,6 +704,12 @@ export async function installPreset(
       sealedPreset,
       dependencies.resolveSealedBlocks ?? resolveSealedPresetBlocksForInstall,
     );
+    const installedBlocks = markInstalledSealedPresetBlocks(
+      materializedBlocks,
+      payload.source,
+      payload.presetId,
+      sealedPresetVersion,
+    );
     const incomingSamplerOverrides = isPlainObject(p.samplerOverrides) ? p.samplerOverrides : {};
     const incomingCustomBody = isPlainObject(p.customBody) ? p.customBody : {};
     const incomingPromptVariables = isPlainObject(p.promptVariables) ? p.promptVariables : {};
@@ -722,7 +728,7 @@ export async function installPreset(
     const promptVariables = existing
       ? mergePromptVariableSelections(
           existing.prompt_order,
-          materializedBlocks,
+          installedBlocks,
           existing.metadata?.promptVariables,
           incomingPromptVariables,
         )
@@ -735,7 +741,7 @@ export async function installPreset(
         samplerOverrides,
         customBody,
       },
-      prompt_order: materializedBlocks,
+      prompt_order: installedBlocks,
       prompts: {
         promptBehavior: isPlainObject(p.promptBehavior) ? p.promptBehavior : {},
         completionSettings: isPlainObject(p.completionSettings) ? p.completionSettings : {},
@@ -1151,6 +1157,36 @@ async function materializeSealedPresetBlocks(
 function extractExactSealedPlaceholder(content: string): string | null {
   const match = content.trim().match(/^\{\{(?:presetBlock|pblock)::([^}]+)\}\}$/);
   return match?.[1]?.trim() || null;
+}
+
+/**
+ * Treat the delivery channel as the authoritative origin for sealed blocks.
+ * Illarin delivers materialized preset JSON, so unlike LumiHub there may be no
+ * sidecar manifest pass that would otherwise add the protected source marker.
+ */
+function markInstalledSealedPresetBlocks(
+  blocks: any[],
+  source: InstallPresetPayload["source"],
+  presetId: string,
+  version: string | null,
+): any[] {
+  return blocks.map((block) => {
+    if (!isPlainObject(block) || block.sealed !== true) return block;
+    const sealedKey = typeof block.sealedKey === "string" && block.sealedKey.trim()
+      ? block.sealedKey.trim()
+      : typeof block.id === "string" && block.id.trim()
+        ? block.id.trim()
+        : null;
+    if (!sealedKey) return block;
+    return {
+      ...block,
+      sealed: true,
+      sealedKey,
+      sealedSource: source,
+      sealedOriginPresetId: presetId,
+      sealedOriginVersion: version,
+    };
+  });
 }
 
 /**

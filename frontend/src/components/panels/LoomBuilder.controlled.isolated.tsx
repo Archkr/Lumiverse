@@ -309,14 +309,16 @@ function configureMainLoomState(withPromptVariable = false): void {
 function renderBlockEditor(
   trustedHostFeatures: boolean | undefined,
   onSave: (updates: Partial<PromptBlock>) => void,
+  blockOverrides: Partial<PromptBlock> = {},
 ): { container: HTMLDivElement; root: Root } {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
+  const renderedBlock = block(blockOverrides)
   flushSync(() => {
     root.render(createElement(BlockEditor, {
-      block: block(),
-      blocks: [block()],
+      block: renderedBlock,
+      blocks: [renderedBlock],
       promptVariables,
       onSave,
       onBack: () => {},
@@ -568,6 +570,32 @@ describe('controlled Loom editor trust boundary', () => {
 
     expect(container.textContent).toContain('blockEditor.preview')
     expect(container.textContent).toContain('blockEditor.sealedBlockTitle')
+    unmountRoot(root)
+  })
+
+  test('preserves Illarin sealed provenance through trusted local edits', () => {
+    let saved: Partial<PromptBlock> | undefined
+    const { container, root } = renderBlockEditor(true, (updates) => {
+      saved = updates
+    }, {
+      sealed: true,
+      sealedKey: 'publisher.instructions',
+      sealedSource: 'illarin',
+      sealedOriginPresetId: 'illarin-asset',
+      sealedOriginVersion: '2.0.0',
+      sealedSha256: 'digest',
+    })
+
+    flushSync(() => saveButton(container).click())
+
+    expect(saved).toMatchObject({
+      sealed: true,
+      sealedKey: 'publisher.instructions',
+      sealedSource: 'illarin',
+      sealedOriginPresetId: 'illarin-asset',
+      sealedOriginVersion: '2.0.0',
+      sealedSha256: 'digest',
+    })
     unmountRoot(root)
   })
 

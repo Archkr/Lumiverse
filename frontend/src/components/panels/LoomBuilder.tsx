@@ -74,7 +74,7 @@ import { presetsApi, type StashedPromptBlock } from '@/api/presets'
 import { imagesApi } from '@/api/images'
 import { usePresetProfiles } from '@/hooks/usePresetProfiles'
 import { getEffectivePromptVariableValues } from '@/hooks/preset-profile-prompt-variables'
-import { computeGroups, createBlock, createMarkerBlock, getRemotePresetOrigin, resolvePromptBlockPlacements } from '@/lib/loom/service'
+import { computeGroups, createBlock, createMarkerBlock, getRemotePresetOrigin, isProtectedSealedSource, resolvePromptBlockPlacements } from '@/lib/loom/service'
 import { sanitizeCharacterTagTrigger, splitCharacterTagTriggerInput } from '@/lib/loom/characterTagTrigger'
 import {
   PROMPT_TEMPLATES,
@@ -611,7 +611,7 @@ export function BlockEditor({
   const { t } = useLb()
   const { t: tc } = useTranslation('common')
   const { injectionTriggerTypes, injectionTriggerLabel } = useLoomOptionLabels()
-  const isInstalledLumiHubSealed = trustedHostFeatures && block.sealedSource === 'lumihub'
+  const isInstalledRemoteSealed = trustedHostFeatures && isProtectedSealedSource(block.sealedSource)
   const [name, setName] = useState(block.name)
   const [role, setRole] = useState<PromptBlock['role']>(block.role || 'system')
   const [content, setContent] = useState(block.content || '')
@@ -654,13 +654,13 @@ export function BlockEditor({
     const trustedUpdates: Partial<PromptBlock> = {}
     if (trustedHostFeatures) {
       const cleanSealedKey = sanitizeSealedBlockKey(sealedKey || block.sealedKey || block.id)
-      const shouldSeal = isInstalledLumiHubSealed || (sealed && !!cleanSealedKey)
+      const shouldSeal = isInstalledRemoteSealed || (sealed && !!cleanSealedKey)
       trustedUpdates.sealed = shouldSeal ? true : undefined
       trustedUpdates.sealedKey = shouldSeal ? cleanSealedKey : undefined
-      trustedUpdates.sealedSource = isInstalledLumiHubSealed ? block.sealedSource : undefined
-      trustedUpdates.sealedOriginPresetId = isInstalledLumiHubSealed ? block.sealedOriginPresetId : undefined
-      trustedUpdates.sealedOriginVersion = isInstalledLumiHubSealed ? block.sealedOriginVersion : undefined
-      trustedUpdates.sealedSha256 = isInstalledLumiHubSealed ? block.sealedSha256 : undefined
+      trustedUpdates.sealedSource = isInstalledRemoteSealed ? block.sealedSource : undefined
+      trustedUpdates.sealedOriginPresetId = isInstalledRemoteSealed ? block.sealedOriginPresetId : undefined
+      trustedUpdates.sealedOriginVersion = isInstalledRemoteSealed ? block.sealedOriginVersion : undefined
+      trustedUpdates.sealedSha256 = isInstalledRemoteSealed ? block.sealedSha256 : undefined
     }
     return {
       name,
@@ -689,7 +689,7 @@ export function BlockEditor({
     content,
     depth,
     injectionTrigger,
-    isInstalledLumiHubSealed,
+    isInstalledRemoteSealed,
     isLocked,
     name,
     placementBinding,
@@ -891,7 +891,7 @@ export function BlockEditor({
               </button>
               {sealControlsOpen && (
                 <div className={s.sealedBlockBody}>
-                  <p className={s.sealedBlockText}>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledHint' : 'blockEditor.sealedBlockHint')}</p>
+                  <p className={s.sealedBlockText}>{t(isInstalledRemoteSealed ? 'blockEditor.sealedBlockInstalledHint' : 'blockEditor.sealedBlockHint')}</p>
                   <div className={s.formGroup}>
                     <label className={s.label}>{t('blockEditor.sealedBlockKey')}</label>
                     <input
@@ -900,18 +900,18 @@ export function BlockEditor({
                       onChange={e => setSealedKey(filterSealedBlockKeyInput(e.target.value))}
                       placeholder={t('blockEditor.sealedBlockKeyPlaceholder')}
                       spellCheck={false}
-                      disabled={isInstalledLumiHubSealed}
+                      disabled={isInstalledRemoteSealed}
                     />
                     <span className={s.settingsHint}>{t('blockEditor.sealedBlockKeyHint')}</span>
                   </div>
                   <label className={clsx(s.sealedBlockArmRow, !sealedKey.trim() && s.sealedBlockArmRowDisabled)}>
                     <input
                       type="checkbox"
-                      checked={(isInstalledLumiHubSealed || sealed) && !!sealedKey.trim()}
-                      disabled={isInstalledLumiHubSealed || !sealedKey.trim()}
+                      checked={(isInstalledRemoteSealed || sealed) && !!sealedKey.trim()}
+                      disabled={isInstalledRemoteSealed || !sealedKey.trim()}
                       onChange={e => setSealed(e.target.checked)}
                     />
-                    <span>{t(isInstalledLumiHubSealed ? 'blockEditor.sealedBlockInstalledEnable' : 'blockEditor.sealedBlockEnable')}</span>
+                    <span>{t(isInstalledRemoteSealed ? 'blockEditor.sealedBlockInstalledEnable' : 'blockEditor.sealedBlockEnable')}</span>
                   </label>
                 </div>
               )}

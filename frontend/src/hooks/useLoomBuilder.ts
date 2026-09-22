@@ -27,7 +27,7 @@ import {
   detectSupportedParamsFromProviders,
   getAvailableMacros,
   exportToSTPreset,
-  sanitizeLumiHubSealedBlocksForExport,
+  sanitizeRemoteSealedBlocksForExport,
   createPortableLoomPresetExport,
   normalizeCategoryBlockState,
   toggleBlockWithCategoryRules,
@@ -932,7 +932,7 @@ export function useLoomBuilder() {
   // Export as legacy (SillyTavern) JSON
   const exportLegacy = useCallback(() => {
     if (!activePreset) return null
-    return exportToSTPreset(sanitizeLumiHubSealedBlocksForExport(activePreset))
+    return exportToSTPreset(sanitizeRemoteSealedBlocksForExport(activePreset))
   }, [activePreset])
 
   // Available macros for the inserter — fetched from API, with local fallback

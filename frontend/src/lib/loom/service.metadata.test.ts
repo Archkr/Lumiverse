@@ -3,6 +3,7 @@ import type { Preset } from '@/types/api'
 import {
   coerceImportedLoomPreset,
   createPortableLoomPresetExport,
+  exportToSTPreset,
   getRemotePresetOrigin,
   marshalPreset,
   marshalUpdate,
@@ -126,6 +127,41 @@ describe('Loom extension metadata preservation', () => {
     const exported = createPortableLoomPresetExport(unmarshalPreset(rawPreset({})))
     expect(Object.hasOwn(exported, 'id')).toBe(false)
     expect(exported.name).toBe('Metadata test')
+  })
+
+  test('redacts materialized Illarin sealed blocks from portable exports', () => {
+    const preset = unmarshalPreset({
+      ...rawPreset({ _lumiverse_install_source: 'illarin' }),
+      prompt_order: [{
+        id: 'private-block',
+        name: 'Private block',
+        content: 'private Illarin content',
+        role: 'system',
+        enabled: true,
+        position: 'pre_history',
+        depth: 0,
+        marker: null,
+        isLocked: false,
+        color: null,
+        injectionTrigger: [],
+        group: null,
+        sealed: true,
+        sealedKey: 'publisher.instructions',
+      }],
+    })
+
+    const exported = createPortableLoomPresetExport(preset)
+    expect(exported.blocks[0]).toMatchObject({
+      content: '{{presetBlock::publisher.instructions}}',
+      sealed: true,
+      sealedKey: 'publisher.instructions',
+      sealedSource: 'illarin',
+    })
+    expect(JSON.stringify(exported)).not.toContain('private Illarin content')
+
+    const legacyExport = exportToSTPreset(preset)
+    expect(JSON.stringify(legacyExport)).toContain('{{presetBlock::publisher.instructions}}')
+    expect(JSON.stringify(legacyExport)).not.toContain('private Illarin content')
   })
 
 })
