@@ -45,7 +45,10 @@ describe("resolveWindowsMsvc", () => {
       vcvarsall,
       architecture: "amd64",
     });
-    expect(commands[1]).toContain("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+    expect(commands[1]).toEqual([
+      "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
+      "-products", "*", "-property", "installationPath",
+    ]);
     expect(commands[2]?.at(-1)).toContain(`call "${vcvarsall}" amd64 >nul && "where.exe" "link.exe"`);
   });
 
@@ -53,13 +56,35 @@ describe("resolveWindowsMsvc", () => {
     const result = await resolveWindowsMsvc({
       arch: "x64",
       env: {},
-      exists: () => true,
-      probe: async () => ({ ok: true, out: "" }),
+      exists: (path) => path.endsWith("vswhere.exe"),
+      probe: async (command) => command[0]?.endsWith("vswhere.exe")
+        ? { ok: true, out: installation }
+        : { ok: false, out: "" },
     });
 
     expect(result.ready).toBe(false);
-    expect(result.detail).toContain("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+    expect(result.detail).toContain("C++ toolchain setup is missing");
     expect(result.detail).toContain("Desktop development with C++");
+  });
+
+  test("tries other installations when the newest lacks C++ tools", async () => {
+    const result = await resolveWindowsMsvc({
+      arch: "x64",
+      env: {},
+      exists: (path) => path.endsWith("vswhere.exe") || path === vcvarsall,
+      probe: async (command) => {
+        if (command[0]?.endsWith("vswhere.exe")) {
+          return { ok: true, out: `C:\\Visual Studio\\Community\r\n${installation}` };
+        }
+        if (command[0] === "cmd.exe") {
+          return { ok: true, out: `${installation}\\VC\\Tools\\MSVC\\bin\\HostX64\\x64\\link.exe` };
+        }
+        return { ok: false, out: "" };
+      },
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.vcvarsall).toBe(vcvarsall);
   });
 
   test("reports an unconfigured linker before attempting a lengthy build", async () => {
@@ -90,7 +115,7 @@ describe("resolveWindowsMsvc", () => {
 
     expect(result.ready).toBe(false);
     expect(result.detail).toContain("amd64_arm64");
-    expect(commands[1]).toContain("Microsoft.VisualStudio.Component.VC.Tools.ARM64");
+    expect(commands[1]).toContain("-products");
   });
 });
 

@@ -52,8 +52,6 @@ export async function resolveWindowsMsvc(options: WindowsMsvcOptions = {}): Prom
   const arch = options.arch ?? process.arch;
   const architecture = arch === "arm64" ? "amd64_arm64" : arch === "ia32" ? "x86" : "amd64";
   const target = arch === "arm64" ? "arm64" : arch === "ia32" ? "x86" : "x64";
-  const components = ["Microsoft.VisualStudio.Component.VC.Tools.x86.x64"];
-  if (arch === "arm64") components.push("Microsoft.VisualStudio.Component.VC.Tools.ARM64");
   const hasTargetLinker = (out: string) => out.split(/\r?\n/).some((path) =>
     path.toLowerCase().includes("\\vc\\tools\\msvc\\")
     && path.toLowerCase().endsWith(`\\${target}\\link.exe`));
@@ -71,31 +69,36 @@ export async function resolveWindowsMsvc(options: WindowsMsvcOptions = {}): Prom
     return { ready: false, detail: `link.exe is not configured and ${vswhere} was not found. ${remedy}` };
   }
 
-  const instance = await run([
-    vswhere, "-latest", "-products", "*", "-requires", ...components, "-property", "installationPath",
-  ], env);
-  const installationPath = instance.ok ? instance.out.split(/\r?\n/)[0]?.trim() : undefined;
-  if (!installationPath) {
-    return { ready: false, detail: `No Visual Studio installation with ${components.join(" and ")} was found. ${remedy}` };
+  const instances = await run([vswhere, "-products", "*", "-property", "installationPath"], env);
+  const installationPaths = instances.ok ? instances.out.split(/\r?\n/).map((path) => path.trim()).filter(Boolean) : [];
+  if (installationPaths.length === 0) {
+    return { ready: false, detail: `No usable Visual Studio installation was found by ${vswhere}. ${remedy}` };
   }
 
-  const vcvarsall = win32.join(installationPath, "VC", "Auxiliary", "Build", "vcvarsall.bat");
-  if (!exists(vcvarsall)) {
-    return { ready: false, detail: `C++ toolchain setup is missing from ${installationPath}. ${remedy}` };
-  }
+  let foundSetup = false;
+  for (const installationPath of installationPaths) {
+    const vcvarsall = win32.join(installationPath, "VC", "Auxiliary", "Build", "vcvarsall.bat");
+    if (!exists(vcvarsall)) continue;
+    foundSetup = true;
 
-  const activatedLinker = await run(
-    windowsMsvcCommand(["where.exe", "link.exe"], vcvarsall, architecture, env),
-    env,
-  );
-  if (!activatedLinker.ok || !hasTargetLinker(activatedLinker.out)) {
-    return { ready: false, detail: `MSVC at ${installationPath} could not provide link.exe for ${architecture}. ${remedy}` };
+    const activatedLinker = await run(
+      windowsMsvcCommand(["where.exe", "link.exe"], vcvarsall, architecture, env),
+      env,
+    );
+    if (!activatedLinker.ok || !hasTargetLinker(activatedLinker.out)) continue;
+
+    return {
+      ready: true,
+      detail: `MSVC linker found at ${installationPath}; build will load its developer environment`,
+      vcvarsall,
+      architecture,
+    };
   }
 
   return {
-    ready: true,
-    detail: `MSVC linker found at ${installationPath}; build will load its developer environment`,
-    vcvarsall,
-    architecture,
+    ready: false,
+    detail: foundSetup
+      ? `Visual Studio C++ toolchain could not provide link.exe for ${architecture}. ${remedy}`
+      : `Visual Studio is installed, but C++ toolchain setup is missing. ${remedy}`,
   };
 }

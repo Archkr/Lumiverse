@@ -141,7 +141,8 @@ Platform-specific build requirements:
   compiler and Windows SDK. The scripted build locates the installed toolset
   and initializes its linker environment; a normal PowerShell window is fine.
   If the MSVC check fails, verify the C++ workload in Visual Studio Installer
-  or run `where link.exe` from the x64 Native Tools Command Prompt.
+  or run `where link.exe` from the x64 Native Tools Command Prompt. In
+  PowerShell, use `where.exe link.exe` (`where` is a PowerShell alias).
 - **Linux:** GTK/WebKitGTK development libraries plus an AppIndicator
   implementation. The helper publishes its tray icon through the
   StatusNotifierItem/AppIndicator D-Bus protocol.
