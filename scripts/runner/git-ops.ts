@@ -1,4 +1,4 @@
-import { delimiter, join } from "path";
+import { delimiter, dirname, join, win32 } from "path";
 import { homedir, platform } from "os";
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
 import { runGit, getUpstreamRef, getCurrentBranch } from "./lib/git.js";
@@ -1072,21 +1072,28 @@ export const DESKTOP_BUILD_STEPS = [
   },
 ] as const satisfies ReadonlyArray<{ label: string; progress: string; command: readonly string[] | null }>;
 
-/**
- * PATH for the build steps. The tray is a GUI app and launches the runner with
- * the minimal PATH GUI apps receive, plus bun's own directory — cargo is not on
- * it. `tauri build` shells out to cargo, so without this the toolchain check
- * passes (it finds `~/.cargo/bin` itself) and the build then fails to find the
- * very tool it just confirmed. Mirrors the tray's `prepend_bun_dir_to_path`.
- */
-function desktopBuildEnv(): Record<string, string | undefined> {
-  const cargoBin = join(homedir(), ".cargo", "bin");
-  const current = process.env.PATH ?? "";
-  const alreadyPresent = current.split(delimiter).includes(cargoBin);
-  return {
-    ...process.env,
-    PATH: alreadyPresent ? current : [cargoBin, current].filter(Boolean).join(delimiter),
-  };
+/** Keep the Bun running this build and cargo available to every child process. */
+export function desktopBuildEnv(
+  env: Record<string, string | undefined> = process.env,
+  bunExecutable = process.execPath,
+  cargoBin = join(homedir(), ".cargo", "bin"),
+  target: NodeJS.Platform = process.platform,
+): Record<string, string | undefined> {
+  const separator = target === "win32" ? ";" : delimiter;
+  const pathKeys = Object.keys(env).filter((key) => target === "win32" ? key.toLowerCase() === "path" : key === "PATH");
+  const current = pathKeys.map((key) => env[key]).filter(Boolean).join(separator);
+  const bunBin = (target === "win32" ? win32.dirname : dirname)(bunExecutable);
+  const seen = new Set<string>();
+  const paths = [bunBin, cargoBin, ...current.split(separator)].filter((entry) => {
+    if (!entry) return false;
+    const key = target === "win32" ? entry.toLowerCase() : entry;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const buildEnv = { ...env };
+  for (const key of pathKeys) delete buildEnv[key];
+  return { ...buildEnv, PATH: paths.join(separator) };
 }
 
 /**

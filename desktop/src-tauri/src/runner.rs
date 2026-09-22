@@ -602,6 +602,9 @@ pub fn desktop_shell_sha() -> Option<String> {
 #[tauri::command]
 pub fn resolve_bun() -> Option<String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(install) = std::env::var_os("BUN_INSTALL") {
+        candidates.push(PathBuf::from(install).join("bin").join(bun_name()));
+    }
     if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
         let home = PathBuf::from(home);
         candidates.push(home.join(".bun").join("bin").join(bun_name()));

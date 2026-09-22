@@ -2,12 +2,14 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { spawnAsync } from "./lib/spawn-async.js";
 import {
   FRONTEND_BUILD_STEPS,
   backendDependencyProbeCmd,
   bunInstallCmd,
   bunInstallTimeoutMs,
   bunRuntimeCmd,
+  desktopBuildEnv,
   dependencyInstallStampIsStale,
   frontendDependencyProbeCmd,
   hardSyncRefusalMessage,
@@ -97,6 +99,30 @@ test("treats an empty direct package directory as an incomplete install", () => 
 test("uses copyfile installs on Windows", () => {
   expect(bunInstallCmd("win32")).toEqual(["bun", "install", "--backend=copyfile"]);
   expect(bunInstallCmd("linux")).toEqual(["bun", "install"]);
+});
+
+test("desktop builds retain Windows Path and the Bun that started the runner", () => {
+  const env = desktopBuildEnv(
+    { Path: "C:\\Windows\\System32;C:\\TOOLS\\BUN", PATH: "C:\\Other\\bin", SYSTEMROOT: "C:\\Windows" },
+    "C:\\Tools\\Bun\\bun.exe",
+    "C:\\Users\\Alice\\.cargo\\bin",
+    "win32",
+  );
+
+  expect(env).toEqual({
+    SYSTEMROOT: "C:\\Windows",
+    PATH: "C:\\Tools\\Bun;C:\\Users\\Alice\\.cargo\\bin;C:\\Windows\\System32;C:\\Other\\bin",
+  });
+});
+
+test("desktop builds find Bun even if it is absent from the inherited PATH", async () => {
+  if (process.platform === "win32") return;
+
+  const env = desktopBuildEnv({ PATH: "/no/bun/on/path" }, process.execPath, "/no/cargo", process.platform);
+  const result = await spawnAsync(["bun", "--version"], { env });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.trim()).toBe(Bun.version);
 });
 
 test("wraps native Termux installs in proot using the detected Bun launcher", () => {
