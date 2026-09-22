@@ -42,7 +42,7 @@ function pickRandomGoodbyeLine(lines: readonly string[]): string {
   const [M = 0, m = 0, p = 0] = Bun.version
     .split(".")
     .map((part) => Number.parseInt(part, 10) || 0);
-  const minimum: readonly [number, number, number] = [1, 4, 0];
+  const minimum: readonly [number, number, number] = [1, 4, 2];
   const [requiredM, requiredMnr, requiredP] = minimum;
   const isTooOld = M < requiredM
     || (M === requiredM && (m < requiredMnr || (m === requiredMnr && p < requiredP)));

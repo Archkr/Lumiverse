@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { MIN_BUN_VERSION } from "../scripts/desktop-toolchain";
+import { meetsVersion, MIN_BUN_VERSION } from "../scripts/desktop-toolchain";
 
 const root = join(import.meta.dir, "..");
 
@@ -10,7 +10,7 @@ async function read(path: string): Promise<string> {
 
 describe("Bun runtime version policy", () => {
   test("keeps runtime, types, Docker, desktop CI, and launchers on 1.4.2", async () => {
-    const [rootPackage, frontendPackage, dockerfile, desktopBuild, desktopRelease, unixLauncher, windowsLauncher] =
+    const [rootPackage, frontendPackage, dockerfile, desktopBuild, desktopRelease, unixLauncher, windowsLauncher, backendRuntime, desktopRunner] =
       await Promise.all([
         Bun.file(join(root, "package.json")).json(),
         Bun.file(join(root, "frontend", "package.json")).json(),
@@ -19,6 +19,8 @@ describe("Bun runtime version policy", () => {
         read(".github/workflows/desktop-release.yml"),
         read("start.sh"),
         read("start.ps1"),
+        read("src/index.ts"),
+        read("scripts/runner.ts"),
       ]);
 
     expect(rootPackage.packageManager).toBe("bun@1.4.2");
@@ -34,6 +36,25 @@ describe("Bun runtime version policy", () => {
     expect(desktopRelease).toContain("bun-version: 1.4.2");
     expect(unixLauncher).toContain('MINIMUM_BUN_VERSION="1.4.2"');
     expect(windowsLauncher).toContain('$MinimumBunVersion = [version]"1.4.2"');
+    expect(backendRuntime).toContain("const _bunMinimum: readonly [number, number, number] = [1, 4, 2]");
+    expect(desktopRunner).toContain("const minimum: readonly [number, number, number] = [1, 4, 2]");
+  });
+
+  test("rejects 1.4.1 and keeps the PowerShell upgrade gate before mode dispatch", async () => {
+    expect(meetsVersion("1.4.1", MIN_BUN_VERSION)).toBe(false);
+    expect(meetsVersion("1.4.2", MIN_BUN_VERSION)).toBe(true);
+
+    const launcher = await read("start.ps1");
+    const gateStart = launcher.indexOf("function Ensure-MinimumBunVersion {");
+    const gateEnd = launcher.indexOf("\n# ─── First-run setup wizard", gateStart);
+    const gate = launcher.slice(gateStart, gateEnd);
+
+    expect(gateStart).toBeGreaterThan(-1);
+    expect(gateEnd).toBeGreaterThan(gateStart);
+    expect(gate.match(/Get-BunSemanticVersion/g)).toHaveLength(2);
+    expect(gate).toContain('Invoke-BunUpgrade "stable"');
+    expect(gate).toContain("exit 1");
+    expect(launcher).toContain("Ensure-Bun\nUpdate-BunChannel\nEnsure-MinimumBunVersion\n");
   });
 
   test("upgrades native Termux through bun-termux before enforcing the floor", async () => {

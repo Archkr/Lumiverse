@@ -20,7 +20,7 @@ if (!("BUN_RUNTIME_TRANSPILER_CACHE_PATH" in process.env)) {
 const [_bunMaj = 0, _bunMin = 0, _bunPat = 0] = Bun.version
   .split(".")
   .map((part) => Number.parseInt(part, 10) || 0);
-const _bunMinimum: readonly [number, number, number] = [1, 4, 0];
+const _bunMinimum: readonly [number, number, number] = [1, 4, 2];
 const [_requiredBunMaj, _requiredBunMin, _requiredBunPat] = _bunMinimum;
 const _bunTooOld = _bunMaj < _requiredBunMaj
   || (_bunMaj === _requiredBunMaj

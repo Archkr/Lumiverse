@@ -142,9 +142,9 @@ export async function handleIPCMessage(msg: any, sink?: ResponseSink): Promise<v
       if (!toolchain.ready) {
         const missing = toolchain.checks
           .filter((check) => check.status === "missing")
-          .map((check) => check.label)
-          .join(", ");
-        respond(id, false, undefined, `Missing desktop build prerequisites: ${missing}`);
+          .map((check) => `${check.label}: ${check.detail}`)
+          .join("; ");
+        respond(id, false, undefined, `Desktop build prerequisites not met: ${missing}. Run 'bun run desktop:doctor' for remedies.`);
         break;
       }
 
