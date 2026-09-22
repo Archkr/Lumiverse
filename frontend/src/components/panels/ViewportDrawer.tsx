@@ -16,6 +16,7 @@ import styles from './ViewportDrawer.module.css'
 import DOMPurify from 'dompurify'
 import clsx from 'clsx'
 import { filterEnabledFrontendContributions } from '@/lib/spindle/frontend-extension-availability'
+import { useDrawerTabDrag } from '@/hooks/useDrawerTabDrag'
 
 function ExtensionTabContent({ tabId }: { tabId: string }) {
   const drawerTabs = useStore((s) => s.drawerTabs)
@@ -94,6 +95,20 @@ export default function ViewportDrawer() {
     },
     [drawerSettings, setSetting]
   )
+
+  const commitDrawerTabPosition = useCallback((verticalPosition: number) => {
+    const state = useStore.getState()
+    state.setSetting(
+      'drawerSettings',
+      { ...state.drawerSettings, verticalPosition },
+      'user-interaction',
+    )
+  }, [])
+
+  const drawerTabDrag = useDrawerTabDrag({
+    position: drawerSettings.verticalPosition,
+    onCommit: commitDrawerTabPosition,
+  })
 
   // Merge built-in tabs with dynamic extension tabs
   const enabledDrawerTabs = filterEnabledFrontendContributions(drawerTabs, extensions)
@@ -228,9 +243,15 @@ useEffect(() => {
             styles.drawerTab,
             isCompact && styles.drawerTabCompact,
             drawerOpen && styles.drawerTabActive,
+            drawerTabDrag.isDragging && styles.drawerTabDragging,
           )}
-          onClick={() => (drawerOpen ? closeDrawer() : openDrawer())}
-          style={{ marginTop: `${drawerSettings.verticalPosition}vh` }}
+          onClick={(event) => {
+            if (drawerTabDrag.consumeSuppressedClick(event)) return
+            if (drawerOpen) closeDrawer()
+            else openDrawer()
+          }}
+          style={{ marginTop: `${drawerTabDrag.verticalPosition}vh` }}
+          {...drawerTabDrag.pointerHandlers}
         >
           <div className={styles.tabIconBox}>
             <Sparkles size={isCompact ? 14 : 16} />

@@ -55,9 +55,15 @@
   background: var(--lcs-glass-bg, var(--lumiverse-bg));
   border: 1px solid var(--lumiverse-border-hover);
   color: var(--lumiverse-text-muted);
-  cursor: pointer;
+  cursor: grab;
   pointer-events: auto;
+  touch-action: none;
+  user-select: none;
   transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.drawerTabDragging {
+  cursor: grabbing;
 }
 
 .wrapperRight .drawerTab {
