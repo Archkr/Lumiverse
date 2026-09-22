@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnAsync } from "./runner/lib/spawn-async";
 import { resolveWindowsMsvc, windowsMsvcCommand } from "./windows-msvc";
 
 const installation = "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools";
@@ -26,13 +27,15 @@ describe("resolveWindowsMsvc", () => {
 
   test("finds the C++ workload and validates its linker in an ordinary shell", async () => {
     const commands: string[][] = [];
+    const verbatimOptions: (boolean | undefined)[] = [];
     const env = { "ProgramFiles(x86)": "C:\\Program Files (x86)", PATH: "C:\\Windows\\System32" };
     const result = await resolveWindowsMsvc({
       arch: "x64",
       env,
       exists: (path) => path.endsWith("vswhere.exe") || path === vcvarsall,
-      probe: async (command) => {
+      probe: async (command, _env, windowsVerbatimArguments) => {
         commands.push(command);
+        verbatimOptions.push(windowsVerbatimArguments);
         if (command[0]?.endsWith("vswhere.exe")) return { ok: true, out: installation };
         if (command[0] === "cmd.exe") return { ok: true, out: `${installation}\\VC\\Tools\\MSVC\\bin\\HostX64\\x64\\link.exe` };
         return { ok: false, out: "" };
@@ -49,7 +52,8 @@ describe("resolveWindowsMsvc", () => {
       "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
       "-products", "*", "-property", "installationPath",
     ]);
-    expect(commands[2]?.at(-1)).toContain(`call "${vcvarsall}" amd64 >nul && "where.exe" "link.exe"`);
+    expect(commands[2]?.at(-1)).toBe(`"call "${vcvarsall}" amd64 >nul && "where.exe" "link.exe""`);
+    expect(verbatimOptions).toEqual([undefined, undefined, true]);
   });
 
   test("distinguishes missing C++ components from Build Tools being installed", async () => {
@@ -128,7 +132,7 @@ test("starts the Tauri build inside the validated MSVC environment", () => {
   )).toEqual([
     "C:\\Windows\\System32\\cmd.exe",
     "/d", "/s", "/c",
-    `call "${vcvarsall}" amd64 >nul && "bun" "run" "tauri:finalized" "build" "--bundles" "nsis"`,
+    `"call "${vcvarsall}" amd64 >nul && "bun" "run" "tauri:finalized" "build" "--bundles" "nsis""`,
   ]);
 });
 
@@ -139,19 +143,26 @@ test("executes a batch-configured child process on Windows", async () => {
   const setup = join(directory, "setup with spaces.bat");
   writeFileSync(setup, '@echo off\r\nset "LUMIVERSE_MSVC_TEST=ready"\r\n');
   try {
+    const cmd = windowsMsvcCommand(
+      [process.execPath, "-e", "console.log(process.env.LUMIVERSE_MSVC_TEST)"],
+      setup,
+      "amd64",
+      process.env,
+    );
     const child = Bun.spawn({
-      cmd: windowsMsvcCommand(
-        [process.execPath, "-e", "console.log(process.env.LUMIVERSE_MSVC_TEST)"],
-        setup,
-        "amd64",
-        process.env,
-      ),
+      cmd,
+      windowsVerbatimArguments: true,
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [out, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    expect(exitCode).toBe(0);
-    expect(out.trim()).toBe("ready");
+    const [out, err, exitCode] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ]);
+    expect({ exitCode, out: out.trim(), err: err.trim() }).toEqual({ exitCode: 0, out: "ready", err: "" });
+
+    const result = await spawnAsync(cmd, { windowsVerbatimArguments: true });
+    expect({ exitCode: result.exitCode, out: result.stdout.trim(), err: result.stderr.trim() })
+      .toEqual({ exitCode: 0, out: "ready", err: "" });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

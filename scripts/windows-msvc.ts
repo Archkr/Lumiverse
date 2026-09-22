@@ -8,7 +8,7 @@ interface ProbeResult {
   out: string;
 }
 
-type CommandProbe = (command: string[], env: Environment) => Promise<ProbeResult>;
+type CommandProbe = (command: string[], env: Environment, windowsVerbatimArguments?: boolean) => Promise<ProbeResult>;
 
 export interface WindowsMsvcOptions {
   arch?: string;
@@ -24,9 +24,9 @@ export interface WindowsMsvcResult {
   architecture?: string;
 }
 
-async function probe(command: string[], env: Environment): Promise<ProbeResult> {
+async function probe(command: string[], env: Environment, windowsVerbatimArguments = false): Promise<ProbeResult> {
   try {
-    const child = Bun.spawn({ cmd: command, env, stdout: "pipe", stderr: "ignore", timeout: 30_000 });
+    const child = Bun.spawn({ cmd: command, env, stdout: "pipe", stderr: "ignore", timeout: 30_000, windowsVerbatimArguments });
     const [out, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return { ok: exitCode === 0, out: out.trim() };
   } catch {
@@ -41,7 +41,7 @@ export function windowsMsvcCommand(command: string[], vcvarsall: string, archite
     "/d",
     "/s",
     "/c",
-    `call ${quote(vcvarsall)} ${architecture} >nul && ${command.map(quote).join(" ")}`,
+    `"call ${quote(vcvarsall)} ${architecture} >nul && ${command.map(quote).join(" ")}"`,
   ];
 }
 
@@ -84,6 +84,7 @@ export async function resolveWindowsMsvc(options: WindowsMsvcOptions = {}): Prom
     const activatedLinker = await run(
       windowsMsvcCommand(["where.exe", "link.exe"], vcvarsall, architecture, env),
       env,
+      true,
     );
     if (!activatedLinker.ok || !hasTargetLinker(activatedLinker.out)) continue;
 

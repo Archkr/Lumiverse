@@ -413,6 +413,7 @@ async function runCommandOrThrow(
     timeoutMs: number;
     label: string;
     env?: Record<string, string | undefined>;
+    windowsVerbatimArguments?: boolean;
     onOutput?: (source: "stdout" | "stderr", text: string) => void;
   }
 ): Promise<void> {
@@ -420,6 +421,7 @@ async function runCommandOrThrow(
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
     env: opts.env,
+    windowsVerbatimArguments: opts.windowsVerbatimArguments,
     onOutput: opts.onOutput,
   });
 
@@ -1197,6 +1199,7 @@ export async function rebuildDesktopShell(
       timeoutMs,
       label: step.label,
       env,
+      windowsVerbatimArguments: buildCommand !== command,
       onOutput: options.mirrorOutput
         ? (source, text) => (source === "stdout" ? process.stdout : process.stderr).write(text)
         : undefined,
