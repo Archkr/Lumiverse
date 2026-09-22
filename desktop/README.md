@@ -136,8 +136,12 @@ install it.
 Platform-specific build requirements:
 
 - **macOS:** Xcode Command Line Tools.
-- **Windows:** WebView2 Runtime (preinstalled on Windows 11) and the MSVC
-  build tools.
+- **Windows:** WebView2 Runtime (preinstalled on Windows 11) and Visual Studio
+  Build Tools with **Desktop development with C++**, including the MSVC C++
+  compiler and Windows SDK. The scripted build locates the installed toolset
+  and initializes its linker environment; a normal PowerShell window is fine.
+  If the MSVC check fails, verify the C++ workload in Visual Studio Installer
+  or run `where link.exe` from the x64 Native Tools Command Prompt.
 - **Linux:** GTK/WebKitGTK development libraries plus an AppIndicator
   implementation. The helper publishes its tray icon through the
   StatusNotifierItem/AppIndicator D-Bus protocol.
@@ -239,6 +243,11 @@ cd desktop
 bun install
 bun run tauri:finalized build
 ```
+
+On Windows, run these manual commands from the appropriate Visual Studio
+Developer Command Prompt (x64 Native Tools for an x64 build), so `link.exe`
+and the SDK are available. `\.\start.ps1 -InstallDesktop` configures the
+installed toolchain automatically when run from an ordinary PowerShell window.
 
 On Linux, Tauri bundles the GStreamer media framework needed by WebKit audio.
 The finalizer verifies the audio plugins and their AppRun search paths, removes

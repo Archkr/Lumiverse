@@ -15,6 +15,7 @@ import {
 } from "./lib/constants.js";
 import { spawnAsync } from "./lib/spawn-async.js";
 import { npmCmd } from "./lib/termux-cli.js";
+import { resolveWindowsMsvc, windowsMsvcCommand } from "../windows-msvc.js";
 
 export interface UpdateState {
   available: boolean;
@@ -1174,6 +1175,8 @@ export async function rebuildDesktopShell(
   log("Rebuilding the desktop shell...");
   const deadline = Date.now() + TIMEOUT_DESKTOP_BUILD_MS;
   const env = desktopBuildEnv();
+  const msvc = process.platform === "win32" ? await resolveWindowsMsvc({ env }) : null;
+  if (msvc && !msvc.ready) throw new Error(`MSVC build tools: ${msvc.detail}`);
 
   for (const step of DESKTOP_BUILD_STEPS) {
     const timeoutMs = deadline - Date.now();
@@ -1185,7 +1188,11 @@ export async function rebuildDesktopShell(
 
     reportProgress?.(step.progress);
     log(step.progress);
-    await runCommandOrThrow(step.command ? [...step.command] : bunInstallCmd(), {
+    const command = step.command ? [...step.command] : bunInstallCmd();
+    const buildCommand = step.command && msvc?.vcvarsall && msvc.architecture
+      ? windowsMsvcCommand(command, msvc.vcvarsall, msvc.architecture, env)
+      : command;
+    await runCommandOrThrow(buildCommand, {
       cwd: desktopDir,
       timeoutMs,
       label: step.label,
