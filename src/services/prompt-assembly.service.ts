@@ -53,6 +53,10 @@ import {
 } from "../macros";
 import type { MacroEnv } from "../macros";
 import { coercePromptVariable } from "../utils/prompt-variable-values";
+import {
+  isClaudeOpusAtLeast,
+  supportsClaudeOpusXhigh,
+} from "../utils/claude-model";
 import { createActivationInputSnapshot } from "../utils/regex-activation-inputs";
 import {
   activateWorldInfo,
@@ -7530,7 +7534,7 @@ export function buildParameters(
  *
  * Provider mapping:
  * - Anthropic:   thinking + output_config (adaptive 4.6+) or thinking.budget_tokens (legacy).
- *                Opus 4.7 and 4.8 additionally support an "xhigh" tier between high and max.
+ *                Opus 4.7 and Opus 4.8+ additionally support an "xhigh" tier between high and max.
  *                Anthropic-only: `thinkingDisplay` ('summarized' | 'omitted') maps to the
  *                `thinking.display` field. On Opus 4.7+ the API defaults to 'omitted' when
  *                unset, so users must opt in to 'summarized' to receive summary text.
@@ -7568,16 +7572,17 @@ export function injectReasoningParams(
 ): void {
   if (providerName === "anthropic") {
     if (!params.thinking) {
-      // Claude 4.6+ and Claude 5 models support adaptive thinking (recommended over manual budget)
+      // Opus 4.6+ and Claude 5 models support adaptive thinking (recommended over manual budget)
       const isAdaptiveModel =
         model &&
-        (/claude-(opus|sonnet)-4[-.](6|7|8)/i.test(model) ||
+        (isClaudeOpusAtLeast(model, 4, 6) ||
+          /claude-sonnet-4[-.](6|7|8)/i.test(model) ||
           /claude-[a-z0-9][a-z0-9-]*-5(?:$|[-.:@])/i.test(model));
       if (isAdaptiveModel) {
         // Adaptive thinking: Claude decides when/how much to think
         params.thinking = { type: "adaptive" };
-        // Opus 4.7 and 4.8 add an "xhigh" tier between high and max; other adaptive models don't support it.
-        const supportsXhigh = /claude-opus-4[-.](7|8)/i.test(model!);
+        // Opus 4.7 remains eligible; all Opus 4.8+ releases are matched by version.
+        const supportsXhigh = supportsClaudeOpusXhigh(model);
         const validEfforts = supportsXhigh
           ? new Set(["low", "medium", "high", "xhigh", "max"])
           : new Set(["low", "medium", "high", "max"]);
