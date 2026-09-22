@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  desktopDropErrorDetail,
   desktopPathBasename,
   filesFromDesktopDrop,
   isSupportedCharacterDropPath,
@@ -35,5 +36,18 @@ describe('desktop file drops', () => {
     ])
     expect(files[0].type).toBe('image/png')
     expect(files[1].type.startsWith('application/json')).toBe(true)
+  })
+
+  test('extracts actionable command errors without inventing a fallback', () => {
+    expect(desktopDropErrorDetail('Could not read dropped file: access denied')).toBe(
+      'Could not read dropped file: access denied',
+    )
+    expect(desktopDropErrorDetail(new Error('Dropped file is no longer authorized'))).toBe(
+      'Dropped file is no longer authorized',
+    )
+    expect(desktopDropErrorDetail({ message: 'Provider file is unavailable' })).toBe(
+      'Provider file is unavailable',
+    )
+    expect(desktopDropErrorDetail({})).toBeNull()
   })
 })

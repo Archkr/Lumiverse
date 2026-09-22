@@ -7,7 +7,11 @@ import { charactersApi } from '@/api/characters'
 import { worldBooksApi } from '@/api/world-books'
 import { toast } from '@/lib/toast'
 import { formatTagLibraryImportToastMessage } from '@/lib/tagLibraryImportToast'
-import { filesFromDesktopDrop, isSupportedCharacterDropPath } from '@/lib/desktop-file-drop'
+import {
+  desktopDropErrorDetail,
+  filesFromDesktopDrop,
+  isSupportedCharacterDropPath,
+} from '@/lib/desktop-file-drop'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useStore } from '@/store'
 import CharacterToolbar from './character-browser/CharacterToolbar'
@@ -274,7 +278,8 @@ export default function CharacterBrowser() {
         .catch((error) => {
           if (disposed) return
           console.error('[CharacterBrowser] Failed to read native dropped files:', error)
-          toast.error(t('characterBrowser.desktopDropReadFailed'))
+          const detail = desktopDropErrorDetail(error)
+          toast.error(`${t('characterBrowser.desktopDropReadFailed')}${detail ? ` ${detail}` : ''}`)
         })
     }).then((stop) => {
       if (disposed) stop()

@@ -4,6 +4,16 @@ const SUPPORTED_CHARACTER_FILE = /\.(json|png|charx|jpe?g)$/i
 
 type ReadDroppedFile = (path: string) => Promise<ArrayBuffer | Uint8Array | number[]>
 
+export function desktopDropErrorDetail(error: unknown): string | null {
+  if (typeof error === 'string') return error.trim() || null
+  if (error instanceof Error) return error.message.trim() || null
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string') return message.trim() || null
+  }
+  return null
+}
+
 function defaultReadDroppedFile(path: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>('read_frontend_drop_file', { path })
 }
@@ -34,7 +44,7 @@ function binaryBlobPart(value: ArrayBuffer | Uint8Array | number[]): ArrayBuffer
 
 /**
  * Turn Tauri's native filesystem paths into browser `File` objects. The Rust
- * command accepts only paths from the immediately preceding OS drop and
+ * command accepts only paths from a recent user-initiated OS drop and
  * consumes each authorization, so the remote frontend never gains general
  * filesystem access.
  */

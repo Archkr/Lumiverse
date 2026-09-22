@@ -141,9 +141,73 @@ fn configure_webview_runtime<'a, R: tauri::Runtime, M: tauri::Manager<R>>(
 #[derive(Default)]
 pub struct FrontendDropState {
     /// Native drag events are the authority for filesystem access. The remote
-    /// frontend may read only supported files the user just dragged into its
-    /// own WebView, and each authorization is consumed on first read.
-    paths: Mutex<HashMap<PathBuf, Instant>>,
+    /// frontend may read only supported paths the user just dropped into its
+    /// own WebView. Keep the native path as the authorization identity: eager
+    /// canonicalization rejects provider-backed files before the OS has had a
+    /// chance to materialize them and can rewrite paths on Windows.
+    authorizations: Mutex<FrontendDropAuthorizations>,
+}
+
+#[derive(Default)]
+struct FrontendDropAuthorizations {
+    /// Paths observed on Enter are retained only long enough to recover from
+    /// platforms that omit paths from the matching Drop event.
+    pending: Vec<PathBuf>,
+    /// Successful drops remain independent so a later drag lifecycle cannot
+    /// invalidate a read already queued by the frontend.
+    granted: HashMap<PathBuf, Instant>,
+}
+
+impl FrontendDropAuthorizations {
+    fn prune(&mut self, now: Instant) {
+        self.granted.retain(|_, granted_at| {
+            now.saturating_duration_since(*granted_at) <= FRONTEND_DROP_AUTHORIZATION_TTL
+        });
+    }
+
+    fn enter(&mut self, paths: &[PathBuf], now: Instant) {
+        self.prune(now);
+        self.pending = paths
+            .iter()
+            .filter(|path| supported_frontend_drop_path(path))
+            .cloned()
+            .collect();
+    }
+
+    fn drop_paths(&mut self, paths: &[PathBuf], now: Instant) {
+        self.prune(now);
+        let dropped: Vec<_> = paths
+            .iter()
+            .filter(|path| supported_frontend_drop_path(path))
+            .cloned()
+            .collect();
+
+        // Some native providers expose paths on Enter but not again on Drop.
+        // Only use that fallback when the Drop payload itself is empty; a
+        // non-empty unsupported payload must not inherit an earlier grant.
+        let granted = if paths.is_empty() {
+            std::mem::take(&mut self.pending)
+        } else {
+            self.pending.clear();
+            dropped
+        };
+        self.granted
+            .extend(granted.into_iter().map(|path| (path, now)));
+    }
+
+    fn leave(&mut self, now: Instant) {
+        self.prune(now);
+        self.pending.clear();
+    }
+
+    fn is_granted(&mut self, path: &std::path::Path, now: Instant) -> bool {
+        self.prune(now);
+        self.granted.contains_key(path)
+    }
+
+    fn consume(&mut self, path: &std::path::Path) {
+        self.granted.remove(path);
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -166,14 +230,6 @@ fn supported_frontend_drop_path(path: &std::path::Path) -> bool {
         })
 }
 
-fn canonical_supported_drop_path(path: &std::path::Path) -> Option<PathBuf> {
-    if !supported_frontend_drop_path(path) {
-        return None;
-    }
-    let canonical = path.canonicalize().ok()?;
-    canonical.is_file().then_some(canonical)
-}
-
 /// Mirror Tauri's native drag lifecycle into a short-lived, one-use file-read
 /// grant. Tauri's drag event reaches this hook before its matching JavaScript
 /// event is delivered to the WebView.
@@ -185,31 +241,21 @@ pub fn track_frontend_drop_event(webview: &Webview, event: &WebviewEvent) {
         return;
     };
     let state = webview.state::<FrontendDropState>();
-    let mut paths = state.paths.lock().unwrap();
+    let mut authorizations = state.authorizations.lock().unwrap();
     let now = Instant::now();
-    paths
-        .retain(|_, granted_at| now.duration_since(*granted_at) <= FRONTEND_DROP_AUTHORIZATION_TTL);
 
     match event {
-        tauri::DragDropEvent::Enter { paths: entered, .. }
-        | tauri::DragDropEvent::Drop { paths: entered, .. } => {
-            paths.clear();
-            paths.extend(
-                entered
-                    .iter()
-                    .filter_map(|path| canonical_supported_drop_path(path))
-                    .map(|path| (path, now)),
-            );
-        }
-        tauri::DragDropEvent::Leave => paths.clear(),
+        tauri::DragDropEvent::Enter { paths, .. } => authorizations.enter(paths, now),
+        tauri::DragDropEvent::Drop { paths, .. } => authorizations.drop_paths(paths, now),
+        tauri::DragDropEvent::Leave => authorizations.leave(now),
         tauri::DragDropEvent::Over { .. } => {}
         _ => {}
     }
 }
 
-/// Read one file from the most recent native drop as a binary IPC response.
+/// Read one file from a recent native drop as a binary IPC response.
 /// The path must have been granted by `track_frontend_drop_event`, is limited
-/// to character-card formats, and is removed before any filesystem read.
+/// to character-card formats, and is consumed only after a successful read.
 #[tauri::command]
 pub async fn read_frontend_drop_file(
     window: WebviewWindow,
@@ -219,23 +265,25 @@ pub async fn read_frontend_drop_file(
     if window.label() != FRONTEND_LABEL {
         return Err("Only the Lumiverse frontend can read dropped files".into());
     }
-    let canonical = canonical_supported_drop_path(&path)
-        .ok_or_else(|| "Dropped file is missing or unsupported".to_string())?;
     {
-        let mut authorized = state.paths.lock().unwrap();
-        let now = Instant::now();
-        authorized.retain(|_, granted_at| {
-            now.duration_since(*granted_at) <= FRONTEND_DROP_AUTHORIZATION_TTL
-        });
-        if authorized.remove(&canonical).is_none() {
+        let mut authorizations = state.authorizations.lock().unwrap();
+        if !authorizations.is_granted(&path, Instant::now()) {
             return Err("Dropped file is no longer authorized".into());
         }
     }
 
-    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(canonical))
+    if !supported_frontend_drop_path(&path) {
+        return Err("Dropped file type is unsupported".into());
+    }
+    // Read the exact OS-provided path. Authorization no longer depends on a
+    // canonical form, so provider-backed and extended Windows paths do not
+    // need to resolve to a second, identical PathBuf before they can be read.
+    let read_path = path.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(read_path))
         .await
         .map_err(|error| format!("Could not schedule dropped-file read: {error}"))?
         .map_err(|error| format!("Could not read dropped file: {error}"))?;
+    state.authorizations.lock().unwrap().consume(&path);
     Ok(Response::new(bytes))
 }
 
@@ -1464,11 +1512,15 @@ pub fn cache_frontend_startup_appearance(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        path::{Path, PathBuf},
+        time::{Duration, Instant},
+    };
 
     use super::{
         download_file_name, is_frontend_popup_label, supported_frontend_drop_path,
-        supports_windows_system_backdrop, valid_widget_size,
+        supports_windows_system_backdrop, valid_widget_size, FrontendDropAuthorizations,
+        FRONTEND_DROP_AUTHORIZATION_TTL,
     };
 
     #[test]
@@ -1502,6 +1554,71 @@ mod tests {
         for path in ["card.zip", "card.txt", "card"] {
             assert!(!supported_frontend_drop_path(Path::new(path)), "{path}");
         }
+    }
+
+    #[test]
+    fn native_drop_authorizes_the_exact_reported_path() {
+        let now = Instant::now();
+        let path = PathBuf::from("provider/card.PNG");
+        let mut authorizations = FrontendDropAuthorizations::default();
+
+        authorizations.drop_paths(std::slice::from_ref(&path), now);
+
+        assert!(authorizations.is_granted(&path, now));
+        authorizations.consume(&path);
+        assert!(!authorizations.is_granted(&path, now));
+    }
+
+    #[test]
+    fn later_drag_lifecycle_does_not_revoke_a_queued_drop() {
+        let now = Instant::now();
+        let dropped = PathBuf::from("first/card.png");
+        let hovering = PathBuf::from("second/card.json");
+        let mut authorizations = FrontendDropAuthorizations::default();
+
+        authorizations.drop_paths(std::slice::from_ref(&dropped), now);
+        authorizations.enter(&[hovering], now + Duration::from_millis(1));
+        authorizations.leave(now + Duration::from_millis(2));
+
+        assert!(authorizations.is_granted(&dropped, now + Duration::from_millis(2)));
+    }
+
+    #[test]
+    fn empty_drop_payload_uses_supported_enter_paths() {
+        let now = Instant::now();
+        let path = PathBuf::from("provider/card.charx");
+        let mut authorizations = FrontendDropAuthorizations::default();
+
+        authorizations.enter(std::slice::from_ref(&path), now);
+        authorizations.drop_paths(&[], now + Duration::from_millis(1));
+
+        assert!(authorizations.is_granted(&path, now + Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn unsupported_drop_does_not_inherit_an_enter_path() {
+        let now = Instant::now();
+        let entered = PathBuf::from("card.png");
+        let unsupported = PathBuf::from("notes.txt");
+        let mut authorizations = FrontendDropAuthorizations::default();
+
+        authorizations.enter(std::slice::from_ref(&entered), now);
+        authorizations.drop_paths(&[unsupported], now + Duration::from_millis(1));
+
+        assert!(!authorizations.is_granted(&entered, now + Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn stale_drop_authorizations_expire() {
+        let now = Instant::now();
+        let path = PathBuf::from("card.jpg");
+        let mut authorizations = FrontendDropAuthorizations::default();
+        authorizations.drop_paths(std::slice::from_ref(&path), now);
+
+        assert!(!authorizations.is_granted(
+            &path,
+            now + FRONTEND_DROP_AUTHORIZATION_TTL + Duration::from_millis(1)
+        ));
     }
 
     #[test]
