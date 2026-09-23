@@ -222,7 +222,6 @@ pub fn run() {
         ))
         .manage(runner::RunnerState::default())
         .manage(frontend::FrontendState::default())
-        .manage(frontend::FrontendDropState::default())
         .manage(frontend::DesktopWidgetCatalogState::default())
         .manage(notifications::DesktopNotificationTransportState::default())
         .manage(remote_instance::RemoteInstanceState::default())
@@ -237,7 +236,6 @@ pub fn run() {
             runner::desktop_shell_sha,
             frontend::desktop_startup_ready,
             frontend::close_current_sso_popup,
-            frontend::read_frontend_drop_file,
             runner::quit_app,
             runner::alert,
             runner::confirm,
@@ -266,8 +264,7 @@ pub fn run() {
             remote_instance::remote_instance_connect,
             remote_instance::remote_instance_poll,
             remote_instance::remote_instance_disconnect,
-        ])
-        .on_webview_event(frontend::track_frontend_drop_event);
+        ]);
 
     #[cfg(target_os = "macos")]
     let builder = builder

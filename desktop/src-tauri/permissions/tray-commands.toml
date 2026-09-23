@@ -48,11 +48,6 @@ description = "Allows the frontend WebView to read whether its native window is 
 commands.allow = ["frontend_presence"]
 
 [[permission]]
-identifier = "desktop-frontend-file-drop"
-description = "Allows the Lumiverse frontend to read supported files from a user-initiated native drop."
-commands.allow = ["read_frontend_drop_file"]
-
-[[permission]]
 identifier = "desktop-startup-appearance"
 description = "Allows the frontend to cache a safe startup titlebar and native appearance snapshot."
 commands.allow = ["cache_frontend_startup_appearance"]

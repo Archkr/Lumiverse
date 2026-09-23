@@ -82,6 +82,14 @@ html[data-tauri-desktop] {
   overflow: hidden;
 }
 
+html[data-tauri-desktop][data-desktop-windows-corners="rounded"] {
+  --desktop-window-corner-radius: 8px;
+}
+
+html[data-tauri-desktop][data-desktop-windows-corners="square"] {
+  --desktop-window-corner-radius: 0px;
+}
+
 html {
   height: 100%;
   /* `overflow: clip` (vs `hidden`) is strictly non-scrollable — it cannot be

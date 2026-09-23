@@ -1580,7 +1580,6 @@
     "cancel": "Cancel",
     "dropToImport": "Drop character files to import",
     "dropFileTypes": ".json, .png, .charx, .jpg",
-    "desktopDropReadFailed": "Lumiverse Desktop couldn't read the dropped file.",
     "tagFilter": {
       "label": "Tags",
       "labelWithCount": "Tags ({{count}})",
