@@ -18,6 +18,7 @@ import CharacterEditorPage from '@/components/panels/character-browser/Character
 import ModalContainer from '@/components/modals/ModalContainer'
 import SpindleUIManager from '@/components/spindle/SpindleUIManager'
 import ToastContainer from '@/components/shared/ToastContainer'
+import WindowFileDropHost from '@/components/shared/WindowFileDropHost'
 import ConnectionLostOverlay from '@/components/shared/ConnectionLostOverlay'
 import ChatHeads from '@/components/chat-heads/ChatHeads'
 import WallpaperLayer from '@/components/shared/WallpaperLayer'
@@ -366,6 +367,7 @@ function Application() {
                   <Outlet />
                 </main>
                 <ViewportDrawer />
+                {!isDesktopFloatingWidgetWindow() && <WindowFileDropHost />}
                 {editingCharacterId && <CharacterEditorPage />}
                 <ModalContainer />
                 {customCSSDockOpen && !customCSSDockUnavailable && (

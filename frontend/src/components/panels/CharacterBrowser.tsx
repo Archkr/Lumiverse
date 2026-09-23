@@ -8,6 +8,7 @@ import { worldBooksApi } from '@/api/world-books'
 import { toast } from '@/lib/toast'
 import { formatTagLibraryImportToastMessage } from '@/lib/tagLibraryImportToast'
 import { characterFilesFromDrop } from '@/lib/character-file-drop'
+import { subscribeWindowFileImport } from '@/lib/window-file-import'
 import { useStore } from '@/store'
 import CharacterToolbar from './character-browser/CharacterToolbar'
 import ChubExpressionBackfillBanner from './character-browser/ChubExpressionBackfillBanner'
@@ -242,6 +243,9 @@ export default function CharacterBrowser() {
   const [dragging, setDragging] = useState(false)
   const [tagLibraryImporting, setTagLibraryImporting] = useState(false)
   const dragCounterRef = useRef(0)
+  const importDroppedFiles = browser.importFiles
+
+  useEffect(() => subscribeWindowFileImport('character', (files) => importDroppedFiles(files)), [importDroppedFiles])
 
   // Drag and drop handlers
   const handleDragEnter = useCallback((e: React.DragEvent) => {

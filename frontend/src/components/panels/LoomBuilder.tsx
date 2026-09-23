@@ -74,7 +74,7 @@ import { presetsApi, type StashedPromptBlock } from '@/api/presets'
 import { imagesApi } from '@/api/images'
 import { usePresetProfiles } from '@/hooks/usePresetProfiles'
 import { getEffectivePromptVariableValues } from '@/hooks/preset-profile-prompt-variables'
-import { computeGroups, createBlock, createMarkerBlock, getRemotePresetOrigin, isProtectedSealedSource, resolvePromptBlockPlacements } from '@/lib/loom/service'
+import { computeGroups, createBlock, createMarkerBlock, detectImportedPresetKind, getRemotePresetOrigin, isProtectedSealedSource, resolvePromptBlockPlacements } from '@/lib/loom/service'
 import { sanitizeCharacterTagTrigger, splitCharacterTagTriggerInput } from '@/lib/loom/characterTagTrigger'
 import {
   PROMPT_TEMPLATES,
@@ -102,6 +102,7 @@ import { toast } from '@/lib/toast'
 import { useLongPress } from '@/hooks/useLongPress'
 import { markLoomRuntimeProfileContext } from '@/lib/loom/runtimeProfile'
 import { importPresetFiles } from '@/lib/loom/preset-import-batch'
+import { subscribeWindowFileImport } from '@/lib/window-file-import'
 import SpindlePresetEditorTabContent from '@/components/spindle/SpindlePresetEditorTabContent'
 import SpindlePresetEditorToolbarItem from '@/components/spindle/SpindlePresetEditorToolbarItem'
 import { applyPresetEditorDraft, toPresetEditorDraft } from '@/lib/spindle/preset-editor-adapter'
@@ -2963,19 +2964,16 @@ useEffect(() => {
     fileInputRef.current?.click()
   }, [])
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Snapshot before resetting: clearing a file input also empties its live
-    // FileList in Chromium.
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
+  const importSelectedFiles = useCallback(async (files: File[], importType: string) => {
     if (files.length === 0 || presetImportInProgressRef.current) return
 
-    const importType = importTypeRef.current
     presetImportInProgressRef.current = true
     try {
       const result = await importPresetFiles(
         files,
-        importType === 'st' ? importFromST : importFromFile,
+        (payload, filename) => importType === 'st' || (importType === 'auto' && detectImportedPresetKind(payload) === 'legacy')
+          ? importFromST(payload, filename)
+          : importFromFile(payload, filename),
         {
           invalidJson: lb('toast.invalidPresetJson'),
           importFailed: lb('toast.presetImportFailed'),
@@ -2993,6 +2991,14 @@ useEffect(() => {
       presetImportInProgressRef.current = false
     }
   }, [importFromFile, importFromST, lb])
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    await importSelectedFiles(files, importTypeRef.current)
+  }, [importSelectedFiles])
+
+  useEffect(() => subscribeWindowFileImport('preset', (files) => importSelectedFiles(files, 'auto')), [importSelectedFiles])
 
   const presetEditorToolbar = presetEditorToolbarItems.some((item) => item.visible) ? (
     <div className={s.extensionToolbar}>

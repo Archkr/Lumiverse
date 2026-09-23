@@ -46,6 +46,7 @@ import { Spinner } from '@/components/shared/Spinner'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
 import TokenCountButton from '@/components/shared/TokenCountButton'
 import { charactersApi, type CharacterPerspectiveLayerInput } from '@/api/characters'
+import { ApiError } from '@/api/client'
 import { characterGalleryApi } from '@/api/character-gallery'
 import { imagesApi } from '@/api/images'
 import { personasApi } from '@/api/personas'
@@ -480,6 +481,7 @@ export default function CharacterEditorPage() {
 
   const character = allCharacters.find((c) => c.id === editingCharacterId) ?? null
   const isOpen = !!editingCharacterId
+  const [characterLoadError, setCharacterLoadError] = useState<{ id: string; message: string } | null>(null)
   const tabs = useMemo<{ id: TabId; label: string }[]>(() => [
     ...builtInTabs,
     ...characterEditorTabs.map((tab) => ({ id: tab.id, label: tab.title })),
@@ -535,7 +537,10 @@ export default function CharacterEditorPage() {
   const savingTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const lastSyncedId = useRef<string | null>(null)
 
-  const close = useCallback(() => setEditingCharacterId(null), [setEditingCharacterId])
+  const close = useCallback(() => {
+    setCharacterLoadError(null)
+    setEditingCharacterId(null)
+  }, [setEditingCharacterId])
   const perspectiveLayerSensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
@@ -551,6 +556,25 @@ export default function CharacterEditorPage() {
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [isOpen, close])
+
+  useEffect(() => {
+    if (!editingCharacterId || character) return
+    let cancelled = false
+    charactersApi.get(editingCharacterId).then((loaded) => {
+      if (!cancelled && !useStore.getState().characters.some((item) => item.id === loaded.id)) {
+        updateCharInStore(loaded.id, loaded)
+      }
+    }).catch((error: unknown) => {
+      if (cancelled) return
+      setCharacterLoadError({
+        id: editingCharacterId,
+        message: error instanceof ApiError && error.status === 404
+          ? t('characterEditor.notFound')
+          : error instanceof Error ? error.message : t('characterEditor.notFound'),
+      })
+    })
+    return () => { cancelled = true }
+  }, [editingCharacterId, character, updateCharInStore, t])
 
   /// Guide Viewer 
   useEffect(() => {
@@ -1976,7 +2000,9 @@ export default function CharacterEditorPage() {
           >
             {!character ? (
               <div className={styles.header}>
-                <span className={styles.creatorText}>{t('characterEditor.notFound')}</span>
+                <span className={styles.creatorText}>
+                  {characterLoadError?.id === editingCharacterId ? characterLoadError.message : tc('actions.loading')}
+                </span>
                 <CloseButton onClick={close} variant="solid" />
               </div>
             ) : (
