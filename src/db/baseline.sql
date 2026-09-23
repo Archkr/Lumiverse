@@ -408,7 +408,7 @@ CREATE TABLE illarin_delivery_receipt (
   content_generation INTEGER NOT NULL,
   installed_at TEXT NOT NULL DEFAULT (datetime('now')),
   acknowledged_at TEXT,
-  PRIMARY KEY (user_id, delivery_id)
+  PRIMARY KEY (user_id, instance_id, delivery_id)
 );
 
 CREATE TABLE image_gen_connections (

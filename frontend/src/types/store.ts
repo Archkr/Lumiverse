@@ -1280,7 +1280,7 @@ export interface SpindleSlice {
   updateExtension: (id: string) => Promise<void>
   switchBranch: (id: string, branch: string) => Promise<void>
   removeExtension: (id: string) => Promise<void>
-  enableExtension: (id: string) => Promise<void>
+  enableExtension: (id: string, approvedPermissions?: string[]) => Promise<void>
   disableExtension: (id: string) => Promise<void>
   restartExtension: (id: string) => Promise<void>
   grantPermission: (id: string, permission: string) => Promise<void>

@@ -27,7 +27,7 @@ function pair(access: string, refresh: string): TokenPair {
     accessToken: access,
     accessTokenExpiresAt: futureExpiry(),
     refreshToken: refresh,
-    instance: { id: `inst-${refresh}`, scopes: ["asset:receive"] },
+    connectedApp: { id: `inst-${refresh}`, permissions: ["work:receive"] },
   };
 }
 
@@ -72,24 +72,24 @@ describe("illarin protocol conformance checklist", () => {
   test("declarations carry required arrays and stay inside every bound", () => {
     const declaration = buildDeclaration({ instanceName: "check", applicationVersion: "1.0.0", scopes: [] });
     expect(Array.isArray(declaration.capabilities)).toBe(true);
-    expect(Array.isArray(declaration.acceptedTargets)).toBe(true);
+    expect(Array.isArray(declaration.acceptedFormats)).toBe(true);
     expect(declaration.capabilities.length).toBeLessThanOrEqual(DECLARATION_LIMITS.maxArrayEntries);
-    expect(declaration.acceptedTargets.length).toBeLessThanOrEqual(DECLARATION_LIMITS.maxArrayEntries);
+    expect(declaration.acceptedFormats.length).toBeLessThanOrEqual(DECLARATION_LIMITS.maxArrayEntries);
     expect(new TextEncoder().encode(JSON.stringify(declaration)).length).toBeLessThanOrEqual(
       DECLARATION_LIMITS.maxBodyBytes,
     );
   });
 
   test("only documented scopes are ever requested", () => {
-    const decision = ["asset:receive"] as const;
+    const decision = ["work:receive"] as const;
     for (const scope of decision) expect(ILLARIN_SCOPES).toContain(scope);
     const declaration = buildDeclaration({ instanceName: "check", scopes: [...decision] });
-    expect(declaration.scopes).toEqual([...decision]);
+    expect(declaration.permissions).toEqual([...decision]);
   });
 
   test("declaration updates omit names and scopes", () => {
     const update = buildDeclarationUpdate(
-      buildDeclaration({ instanceName: "check", applicationVersion: "2.0.0", scopes: ["asset:receive"] }),
+      buildDeclaration({ instanceName: "check", applicationVersion: "2.0.0", scopes: ["work:receive"] }),
     );
     const keys = Object.keys(update);
     expect(keys).not.toContain("applicationName");
@@ -105,7 +105,7 @@ describe("illarin protocol conformance checklist", () => {
     await updateInstanceDeclaration("https://illarin.com", "ia1.secret-access", {
       protocolVersion: 1,
       capabilities: [],
-      acceptedTargets: [],
+      acceptedFormats: [],
     }, options);
 
     for (const url of urls()) {
@@ -125,8 +125,12 @@ describe("illarin protocol conformance checklist", () => {
     expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual(["delivery-1"]);
     expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-b")).toEqual([]);
 
+    svc.recordDeliveryInstalled(USER_A, "instance-b", "delivery-1", "asset-2", 6);
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-b")).toEqual(["delivery-1"]);
+
     svc.markDeliveriesAcknowledged(USER_A, "instance-a", ["delivery-1"]);
     expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual([]);
+    expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-b")).toEqual(["delivery-1"]);
 
     svc.queueDeliveryAcknowledgement(USER_A, "instance-a", "delivery-1");
     expect(svc.pendingDeliveryAcknowledgements(USER_A, "instance-a")).toEqual(["delivery-1"]);

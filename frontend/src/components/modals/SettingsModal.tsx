@@ -4192,6 +4192,7 @@ function IllarinSettings() {
     instance_name?: string
     instance_id?: string
     scopes?: string[]
+    permission_error?: string | null
     linked_at?: string | null
     declaration_version?: string | null
     pending_link?: { status: 'pending' | 'linked' | 'failed'; reason?: string | null } | null
@@ -4201,8 +4202,11 @@ function IllarinSettings() {
   const statusRef = useRef(status)
   useEffect(() => { statusRef.current = status }, [status])
   const [unlinking, setUnlinking] = useState(false)
+  const [refreshingPermissions, setRefreshingPermissions] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deviceCode, setDeviceCode] = useState<{ user_code: string; verification_url: string } | null>(null)
+  const [browserCode, setBrowserCode] = useState<string | null>(null)
+  const [browserAuthorizationUrl, setBrowserAuthorizationUrl] = useState<string | null>(null)
 
   // Loopback browser linking only reaches the backend when the BROWSER runs
   // on the same machine as the server; otherwise fall back to device codes.
@@ -4241,6 +4245,8 @@ function IllarinSettings() {
     stopPolling()
     setLinking(false)
     setDeviceCode(null)
+    setBrowserCode(null)
+    setBrowserAuthorizationUrl(null)
     fetchStatus()
   }
 
@@ -4305,6 +4311,8 @@ function IllarinSettings() {
 
     setError(null)
     setLinking(true)
+    setBrowserCode(null)
+    setBrowserAuthorizationUrl(null)
     if (!isLocalOrigin) {
       await startDeviceFlow(authorizationTab)
       return
@@ -4323,18 +4331,24 @@ function IllarinSettings() {
         setLinking(false)
         return
       }
-      const data = await res.json() as { authorize_url?: string }
-      const navigation = navigateAuthorizationPopup(authorizationTab, data.authorize_url)
-      if (navigation.status === 'invalid') {
+      const data = await res.json() as { authorize_url?: string; user_code?: string }
+      if (!data.user_code) {
         closeAuthorizationPopup(authorizationTab)
         setError(t('illarin.errLinkFailed'))
         setLinking(false)
         return
       }
+      setBrowserCode(data.user_code)
+      const navigation = navigateAuthorizationPopup(authorizationTab, data.authorize_url)
+      if (navigation.status === 'invalid') {
+        closeAuthorizationPopup(authorizationTab)
+        setError(t('illarin.errLinkFailed'))
+        setLinking(false)
+        setBrowserCode(null)
+        return
+      }
 
-      // Same-tab navigation still completes local loopback authorization when
-      // a browser blocks the reserved popup.
-      if (navigation.status === 'blocked') window.location.assign(navigation.url)
+      if (navigation.status === 'blocked') setBrowserAuthorizationUrl(navigation.url)
 
       // Backend listens on loopback while the authorization page is open.
       pollRef.current.timer = setInterval(async () => {
@@ -4344,6 +4358,8 @@ function IllarinSettings() {
             setError(t('illarin.errLinkFailed'))
             stopPolling()
             setLinking(false)
+            setBrowserCode(null)
+            setBrowserAuthorizationUrl(null)
           } else {
             finishLinking()
           }
@@ -4354,6 +4370,8 @@ function IllarinSettings() {
       closeAuthorizationPopup(authorizationTab)
       setError(err.message || t('illarin.errConnectFailed'))
       setLinking(false)
+      setBrowserCode(null)
+      setBrowserAuthorizationUrl(null)
     }
   }
 
@@ -4377,6 +4395,21 @@ function IllarinSettings() {
       setError(t('illarin.errUnlinkFailed'))
     } finally {
       setUnlinking(false)
+    }
+  }
+
+  const handleRefreshPermissions = async () => {
+    setRefreshingPermissions(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/v1/illarin/permissions/refresh', { method: 'POST', credentials: 'include' })
+      if (!response.ok) throw new Error(t('illarin.errRefreshPermissions'))
+      await fetchStatus()
+    } catch {
+      setError(t('illarin.errRefreshPermissions'))
+      await fetchStatus()
+    } finally {
+      setRefreshingPermissions(false)
     }
   }
 
@@ -4415,8 +4448,18 @@ function IllarinSettings() {
 
           <div className={styles.field}>
             <span className={styles.fieldLabel}>{t('illarin.scopesLabel')}</span>
-            <span className={styles.lumihubMeta}>{(status.scopes ?? []).join(', ')}</span>
+            <span className={styles.lumihubMeta}>{(status.scopes ?? []).join(', ') || t('illarin.noPermissions')}</span>
           </div>
+
+          {status.permission_error && (
+            <span className={styles.helperText}>{t('illarin.permissionOff', { permission: status.permission_error })}</span>
+          )}
+
+          <Button variant="ghost" size="sm" onClick={handleRefreshPermissions} disabled={refreshingPermissions} loading={refreshingPermissions}>
+            {t('illarin.refreshPermissions')}
+          </Button>
+
+          {error && <span className={styles.helperText} style={{ color: 'var(--lumiverse-danger)' }}>{error}</span>}
 
           {status.declaration_version && (
             <div className={styles.field}>
@@ -4475,6 +4518,21 @@ function IllarinSettings() {
                 {deviceCode.user_code}
               </span>
               <span className={styles.lumihubDisclosureText}>{t('illarin.deviceNote')}</span>
+            </div>
+          )}
+
+          {browserCode && (
+            <div className={styles.lumihubDisclosure}>
+              <span className={styles.lumihubDisclosureTitle}>{t('illarin.browserCodeTitle')}</span>
+              <span className={styles.lumihubDisclosureText}>{t('illarin.browserCodeNote')}</span>
+              {browserAuthorizationUrl && (
+                <a className={styles.illarinVerificationLink} href={browserAuthorizationUrl} target="_blank" rel="noopener noreferrer">
+                  {t('illarin.openAuthorization')}
+                </a>
+              )}
+              <span className={styles.lumihubInput} style={{ fontSize: '1.4em', textAlign: 'center', letterSpacing: '0.2em' }}>
+                {browserCode}
+              </span>
             </div>
           )}
 

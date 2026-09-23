@@ -4,23 +4,27 @@ import * as svc from "../services/illarin-instance.service";
 import type { IllarinInstance } from "../services/illarin-instance.service";
 import {
   collectDeliveries,
+  IllarinApiError,
   IllarinRateLimitError,
   IllarinUnauthorizedError,
   IllarinUnavailableError,
 } from "./api";
-import type { DeliveryWorkList, IllarinDelivery, WithheldNotice } from "./types";
+import type { DeliveryWorkList, IllarinDelivery, TakedownNotice } from "./types";
 import { installIllarinDelivery } from "./delivery-installer";
 import { recordWithheld, reportLibrary } from "./extensions";
 import { getValidAccessToken, handleTerminalUnauthorized, refreshAccessToken } from "./tokens";
+import { clearPermissionError, setPermissionError } from "./permission-state";
 
 const MAX_BACKOFF_MS = 60_000;
+const LIBRARY_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60_000;
+let librarySnapshotTimer: ReturnType<typeof setInterval> | null = null;
 
 export interface DeliveryCycleDependencies {
   getInstance(userId: string): Promise<IllarinInstance | null>;
   getAccessToken(userId: string): Promise<string | null>;
   refreshAccessToken(userId: string): Promise<string | null>;
   collect(baseUrl: string, token: string, acknowledge: readonly string[]): Promise<DeliveryWorkList>;
-  recordWithheld(userId: string, notices: readonly WithheldNotice[]): Promise<void>;
+  recordWithheld(userId: string, notices: readonly TakedownNotice[]): Promise<void>;
   pendingAcknowledgements(userId: string, instanceId: string): string[];
   markAcknowledged(userId: string, instanceId: string, deliveryIds: readonly string[]): void;
   hasReceipt(userId: string, instanceId: string, deliveryId: string): boolean;
@@ -30,8 +34,8 @@ export interface DeliveryCycleDependencies {
     userId: string,
     instanceId: string,
     deliveryId: string,
-    assetId: string,
-    contentGeneration: number,
+    workId: string,
+    versionNumber: number,
   ): void;
   terminalUnauthorized(userId: string): Promise<void>;
 }
@@ -94,7 +98,7 @@ export async function runDeliveryCycle(
   signal?: AbortSignal,
 ): Promise<DeliveryCycleResult> {
   const instance = await dependencies.getInstance(userId);
-  if (!instance || !instance.scopes.includes("asset:receive")) {
+  if (!instance || !instance.scopes.includes("work:receive")) {
     return { status: "stop", installed: 0, failed: 0 };
   }
   const acknowledge = dependencies.pendingAcknowledgements(userId, instance.instanceId);
@@ -104,11 +108,11 @@ export async function runDeliveryCycle(
   // A successful response means Illarin committed every acknowledgement in
   // the request, whether it returned work (200) or an empty wait (204).
   dependencies.markAcknowledged(userId, instance.instanceId, acknowledge);
-  await dependencies.recordWithheld(userId, work.withheld);
+  await dependencies.recordWithheld(userId, work.takedowns);
 
   let installed = 0;
   let failed = 0;
-  for (const delivery of work.deliveries) {
+  for (const delivery of work.sends) {
     if (signal?.aborted) return { status: "stop", installed, failed };
     if (dependencies.hasReceipt(userId, instance.instanceId, delivery.id)) {
       dependencies.queueAcknowledgement(userId, instance.instanceId, delivery.id);
@@ -116,19 +120,19 @@ export async function runDeliveryCycle(
     }
     try {
       await dependencies.install(userId, delivery);
-      if (signal?.aborted) return { status: "stop", installed, failed };
       dependencies.recordInstalled(
         userId,
         instance.instanceId,
         delivery.id,
-        delivery.assetId,
-        delivery.contentGeneration,
+        delivery.workId,
+        delivery.versionNumber,
       );
       installed++;
+      if (signal?.aborted) return { status: "stop", installed, failed };
     } catch (err) {
       failed++;
       console.warn(
-        `[Illarin] Delivery ${delivery.id} (${delivery.kind}) was not installed:`,
+        `[Illarin] Send ${delivery.id} (${delivery.type}) was not installed:`,
         err instanceof Error ? err.message : err,
       );
     }
@@ -150,6 +154,7 @@ function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
 }
 
 const workers = new Map<string, AbortController>();
+const workerTasks = new Map<string, Promise<void>>();
 
 async function runWorker(userId: string, controller: AbortController): Promise<void> {
   let failures = 0;
@@ -159,6 +164,12 @@ async function runWorker(userId: string, controller: AbortController): Promise<v
       if (result.status === "stop") break;
       failures = 0;
     } catch (err) {
+      if (controller.signal.aborted || workers.get(userId) !== controller) break;
+      if (err instanceof IllarinApiError && err.status === 403) {
+        setPermissionError(userId, "work:receive");
+        console.warn("[Illarin] Send collection disabled by missing work:receive permission. Enable it in Illarin account settings.");
+        break;
+      }
       failures++;
       const retryAfterMs = (err instanceof IllarinRateLimitError || err instanceof IllarinUnavailableError)
         && err.retryAfterSeconds !== null
@@ -175,9 +186,15 @@ async function runWorker(userId: string, controller: AbortController): Promise<v
 
 export function startDeliveryWorker(userId: string): void {
   stopDeliveryWorker(userId);
+  clearPermissionError(userId);
   const controller = new AbortController();
+  const previous = workerTasks.get(userId);
   workers.set(userId, controller);
-  void runWorker(userId, controller);
+  const task = (async () => {
+    if (previous) await previous;
+    if (!controller.signal.aborted) await runWorker(userId, controller);
+  })().finally(() => { if (workerTasks.get(userId) === task) workerTasks.delete(userId); });
+  workerTasks.set(userId, task);
   void reportLibrary(userId);
 }
 
@@ -189,11 +206,21 @@ export function stopDeliveryWorker(userId: string): void {
 export async function startAllDeliveryWorkers(): Promise<void> {
   const instances = await svc.listIllarinInstances();
   for (const instance of instances) {
-    if (instance.scopes.includes("asset:receive")) startDeliveryWorker(instance.userId);
+    if (instance.scopes.includes("work:receive")) startDeliveryWorker(instance.userId);
+    else if (instance.scopes.includes("library:sync")) void reportLibrary(instance.userId);
+  }
+  if (!librarySnapshotTimer) {
+    librarySnapshotTimer = setInterval(() => {
+      void svc.listIllarinInstances().then(async (current) => {
+        for (const instance of current) await reportLibrary(instance.userId);
+      }).catch((err) => console.warn("[Illarin] Library snapshot skipped:", err instanceof Error ? err.message : err));
+    }, LIBRARY_SNAPSHOT_INTERVAL_MS);
   }
 }
 
 export function stopAllDeliveryWorkers(): void {
   for (const controller of workers.values()) controller.abort();
   workers.clear();
+  if (librarySnapshotTimer) clearInterval(librarySnapshotTimer);
+  librarySnapshotTimer = null;
 }
