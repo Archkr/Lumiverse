@@ -181,12 +181,14 @@ test("validates backend and frontend dependencies with the same Termux runtime w
 
   const probe = backendDependencyProbeCmd(env);
   expect(probe.slice(0, 2)).toEqual(["grun", env.LUMIVERSE_BUN_PATH]);
-  expect(probe.at(-1)).toContain("await import('better-auth')");
-  expect(probe.at(-1)).toContain("await import('@better-auth/oauth-provider')");
+  expect(probe.at(-1)).toContain("import('better-auth')");
+  expect(probe.at(-1)).toContain("import('@better-auth/oauth-provider')");
+  expect(probe.at(-1)).not.toMatch(/\s/);
 
   const frontendProbe = frontendDependencyProbeCmd(env);
   expect(frontendProbe.slice(0, 2)).toEqual(["grun", env.LUMIVERSE_BUN_PATH]);
-  expect(frontendProbe.at(-1)).toContain("await import('@better-auth/oauth-provider/client')");
+  expect(frontendProbe.at(-1)).toContain("import('@better-auth/oauth-provider/client')");
+  expect(frontendProbe.at(-1)).not.toMatch(/\s/);
 });
 
 test("Better Auth validation detects a missing exported core subpath", () => {

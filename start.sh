@@ -799,14 +799,16 @@ run_bun_dependency_install() {
 
 verify_backend_dependencies() {
   local dir="$1"
-  (cd "$dir" && _bun -e "await import('better-auth'); await import('@better-auth/oauth-provider')")
+  # glibc-runner/grun currently word-splits argv containing spaces on Termux.
+  # Keep eval probes whitespace-free so fallback runtimes receive one intact -e arg.
+  (cd "$dir" && _bun -e "await(import('better-auth'));await(import('@better-auth/oauth-provider'))")
 }
 
 verify_frontend_dependencies() {
   local dir="$1"
   # Exercise the browser-facing import that reaches Better Auth's transitive
   # core files. Direct-package checks do not catch a partially extracted core.
-  (cd "$dir" && _bun -e "await import('@better-auth/oauth-provider/client')")
+  (cd "$dir" && _bun -e "await(import('@better-auth/oauth-provider/client'))")
 }
 
 verify_dependencies() {
