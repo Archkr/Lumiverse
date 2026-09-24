@@ -47,7 +47,7 @@ afterAll(() => {
   secretSpy.mockRestore(); eventSpy.mockRestore(); closeDatabase();
 });
 
-async function run(provider: string, body: object[], options: { responses?: boolean; nonStreaming?: boolean; presetName?: string } = {}) {
+async function run(provider: string, body: object[], options: { responses?: boolean; nonStreaming?: boolean; presetName?: string; chunkDelayMs?: number } = {}) {
   const connection = await connections.createConnection(userId, {
     name: "Mock", provider, model: "test-model", api_url: "https://example.test",
   });
@@ -66,7 +66,18 @@ async function run(provider: string, body: object[], options: { responses?: bool
   chats.createMessage(chat.id, { is_user: true, name: "User", content: "Hello." }, userId);
   fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => options.nonStreaming
     ? Response.json(body[0])
-    : new Response(body.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""))) as unknown as typeof fetch);
+    : options.chunkDelayMs
+      ? new Response(new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            for (const [index, chunk] of body.entries()) {
+              if (index > 0 && options.chunkDelayMs) await Bun.sleep(options.chunkDelayMs);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+            }
+            controller.close();
+          },
+        }))
+      : new Response(body.map(e => `data: ${JSON.stringify(e)}\n\n`).join(""))) as unknown as typeof fetch);
   const result = await startGeneration({
     userId, chat_id: chat.id, connection_id: connection.id, generation_type: "normal",
     ...(preset ? { preset_id: preset.id } : {}),
@@ -213,6 +224,42 @@ test("generation meta token count uses provider usage without local tokenization
   } finally {
     tokenizerSpy.mockRestore();
   }
+});
+test("non-streaming generation metrics retain identity without TTFT or TPS", async () => {
+  const { generationId } = await run("openai", [{
+    choices: [{ message: { content: "Visible answer." }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+  }], { nonStreaming: true });
+  const deadline = Date.now() + 3000;
+  while (!metricsReady.some((event) => event.generationId === generationId) && Date.now() < deadline) {
+    await Bun.sleep(5);
+  }
+  const metricsEvent = metricsReady.find((event) => event.generationId === generationId);
+  expect(metricsEvent?.generationMetrics).toMatchObject({ wasStreaming: false, model: "test-model" });
+  expect(metricsEvent?.generationMetrics.ttft).toBeUndefined();
+  expect(metricsEvent?.generationMetrics.tps).toBeUndefined();
+  expect(chats.getMessage(userId, metricsEvent.messageId)?.extra.generationMetrics).toEqual(metricsEvent.generationMetrics);
+});
+test("TPS is measured between provider content and stop, before message completion", async () => {
+  const { generationId } = await run("openai", [
+    { choices: [{ delta: { content: "Visible answer." }, finish_reason: null }] },
+    { choices: [{ delta: {}, finish_reason: "stop" }] },
+    {
+      choices: [],
+      usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+    },
+  ], { chunkDelayMs: 30 });
+  const deadline = Date.now() + 3000;
+  while (!metricsReady.some((event) => event.generationId === generationId) && Date.now() < deadline) {
+    await Bun.sleep(5);
+  }
+  const entry = pool.getPoolEntry(generationId)!;
+  const metrics = metricsReady.find((event) => event.generationId === generationId)?.generationMetrics;
+  expect(entry.firstTokenAt).toBeGreaterThanOrEqual(entry.streamingStartedAt!);
+  expect(entry.firstContentTokenAt).toBeGreaterThanOrEqual(entry.firstTokenAt!);
+  expect(entry.responseStoppedAt).toBeGreaterThan(entry.firstContentTokenAt!);
+  expect(entry.completedAt! - entry.responseStoppedAt!).toBeGreaterThanOrEqual(15);
+  expect(metrics?.tps).toBe(Math.round(200_000 / (entry.responseStoppedAt! - entry.firstContentTokenAt!)) / 10);
 });
 for (const fixture of [
   { provider: "openai", body: [{ choices: [{ delta: { content: "Hello." }, finish_reason: "stop" }] }] },

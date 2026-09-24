@@ -3186,6 +3186,8 @@ async function runGeneration(
 
   let fullContent = "";
   let fullReasoning = "";
+  const poolEntry = pool.getPoolEntry(generationId);
+  let lastProviderContentAt: number | undefined;
   const trimIncompleteWords = lifecycle.trimIncompleteWords === true;
   let responseBehaviorOptions:
     | {
@@ -3283,15 +3285,21 @@ async function runGeneration(
     queueStreamSegment(text, appended.seq, appended.offset, "reasoning");
   }
 
-  function processContentToken(token: string) {
+  function processContentToken(token: string, receivedAt?: number) {
     const parsed = cotParser.push(token);
     if (parsed.reasoning) emitReasoningToken(parsed.reasoning);
+    if (parsed.content && receivedAt != null && poolEntry && poolEntry.firstContentTokenAt == null) {
+      poolEntry.firstContentTokenAt = receivedAt;
+    }
     if (parsed.content) emitContentToken(parsed.content);
   }
 
   function flushCotBuffers() {
     const parsed = cotParser.flush();
     if (parsed.reasoning) emitReasoningToken(parsed.reasoning);
+    if (parsed.content && lastProviderContentAt != null && poolEntry && poolEntry.firstContentTokenAt == null) {
+      poolEntry.firstContentTokenAt = lastProviderContentAt;
+    }
     if (parsed.content) emitContentToken(parsed.content);
   }
 
@@ -3479,7 +3487,6 @@ async function runGeneration(
   delete parameters._streaming;
 
   // Record streaming mode on the pool entry for metrics
-  const poolEntry = pool.getPoolEntry(generationId);
   if (poolEntry) poolEntry.wasStreaming = useStreaming;
 
   let emittedStopped = false;
@@ -3574,8 +3581,12 @@ async function runGeneration(
           }
           throw err;
         }
-        if (result.done) break;
+        if (result.done) {
+          if (poolEntry && !signal.aborted) poolEntry.responseStoppedAt = Date.now();
+          break;
+        }
         const chunk = result.value;
+        const receivedAt = Date.now();
 
         if (signal.aborted) {
           const persisted = await persistPartialContent();
@@ -3600,6 +3611,7 @@ async function runGeneration(
         // are streamed model output and demonstrate the provider is healthy.
         if (chunk.reasoning || chunk.token) {
           touchActiveGeneration(generationId);
+          if (poolEntry && poolEntry.firstTokenAt == null) poolEntry.firstTokenAt = receivedAt;
         }
 
         // Emit reasoning tokens (provider thinking/extended thinking)
@@ -3612,7 +3624,8 @@ async function runGeneration(
         }
 
         if (chunk.token) {
-          processContentToken(chunk.token);
+          lastProviderContentAt = receivedAt;
+          processContentToken(chunk.token, receivedAt);
         }
 
         if (chunk.tool_calls) {
@@ -3651,6 +3664,7 @@ async function runGeneration(
 
         if (chunk.finish_reason) {
           finishReason = chunk.finish_reason;
+          if (poolEntry) poolEntry.responseStoppedAt = Math.max(chunk.stopReceivedAt ?? receivedAt, lastProviderContentAt ?? 0);
           await iter.return?.(undefined);
           break;
         }
@@ -4066,8 +4080,6 @@ async function runGeneration(
             }
           | undefined;
         if (finalPoolEntry) {
-          // completedAt freezes the response boundary before this deferred
-          // tokenizer/bookkeeping work runs.
           const timingMetrics = calculateGenerationTimingMetrics(
             finalPoolEntry,
             responseTokenCount,

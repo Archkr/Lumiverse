@@ -258,6 +258,7 @@ export interface StreamChunk {
   token: string;
   reasoning?: string;
   finish_reason?: string;
+  stopReceivedAt?: number;
   stop_details?: GenerationStopDetails | null;
   stop_sequence?: string | null;
   /** Accumulated function calls (set on the final chunk when finish_reason indicates tool use). */
