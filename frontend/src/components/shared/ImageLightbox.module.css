@@ -21,6 +21,7 @@
 
 .image {
   touch-action: none;
+  user-select: none;
   max-width: calc(90vw / var(--lumiverse-ui-scale, 1));
   max-height: calc(90vh / var(--lumiverse-ui-scale, 1));
   object-fit: contain;
