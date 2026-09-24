@@ -105,7 +105,9 @@ let keyboardOpen = false
 // after a dismissal, so the live height while "closed" can't be trusted — only
 // the largest genuine height we've seen. Keyed by orientation because the full
 // height differs between portrait and landscape.
-const initialFullHeight = window.visualViewport?.height ?? window.innerHeight
+const initialFullHeight = window.visualViewport
+  ? window.visualViewport.height * window.visualViewport.scale
+  : window.innerHeight
 const startedPortrait = window.matchMedia('(orientation: portrait)').matches
 let basePortrait = startedPortrait ? initialFullHeight : 0
 let baseLandscape = startedPortrait ? 0 : initialFullHeight
@@ -113,10 +115,14 @@ let baseLandscape = startedPortrait ? 0 : initialFullHeight
 function syncViewportVars() {
   const root = document.documentElement
   const viewport = window.visualViewport
-  const width = Math.round(viewport?.width ?? window.innerWidth)
-  const height = Math.round(viewport?.height ?? window.innerHeight)
-  const offsetTop = Math.round(viewport?.offsetTop ?? 0)
-  const offsetLeft = Math.round(viewport?.offsetLeft ?? 0)
+  // Pinch zoom changes the visible region, not the app's layout size.
+  // Normalize dimensions so zoom isn't mistaken for a keyboard opening.
+  const scale = viewport?.scale ?? 1
+  const zoomed = Math.abs(scale - 1) > 0.01
+  const width = Math.round(viewport ? viewport.width * scale : window.innerWidth)
+  const height = Math.round(viewport ? viewport.height * scale : window.innerHeight)
+  const offsetTop = zoomed ? 0 : Math.round(viewport?.offsetTop ?? 0)
+  const offsetLeft = zoomed ? 0 : Math.round(viewport?.offsetLeft ?? 0)
 
   const keyboardActive = hasVirtualKeyboard && keyboardOpen
   // Grow the baseline only from keyboard-closed readings — a closed viewport
@@ -238,6 +244,7 @@ function findScrollableAncestor(el: HTMLElement | null): { el: HTMLElement; hori
 // scrollTo(0, 0) keeps the layout stable. Focused inputs in scroll containers
 // are revealed via container-level scroll instead (see focusin handler below).
 window.visualViewport?.addEventListener('scroll', () => {
+  if (Math.abs((window.visualViewport?.scale ?? 1) - 1) > 0.01) return
   if ((window.navigator as any).standalone && navigator.maxTouchPoints > 0 && window.visualViewport?.offsetTop) {
     window.scrollTo(0, 0)
   }
@@ -314,23 +321,9 @@ if (!isWebKit) {
   }
 }
 
-// ── Viewport lock: prevent pinch-zoom and elastic overscroll ──
-// Safari ignores user-scalable=no and maximum-scale in the viewport meta tag
-// since iOS 10. These JS handlers catch the gestures that CSS alone cannot.
-
-// Prevent Safari gesturestart/gesturechange (pinch zoom)
-document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false })
-document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false })
-
-// Prevent multi-finger zoom on all browsers (2+ touch points = pinch gesture)
-document.addEventListener('touchmove', (e) => {
-  if (e.touches.length > 1) e.preventDefault()
-}, { passive: false })
-
 // Prevent desktop trackpad/touchpad pinch-to-zoom. On Windows and macOS,
 // Chrome/Edge/Firefox translate trackpad pinch gestures into wheel events
-// with ctrlKey=true. Without this, the gesture bypasses all other zoom
-// prevention (viewport meta, touch-action, gesture events) and causes
+// with ctrlKey=true. Preserve the desktop behavior to avoid
 // layout issues — the input area grows disproportionately while the chat
 // shrinks, and absolute-positioned elements can drift out of place.
 document.addEventListener('wheel', (e) => {
@@ -363,6 +356,8 @@ if ((window.navigator as any).standalone === true && navigator.maxTouchPoints > 
 
   document.addEventListener('touchmove', (e) => {
     if (e.touches.length !== 1) return
+    // Let the browser pan the magnified page.
+    if (Math.abs((window.visualViewport?.scale ?? 1) - 1) > 0.01) return
 
     const deltaY = touchStartY - e.touches[0].clientY
     const deltaX = touchStartX - e.touches[0].clientX

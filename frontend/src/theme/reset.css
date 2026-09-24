@@ -122,10 +122,8 @@ body {
   color: var(--lumiverse-text);
   background: var(--lumiverse-bg-deep);
   line-height: 1.5;
-  /* Prevent double-tap zoom and pinch zoom; still allows pan/scroll.
-     pan-x pan-y (instead of manipulation) explicitly excludes pinch-zoom
-     on real touchscreens, complementing the JS gesture/wheel handlers. */
-  touch-action: pan-x pan-y;
+  /* Allow native scrolling and pinch zoom without double-tap zoom. */
+  touch-action: manipulation;
 }
 
 /* The native frontend host is transparent. A theme can opt into a translucent
