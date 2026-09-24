@@ -213,7 +213,7 @@ function syncThemeColorMeta(vars: Record<string, string>) {
   meta.content = color
 }
 
-function resolveDesktopSurfaceColor(
+export function resolveDesktopSurfaceColor(
   config: ThemeConfig,
   vars: Record<string, string>,
   hasPaletteOverride: boolean,
@@ -393,7 +393,7 @@ function buildColorInterpolator(from: string, to: string): ((t: number) => strin
 /** Threshold: if an extension override provides this many variables, it IS the theme. */
 const FULL_THEME_MIN_KEYS = 40
 
-function buildResolvedThemeVars(
+export function buildResolvedThemeVars(
   theme: ThemeConfig | null,
   characterThemeOverlay: CharacterThemeOverlay | null,
   extensionThemeOverrides: ReturnType<typeof useStore.getState>['extensionThemeOverrides'],
@@ -410,7 +410,11 @@ function buildResolvedThemeVars(
     (o) => !mutedExtensionThemes[o.extensionId]
   )
   const hasOverrides = activeOverrides.length > 0
-  const hasPaletteOverride = activeOverrides.some((override) => !!override.paletteAccent)
+  const activeCharacterPalette = config.characterAware && !hasOverrides
+    ? characterThemeOverlay
+    : null
+  const hasPaletteOverride = activeCharacterPalette !== null
+    || activeOverrides.some((override) => !!override.paletteAccent)
 
   // Check if any extension provides a full theme-sized override (e.g. via
   // applyPalette). Even then, still layer it on top of the user's resolved
@@ -430,14 +434,14 @@ function buildResolvedThemeVars(
     }
   }
 
-  const effectiveConfig = config.characterAware && !hasOverrides && characterThemeOverlay
+  const effectiveConfig = activeCharacterPalette
     ? {
         ...config,
-        accent: characterThemeOverlay.accent,
+        accent: activeCharacterPalette.accent,
         baseColorsByMode: {
           ...config.baseColorsByMode,
-          dark: { ...config.baseColorsByMode?.dark, ...characterThemeOverlay.baseColors },
-          light: { ...config.baseColorsByMode?.light, ...characterThemeOverlay.baseColorsLight },
+          dark: { ...config.baseColorsByMode?.dark, ...activeCharacterPalette.baseColors },
+          light: { ...config.baseColorsByMode?.light, ...activeCharacterPalette.baseColorsLight },
         },
       }
     : config
