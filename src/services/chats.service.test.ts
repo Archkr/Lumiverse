@@ -1012,6 +1012,30 @@ describe("avatar-bound appearance", () => {
     expect(result?.chat.metadata.alternate_field_selections.personality).toBe("warm");
   });
 
+  test("a deleted variant left in an old avatar binding does not block appearance changes", () => {
+    seedCharacterWithExtensions("char1", {
+      ...appearanceExtensions,
+      alternate_fields: { personality: appearanceExtensions.alternate_fields.personality },
+    });
+    getDb().query("UPDATE characters SET alternate_greetings = ? WHERE id = ?")
+      .run(JSON.stringify(["Winter hello"]), "char1");
+    seedChat("chat1", "char1", "Chat", "{}", 1);
+
+    const selectedField = applyChatAppearance("u1", "chat1", {
+      type: "field", field: "personality", variant_id: "warm",
+    });
+    expect(selectedField?.chat.metadata.active_avatar_id).toBe("winter-image");
+    expect(selectedField?.chat.metadata.alternate_field_selections).toEqual({ personality: "warm" });
+
+    const selectedAvatar = applyChatAppearance("u1", "chat1", {
+      type: "avatar", avatar_entry_id: "winter-avatar",
+    });
+    expect(selectedAvatar?.chat.metadata.alternate_field_selections).toEqual({ personality: "warm" });
+    expect(applyChatAppearance("u1", "chat1", {
+      type: "field", field: "description", variant_id: "winter-desc",
+    })).toBeNull();
+  });
+
   test("an unbound field change does not rewrite an edited greeting", () => {
     seedCharacterWithExtensions("char1", {
       alternate_fields: {

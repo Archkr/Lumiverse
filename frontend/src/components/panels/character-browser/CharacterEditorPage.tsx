@@ -83,7 +83,7 @@ import { useScaledSortableStyle } from '@/lib/dndUiScale'
 import { useFolders } from '@/hooks/useFolders'
 import { setCharacterEditorController, syncCharacterEditorState } from '@/lib/spindle/character-editor-helper'
 import { applyChatAppearance } from '@/lib/chatAppearance'
-import type { AvatarBindings } from '@/lib/avatarBindings'
+import { setAlternateFieldVariants, type AvatarBindingField, type AvatarBindings } from '@/lib/avatarBindings'
 import styles from './CharacterEditorPage.module.css'
 import clsx from 'clsx'
 import {
@@ -1115,15 +1115,8 @@ export default function CharacterEditorPage() {
   )
 
   const handleAlternatesChange = useCallback(
-    (field: string, variants: Array<{ id: string; label: string; content: string }>) => {
-      mutateExtensions((ext) => {
-        const currentAltFields = ext.alternate_fields || {}
-        const updatedAltFields = { ...currentAltFields, [field]: variants }
-        if (variants.length === 0) delete updatedAltFields[field]
-        const next = { ...ext, alternate_fields: updatedAltFields }
-        if (Object.keys(updatedAltFields).length === 0) delete next.alternate_fields
-        return next
-      }, false)
+    (field: AvatarBindingField, variants: Array<{ id: string; label: string; content: string }>) => {
+      mutateExtensions((ext) => setAlternateFieldVariants(ext, field, variants), false)
     },
     [mutateExtensions]
   )
@@ -2179,7 +2172,7 @@ export default function CharacterEditorPage() {
                         label={t('characterEditor.description')}
                         helper={t('characterEditor.descriptionHelper')}
                         value={fields.description || ''}
-                        alternates={character?.extensions?.alternate_fields?.description}
+                        alternates={workingExtensions.alternate_fields?.description}
                         onChange={(v) => handleFieldChange('description', v)}
                         onAlternatesChange={(variants) => handleAlternatesChange('description', variants)}
                         rows={5}
@@ -2188,7 +2181,7 @@ export default function CharacterEditorPage() {
                         label={t('characterEditor.personality')}
                         helper={t('characterEditor.personalityHelper')}
                         value={fields.personality || ''}
-                        alternates={character?.extensions?.alternate_fields?.personality}
+                        alternates={workingExtensions.alternate_fields?.personality}
                         onChange={(v) => handleFieldChange('personality', v)}
                         onAlternatesChange={(variants) => handleAlternatesChange('personality', variants)}
                         rows={4}
@@ -2197,7 +2190,7 @@ export default function CharacterEditorPage() {
                         label={t('characterEditor.scenario')}
                         helper={t('characterEditor.scenarioHelper')}
                         value={fields.scenario || ''}
-                        alternates={character?.extensions?.alternate_fields?.scenario}
+                        alternates={workingExtensions.alternate_fields?.scenario}
                         onChange={(v) => handleFieldChange('scenario', v)}
                         onAlternatesChange={(variants) => handleAlternatesChange('scenario', variants)}
                         rows={3}

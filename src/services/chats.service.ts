@@ -1692,8 +1692,6 @@ function applyAvatarEntryToMetadata(
       delete selections[field];
     } else if (typeof variantId === "string" && hasAlternateVariant(character, field, variantId)) {
       selections[field] = variantId;
-    } else {
-      return false;
     }
   }
   setCharacterSelections(metadata, group, characterId, selections);
