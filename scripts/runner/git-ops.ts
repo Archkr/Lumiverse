@@ -1038,12 +1038,12 @@ export const FRONTEND_BUILD_STEPS = [
   {
     label: "frontend component metadata extraction",
     progress: "Extracting frontend component metadata...",
-    command: ["bun", "run", "extract-props"],
+    command: ["bun", "run", "scripts/extract-props.ts"],
   },
   {
     label: "frontend CSS variable extraction",
     progress: "Extracting frontend CSS variables...",
-    command: ["bun", "run", "extract-css-vars"],
+    command: ["bun", "run", "scripts/extract-css-vars.ts"],
   },
   {
     label: "frontend Vite bundling",

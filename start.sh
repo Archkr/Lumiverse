@@ -885,7 +885,15 @@ build_frontend() {
   install_deps "$FRONTEND_DIR" "frontend"
 
   info "Building frontend..."
-  (cd "$FRONTEND_DIR" && _bun run build)
+  (
+    cd "$FRONTEND_DIR"
+    # Keep every Bun hop behind _bun on Termux. Package-script aliases such as
+    # `bun run build` recurse through a shell and can resolve the raw glibc Bun
+    # binary, bypassing grun/proot and failing with "required file not found".
+    _bun run scripts/extract-props.ts
+    _bun run scripts/extract-css-vars.ts
+    _bun run scripts/build-frontend.ts
+  )
   ok "Frontend built -> $FRONTEND_DIR/dist"
 }
 

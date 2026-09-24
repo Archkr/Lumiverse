@@ -286,16 +286,32 @@ test("reports frontend build phases separately while preserving their order", ()
   expect(FRONTEND_BUILD_STEPS.map(({ label, command }) => ({ label, command }))).toEqual([
     {
       label: "frontend component metadata extraction",
-      command: ["bun", "run", "extract-props"],
+      command: ["bun", "run", "scripts/extract-props.ts"],
     },
     {
       label: "frontend CSS variable extraction",
-      command: ["bun", "run", "extract-css-vars"],
+      command: ["bun", "run", "scripts/extract-css-vars.ts"],
     },
     {
       label: "frontend Vite bundling",
       command: ["bun", "run", "scripts/build-frontend.ts"],
     },
+  ]);
+});
+
+test("runs frontend build entrypoints directly through the selected Termux Bun wrapper", () => {
+  const env = {
+    LUMIVERSE_IS_TERMUX: "true",
+    LUMIVERSE_BUN_METHOD: "grun",
+    LUMIVERSE_BUN_PATH: "/data/data/com.termux/files/home/.bun/bin/bun",
+  };
+
+  expect(FRONTEND_BUILD_STEPS.map((step) =>
+    bunRuntimeCmd([...step.command].slice(1), env),
+  )).toEqual([
+    ["grun", env.LUMIVERSE_BUN_PATH, "run", "scripts/extract-props.ts"],
+    ["grun", env.LUMIVERSE_BUN_PATH, "run", "scripts/extract-css-vars.ts"],
+    ["grun", env.LUMIVERSE_BUN_PATH, "run", "scripts/build-frontend.ts"],
   ]);
 });
 
