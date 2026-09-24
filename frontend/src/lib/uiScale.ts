@@ -1,4 +1,4 @@
-export const MIN_UI_SCALE = 0.8
+export const MIN_UI_SCALE = 0.5
 export const MAX_UI_SCALE = 1.5
 
 /** Saved/imported settings must stay within the range offered by the UI. */

@@ -13,15 +13,16 @@ describe('UI scale settings', () => {
   })
 
   test('keeps valid values and constrains settings to the supported slider range', () => {
+    expect(normalizeUiScale(0.5)).toBe(0.5)
     expect(normalizeUiScale(0.8)).toBe(0.8)
     expect(normalizeUiScale(1.25)).toBe(1.25)
     expect(normalizeUiScale(1.5)).toBe(1.5)
-    expect(normalizeUiScale(0.01)).toBe(0.8)
+    expect(normalizeUiScale(0.01)).toBe(0.5)
     expect(normalizeUiScale(20)).toBe(1.5)
   })
 
   test('converts rendered pointer movement and viewport dimensions exactly once', () => {
     expect(toLayoutDelta(30, -15, 1.5)).toEqual({ x: 20, y: -10 })
-    expect(toLayoutSize({ width: 1200, height: 800 }, 0.8)).toEqual({ width: 1500, height: 1000 })
+    expect(toLayoutSize({ width: 1200, height: 800 }, 0.5)).toEqual({ width: 2400, height: 1600 })
   })
 })

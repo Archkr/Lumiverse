@@ -52,7 +52,7 @@ for (const name of (process.env.UI_SCALE_BROWSERS ?? 'chromium,firefox,webkit').
         await page.waitForFunction(() => !!window.uiScaleFixture)
 
         // Return to 100% at the end to catch stale sizing after live changes.
-        for (const scale of [0.8, 1, 1.25, 1.5, 1]) {
+        for (const scale of [0.5, 0.8, 1, 1.25, 1.5, 1]) {
           const label = `${name}/${mode}/${width}/${scale}`
           await change(page, 'setScale', scale)
           for (const shell of [true, false]) {

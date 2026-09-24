@@ -42,7 +42,7 @@ whole shell horizontally when a scaled control exceeded the available width.
   not calculate a second shell height. Keep browser pinch zoom separate from
   the saved UI scale.
 - Theme application runs in a React layout effect before paint. Saved settings
-  are validated against the existing 80–150% slider range.
+  are validated against the 50–150% slider range.
 
 CSS zoom does not change media-query breakpoints like browser page zoom does.
 Use available container space for new responsive layouts and keep native browser
