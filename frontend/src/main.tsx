@@ -156,6 +156,10 @@ function syncViewportVars() {
   root.style.setProperty('--app-viewport-height', `${height}px`)
   root.style.setProperty('--app-viewport-offset-top', `${offsetTop}px`)
   root.style.setProperty('--app-viewport-offset-left', `${offsetLeft}px`)
+  root.style.setProperty('--app-visual-viewport-width', `${Math.round(viewport?.width ?? window.innerWidth)}px`)
+  root.style.setProperty('--app-visual-viewport-height', `${Math.round(viewport?.height ?? window.innerHeight)}px`)
+  root.style.setProperty('--app-visual-viewport-offset-top', `${Math.round(viewport?.offsetTop ?? 0)}px`)
+  root.style.setProperty('--app-visual-viewport-offset-left', `${Math.round(viewport?.offsetLeft ?? 0)}px`)
   root.style.setProperty('--app-keyboard-inset-bottom', `${keyboardInsetBottom}px`)
   root.style.setProperty('--app-screen-height', `${Math.round(window.innerHeight)}px`)
 
@@ -319,6 +323,12 @@ if (!isWebKit) {
   if (viewport) {
     viewport.setAttribute('content', viewport.getAttribute('content') + ', interactive-widget=resizes-content')
   }
+}
+
+if (isWebKit && navigator.maxTouchPoints === 0) {
+  const preventDesktopPinchZoom = (event: Event) => event.preventDefault()
+  document.addEventListener('gesturestart', preventDesktopPinchZoom, { passive: false })
+  document.addEventListener('gesturechange', preventDesktopPinchZoom, { passive: false })
 }
 
 // Prevent desktop trackpad/touchpad pinch-to-zoom. On Windows and macOS,

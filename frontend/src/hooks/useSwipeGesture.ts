@@ -112,8 +112,12 @@ export default function useSwipeGesture(
       currentX = touch.clientX
     }
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (e: TouchEvent) => {
       if (!optionsRef.current.enabled) return
+      if (e.touches.length !== 0) {
+        locked = 'vertical'
+        return
+      }
       if (locked !== 'horizontal') {
         locked = null
         return

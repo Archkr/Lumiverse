@@ -15,6 +15,10 @@
   --app-viewport-height: 100dvh;
   --app-viewport-offset-top: 0px;
   --app-viewport-offset-left: 0px;
+  --app-visual-viewport-width: 100vw;
+  --app-visual-viewport-height: 100dvh;
+  --app-visual-viewport-offset-top: 0px;
+  --app-visual-viewport-offset-left: 0px;
   --app-keyboard-inset-bottom: 0px;
   --app-desktop-titlebar-height: 36px;
   /* Keep native-style window chrome above application and extension-owned
