@@ -23,7 +23,10 @@ mock.module('@/components/quick-toolbar/useQuickToolbarActions', () => ({
 mock.module('@/components/shared/CloseButton', () => ({ CloseButton: () => null }))
 mock.module('@/components/shared/ModalShell', () => ({ ModalShell: ({ children }: { children?: unknown }) => children }))
 mock.module('@/components/shared/Toggle', () => ({ Toggle: { Switch: () => null } }))
-mock.module('@/lib/dndUiScale', () => ({ useScaledSortableStyle: () => ({ setNodeRef: () => undefined, style: {} }) }))
+mock.module('@/lib/dndUiScale', () => ({
+  DndContext: ({ children }: { children?: unknown }) => children,
+  useScaledSortableStyle: () => ({ setNodeRef: () => undefined, style: {} }),
+}))
 mock.module('@/lib/toolbarActionSearch', () => ({
   filterActionIds: (ids: string[]) => ids,
   filterActions: (actions: unknown[]) => actions,

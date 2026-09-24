@@ -24,7 +24,6 @@ import {
   Pencil,
 } from 'lucide-react'
 import {
-  DndContext,
   closestCenter,
   MouseSensor,
   TouchSensor,
@@ -79,7 +78,7 @@ import SpindleCharacterEditorTabContent from '@/components/spindle/SpindleCharac
 import { ttsConnectionsApi } from '@/api/tts-connections'
 import type { VoiceRef } from '@/types/api'
 import { filterWorldBooksForChatContextAttachment } from '@/lib/worldBookIndexPrompt'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import { useFolders } from '@/hooks/useFolders'
 import { setCharacterEditorController, syncCharacterEditorState } from '@/lib/spindle/character-editor-helper'
 import { applyChatAppearance } from '@/lib/chatAppearance'

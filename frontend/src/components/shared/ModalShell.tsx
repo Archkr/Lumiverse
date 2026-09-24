@@ -24,7 +24,7 @@ export function ModalShell({
   isOpen,
   onClose,
   maxWidth = 560,
-  maxHeight = '85vh',
+  maxHeight = 'calc(85dvh / var(--lumiverse-ui-scale, 1))',
   zIndex = 10002,
   closeOnBackdrop = true,
   closeOnEscape = true,
@@ -85,7 +85,13 @@ export function ModalShell({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-            style={{ maxWidth, maxHeight, ...style }}
+            // A caller's viewport-unit limit also needs to fit the available
+            // backdrop at larger UI scales and while a keyboard is open.
+            style={{
+              maxWidth,
+              maxHeight: `min(${typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight}, 100%)`,
+              ...style,
+            }}
           >
             <span data-spindle-mount="modal_header_actions" data-spindle-scope={`modal:${modalId}:header-actions`} style={{ display: 'contents' }} />
             {children}

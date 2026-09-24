@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '@/store'
 import { generateThemeVariables } from '@/theme/engine'
@@ -497,7 +497,9 @@ export function useThemeApplicator() {
     }
   }, [])
 
-  useEffect(() => {
+  // Apply dimensions before paint; the resize notification below lets portal
+  // positioning and other geometry consumers update against the new scale.
+  useLayoutEffect(() => {
     const root = document.documentElement
     const motionMq = window.matchMedia('(prefers-reduced-motion: reduce)')
 
@@ -579,12 +581,6 @@ export function useThemeApplicator() {
       syncThemeColorMeta(vars)
       syncDesktopBackground(config, mode, vars, hasPaletteOverride)
 
-      if (!root.hasAttribute('data-pwa')) {
-        const us = parseFloat(vars['--lumiverse-ui-scale'] ?? '1') || 1
-        const viewport = window.visualViewport
-        const vh = viewport ? viewport.height * viewport.scale : window.innerHeight
-        root.style.setProperty('--app-shell-height', `${Math.round(vh / us)}px`)
-      }
       window.dispatchEvent(new Event('resize'))
 
       if (config.enableGlass && config.renderingMode !== 'efficiency' && !motionMq.matches) {

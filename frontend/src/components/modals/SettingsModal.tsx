@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { motion } from 'motion/react'
 import { RefreshCw, GripVertical, Plus } from 'lucide-react'
 import {
-  DndContext,
   closestCenter,
   MouseSensor,
   TouchSensor,
@@ -19,7 +18,7 @@ import {
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import { CloseButton } from '@/components/shared/CloseButton'
 import LanguageSwitcher from '@/components/shared/LanguageSwitcher'
 import { useTranslation } from 'react-i18next'

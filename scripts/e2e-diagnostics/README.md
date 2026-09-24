@@ -24,6 +24,11 @@ bun run diagnose
 
 ## Scripts
 
+- `node check-ui-scale.mjs`
+  Runs a local React 19 scaling regression suite in Chromium, Firefox, and WebKit,
+  with no server or login required. Install the frontend dependencies and run
+  `bun x playwright install chromium firefox webkit` here first. Set
+  `UI_SCALE_BROWSERS=chromium` to run one engine. See [UI scaling](../../developer-docs/docs/frontend-api/ui-scaling.md).
 - `bun run diagnose`
   Captures general chat scroll and virtualization stats on the busiest recent chat.
 - `bun run diagnose:spindle`

@@ -23,7 +23,6 @@ import { useStore } from '@/store'
 import { useQuickToolbarActions, type ToolbarAction } from '@/components/quick-toolbar/useQuickToolbarActions'
 import { IconPlaylistAdd } from '@tabler/icons-react'
 import {
-  DndContext,
   closestCenter,
   KeyboardSensor,
   MouseSensor,
@@ -42,7 +41,7 @@ import {
 import { CloseButton } from '@/components/shared/CloseButton'
 import { ModalShell } from '@/components/shared/ModalShell'
 import { Toggle } from '@/components/shared/Toggle'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import { filterActionIds, filterActions } from '@/lib/toolbarActionSearch'
 import { hasEnabledFrontendExtension } from '@/lib/spindle/frontend-extension-availability'
 import { isCoreOwnedComposerActionId } from './composerActionOwnership'

@@ -22,7 +22,6 @@ import {
 } from 'lucide-react'
 import { IconVersions } from '@tabler/icons-react'
 import {
-  DndContext,
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
@@ -46,7 +45,7 @@ import SpindleSettings from './SpindleSettings'
 import { Spinner } from '@/components/shared/Spinner'
 import ConfirmationModal from '@/components/shared/ConfirmationModal'
 import { getSafeHttpsUrl } from '@/lib/navigationSafety'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import {
   getExtensionMountPointsVersion,
   hasExtensionMountPoint,

@@ -32,7 +32,6 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  DndContext,
   MouseSensor,
   TouchSensor,
   KeyboardSensor,
@@ -51,7 +50,7 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import { useScrollGate } from '@/hooks/useScrollGate'
 import useIsMobile from '@/hooks/useIsMobile'
 import { invalidateTokenCountsForEntry, useTokenCounts, useTokenCountSweep } from '@/hooks/useTokenCounts'

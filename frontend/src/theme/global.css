@@ -182,8 +182,7 @@ select:focus-visible,
   }
 
   body {
-    width: var(--app-viewport-width, 100vw);
-    height: 100%;
+    /* reset.css owns the scale-compensated body dimensions. */
     overflow: hidden;
     overscroll-behavior: none;
     overscroll-behavior-x: none;
@@ -210,9 +209,5 @@ html[data-ios-pwa] {
      actual device screen size in CSS pixels, immune to all viewport quirks. */
   height: var(--ios-screen-height, 100%);
   --ios-viewport-offset: env(safe-area-inset-top, 0px);
-  --app-shell-height: 100%;
-}
-
-html[data-pwa]:not([data-ios-pwa]) {
-  --app-shell-height: var(--app-viewport-height, 100dvh);
+  --app-shell-height: var(--ios-screen-height, 100dvh);
 }

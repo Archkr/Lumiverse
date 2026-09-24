@@ -4,7 +4,6 @@ import i18n from '@/i18n'
 import clsx from 'clsx'
 import { GripVertical } from 'lucide-react'
 import {
-  DndContext,
   closestCenter,
   MouseSensor,
   TouchSensor,
@@ -20,7 +19,7 @@ import {
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import { useStore } from '@/store'
 import { ModalShell } from '@/components/shared/ModalShell'
 import { Toggle } from '@/components/shared/Toggle'

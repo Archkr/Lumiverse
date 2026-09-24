@@ -130,7 +130,10 @@ mock.module('@/lib/i18n/worldBookEntryLabels', () => ({
   }),
 }))
 mock.module('@/lib/i18n/loomOptionLabels', () => ({ useLoomOptionLabels: () => ({ markerLabel: () => 'marker' }) }))
-mock.module('@/lib/dndUiScale', () => ({ useScaledSortableStyle: (input: unknown) => input }))
+mock.module('@/lib/dndUiScale', () => ({
+  DndContext: ({ children }: { children?: unknown }) => children,
+  useScaledSortableStyle: (input: unknown) => input,
+}))
 mock.module('@/hooks/useScrollGate', () => ({ useScrollGate: noop }))
 mock.module('@/hooks/useIsMobile', () => ({ default: () => false }))
 mock.module('@/components/shared/WorldBookEntryEditor', () => ({

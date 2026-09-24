@@ -4,7 +4,6 @@ import i18n from '@/i18n'
 import { useSpindleComponentOverride } from '@/lib/spindle/use-spindle-component-override'
 
 import {
-  DndContext,
   closestCenter,
   MouseSensor,
   TouchSensor,
@@ -20,7 +19,7 @@ import {
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable'
-import { useScaledSortableStyle } from '@/lib/dndUiScale'
+import { DndContext, useScaledSortableStyle } from '@/lib/dndUiScale'
 import {
   GripVertical,
   ChevronDown,
