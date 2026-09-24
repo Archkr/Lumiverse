@@ -126,8 +126,7 @@ body {
   color: var(--lumiverse-text);
   background: var(--lumiverse-bg-deep);
   line-height: 1.5;
-  /* Allow native scrolling and pinch zoom without double-tap zoom. */
-  touch-action: manipulation;
+  touch-action: pan-x pan-y;
 }
 
 /* The native frontend host is transparent. A theme can opt into a translucent

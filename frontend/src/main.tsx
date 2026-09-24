@@ -325,11 +325,11 @@ if (!isWebKit) {
   }
 }
 
-if (isWebKit && navigator.maxTouchPoints === 0) {
-  const preventDesktopPinchZoom = (event: Event) => event.preventDefault()
-  document.addEventListener('gesturestart', preventDesktopPinchZoom, { passive: false })
-  document.addEventListener('gesturechange', preventDesktopPinchZoom, { passive: false })
-}
+document.addEventListener('gesturestart', (event) => event.preventDefault(), { passive: false })
+document.addEventListener('gesturechange', (event) => event.preventDefault(), { passive: false })
+document.addEventListener('touchmove', (event) => {
+  if (event.touches.length > 1) event.preventDefault()
+}, { passive: false })
 
 // Prevent desktop trackpad/touchpad pinch-to-zoom. On Windows and macOS,
 // Chrome/Edge/Firefox translate trackpad pinch gestures into wheel events
