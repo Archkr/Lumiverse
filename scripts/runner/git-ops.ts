@@ -194,10 +194,10 @@ export function bunRuntimeCmd(
   return [env.LUMIVERSE_BUN_EXECUTABLE || "bun", ...args];
 }
 
-const BACKEND_DEPENDENCY_PROBE = [
-  "await import('better-auth');",
-  "await import('@better-auth/oauth-provider');",
-].join(" ");
+// glibc-runner/grun currently word-splits argv containing spaces on Termux.
+// Keep eval probes whitespace-free so fallback runtimes receive one intact -e arg.
+const BACKEND_DEPENDENCY_PROBE =
+  "await(import('better-auth'));await(import('@better-auth/oauth-provider'))";
 
 export function backendDependencyProbeCmd(
   env: Record<string, string | undefined> = process.env,
@@ -205,7 +205,7 @@ export function backendDependencyProbeCmd(
   return bunRuntimeCmd(["-e", BACKEND_DEPENDENCY_PROBE], env);
 }
 
-const FRONTEND_DEPENDENCY_PROBE = "await import('@better-auth/oauth-provider/client');";
+const FRONTEND_DEPENDENCY_PROBE = "await(import('@better-auth/oauth-provider/client'))";
 
 export function frontendDependencyProbeCmd(
   env: Record<string, string | undefined> = process.env,
