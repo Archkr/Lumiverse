@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { meetsVersion, MIN_BUN_VERSION } from "../scripts/desktop-toolchain";
+import {
+  MINIMUM_BUN_VERSION,
+  meetsBunVersion,
+  requiredBunVersion,
+  windowsRuntimeRoot,
+} from "../src/runtime/bun-runtime";
 
 const root = join(import.meta.dir, "..");
 
@@ -36,8 +42,11 @@ describe("Bun runtime version policy", () => {
     expect(desktopRelease).toContain("bun-version: 1.4.2");
     expect(unixLauncher).toContain('MINIMUM_BUN_VERSION="1.4.2"');
     expect(windowsLauncher).toContain('$MinimumBunVersion = [version]"1.4.2"');
-    expect(backendRuntime).toContain("const _bunMinimum: readonly [number, number, number] = [1, 4, 2]");
-    expect(desktopRunner).toContain("const minimum: readonly [number, number, number] = [1, 4, 2]");
+    expect(MINIMUM_BUN_VERSION).toBe("1.4.2");
+    expect(requiredBunVersion(root)).toBe("1.4.2");
+    expect(backendRuntime).toContain("await bootstrapBunRuntime");
+    expect(desktopRunner).toContain("await bootstrapBunRuntime");
+    expect(await read("scripts/runner/server-manager.ts")).toContain("await ensureBunRuntime(PROJECT_ROOT)");
   });
 
   test("rejects 1.4.1 and keeps the PowerShell upgrade gate before mode dispatch", async () => {
@@ -51,10 +60,20 @@ describe("Bun runtime version policy", () => {
 
     expect(gateStart).toBeGreaterThan(-1);
     expect(gateEnd).toBeGreaterThan(gateStart);
-    expect(gate.match(/Get-BunSemanticVersion/g)).toHaveLength(2);
+    expect(gate.match(/Get-BunSemanticVersion/g)).toHaveLength(3);
     expect(gate).toContain('Invoke-BunUpgrade "stable"');
+    expect(gate).toContain("Install-LumiverseBunRuntime");
     expect(gate).toContain("exit 1");
     expect(launcher).toContain("Ensure-Bun\nUpdate-BunChannel\nEnsure-MinimumBunVersion\n");
+  });
+
+  test("selects a versioned Windows runtime and compares prerelease versions numerically", () => {
+    expect(meetsBunVersion("1.4.1", "1.4.2")).toBe(false);
+    expect(meetsBunVersion("1.4.2-canary.1", "1.4.2")).toBe(true);
+    expect(meetsBunVersion("1.5.0", "1.4.2")).toBe(true);
+    expect(windowsRuntimeRoot("1.4.2", {
+      LOCALAPPDATA: "C:\\Users\\Alice\\AppData\\Local",
+    }, root)).toBe("C:\\Users\\Alice\\AppData\\Local\\Lumiverse\\runtimes\\bun-1.4.2");
   });
 
   test("upgrades native Termux through bun-termux before enforcing the floor", async () => {

@@ -621,7 +621,7 @@
     "unlinking": "正在取消關聯…",
     "unlink": "取消 LumiHub 關聯",
     "instanceName": "實例名稱",
-    "urlPlaceholder": "https://lumi.spot",
+    "urlPlaceholder": "https://hub.example.com",
     "instancePlaceholder": "我的 Lumiverse",
     "instanceHint": "在 LumiHub 上標識此實例的標籤（如「家用電腦」「筆記本」）",
     "waitingApproval": "等待批准…",

@@ -661,7 +661,7 @@
     "unlinking": "Unlinking...",
     "unlink": "Unlink from LumiHub",
     "instanceName": "Instance Name",
-    "urlPlaceholder": "https://lumi.spot",
+    "urlPlaceholder": "https://hub.example.com",
     "instancePlaceholder": "My Lumiverse",
     "instanceHint": "A label to identify this instance on LumiHub (e.g. \"Home PC\", \"Laptop\")",
     "waitingApproval": "Waiting for approval...",

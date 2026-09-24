@@ -537,7 +537,7 @@
     "unlinking": "Disconnessione...",
     "unlink": "Disconnetti da LumiHub",
     "instanceName": "Nome istanza",
-    "urlPlaceholder": "https://lumi.spot",
+    "urlPlaceholder": "https://hub.example.com",
     "instancePlaceholder": "Il mio Lumiverse",
     "instanceHint": "Un'etichetta per identificare questa istanza su LumiHub (es. \"PC di casa\", \"Laptop\")",
     "waitingApproval": "In attesa di approvazione...",

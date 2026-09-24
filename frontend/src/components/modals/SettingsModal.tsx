@@ -3938,7 +3938,7 @@ function LumiHubSettings() {
   const { t } = useTranslation('settings')
   const user = useStore((s) => s.user)
   const defaultInstanceName = user?.name ? `${user.name}'s Lumiverse` : t('lumihub.defaultInstance')
-  const [lumihubUrl, setLumihubUrl] = useState('https://lumi.spot')
+  const [lumihubUrl, setLumihubUrl] = useState('')
   const [instanceName, setInstanceName] = useState(defaultInstanceName)
   const [status, setStatus] = useState<{
     linked: boolean

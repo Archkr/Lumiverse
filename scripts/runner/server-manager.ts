@@ -8,6 +8,7 @@ import {
   type ServerLaunchTransport,
 } from "./server-process-launcher.js";
 import type { ServerOutputStream } from "./server-process-output.js";
+import { configuredBunExecutable, ensureBunRuntime } from "../../src/runtime/bun-runtime.js";
 
 export type ServerState = "starting" | "running" | "stopping" | "stopped" | "crashed";
 export interface ServerLogSession {
@@ -145,13 +146,17 @@ function frontendDir(): string | undefined {
   return existsSync(join(bundled, "index.html")) ? bundled : undefined;
 }
 
-export function startServer(isDev: boolean): void {
+export async function startServer(isDev: boolean): Promise<void> {
   if (instance?.proc) return;
+
+  // Re-read package.json on every start. An operator update or external pull
+  // may have raised the runtime floor since this long-lived runner launched.
+  await ensureBunRuntime(PROJECT_ROOT);
 
   const smol = smolEnabled() ? ["--smol"] : [];
   // process.execPath, not bare "bun": under a GUI supervisor (desktop
   // tray) the environment's PATH may not contain bun at all.
-  const bunBin = process.execPath;
+  const bunBin = configuredBunExecutable();
   const args = isDev
     ? [bunBin, ...smol, "--watch", ENTRY]
     : [bunBin, ...smol, ENTRY];
@@ -284,7 +289,7 @@ export async function restartServer(isDev: boolean): Promise<void> {
   const count = instance ? instance.restartCount + 1 : 1;
   console.log(`[${ts()}] [runner] Restarting server (restart #${count})...`);
   await stopServer();
-  startServer(isDev);
+  await startServer(isDev);
   if (instance) instance.restartCount = count;
 }
 

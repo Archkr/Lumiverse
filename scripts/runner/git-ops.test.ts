@@ -101,6 +101,19 @@ test("uses copyfile installs on Windows", () => {
   expect(bunInstallCmd("linux")).toEqual(["bun", "install"]);
 });
 
+test("uses the runtime selected by the Windows version bootstrap", () => {
+  const env = { LUMIVERSE_BUN_EXECUTABLE: "C:\\Lumiverse\\bun-1.4.2\\bin\\bun.exe" };
+  expect(bunInstallCmd("win32", env)).toEqual([
+    env.LUMIVERSE_BUN_EXECUTABLE,
+    "install",
+    "--backend=copyfile",
+  ]);
+  expect(bunRuntimeCmd(["--version"], env)).toEqual([
+    env.LUMIVERSE_BUN_EXECUTABLE,
+    "--version",
+  ]);
+});
+
 test("desktop builds retain Windows Path and the Bun that started the runner", () => {
   const env = desktopBuildEnv(
     { Path: "C:\\Windows\\System32;C:\\TOOLS\\BUN", PATH: "C:\\Other\\bin", SYSTEMROOT: "C:\\Windows" },

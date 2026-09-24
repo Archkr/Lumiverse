@@ -16,6 +16,7 @@ import {
 import { spawnAsync } from "./lib/spawn-async.js";
 import { npmCmd } from "./lib/termux-cli.js";
 import { resolveWindowsMsvc, windowsMsvcCommand } from "../windows-msvc.js";
+import { configuredBunExecutable, ensureBunRuntime } from "../../src/runtime/bun-runtime.js";
 
 export interface UpdateState {
   available: boolean;
@@ -163,12 +164,13 @@ export function bunInstallCmd(
     // A proot-distro shell already provides syscall interception.
     return ["bun", ...installArgs];
   }
+  const bunExecutable = env.LUMIVERSE_BUN_EXECUTABLE || "bun";
   if (platform === "win32") {
     // Windows normally hardlinks packages from Bun's cache. Filesystem filters
     // can leave those package directories empty even though install exits 0.
-    return ["bun", "install", "--backend=copyfile"];
+    return [bunExecutable, "install", "--backend=copyfile"];
   }
-  return ["bun", "install"];
+  return [bunExecutable, "install"];
 }
 
 export function bunRuntimeCmd(
@@ -189,7 +191,7 @@ export function bunRuntimeCmd(
       bunPath, ...args,
     ];
   }
-  return ["bun", ...args];
+  return [env.LUMIVERSE_BUN_EXECUTABLE || "bun", ...args];
 }
 
 const BACKEND_DEPENDENCY_PROBE = [
@@ -582,6 +584,7 @@ export async function applyUpdate(
       log("Could not inspect changed files; conservatively installing dependencies and rebuilding the frontend.");
     }
 
+    await ensureBunRuntime(PROJECT_ROOT);
     await ensureChangedDependencies(frontendDir, changedFiles, reportProgress, {
       fromRef: previousHead,
       toRef: currentHead,
@@ -638,6 +641,7 @@ export async function switchBranch(
       log("Could not inspect changed files; conservatively installing dependencies and rebuilding the frontend.");
     }
 
+    await ensureBunRuntime(PROJECT_ROOT);
     await ensureChangedDependencies(frontendDir, changedFiles, reportProgress, {
       fromRef: previousHead,
       toRef: currentHead,
@@ -1078,7 +1082,7 @@ export const DESKTOP_BUILD_STEPS = [
 /** Keep the Bun running this build and cargo available to every child process. */
 export function desktopBuildEnv(
   env: Record<string, string | undefined> = process.env,
-  bunExecutable = process.execPath,
+  bunExecutable = configuredBunExecutable(env),
   cargoBin = join(homedir(), ".cargo", "bin"),
   target: NodeJS.Platform = process.platform,
 ): Record<string, string | undefined> {
@@ -1228,7 +1232,7 @@ export async function rebuildFrontend(
 
     reportProgress?.(step.progress);
     log(step.progress);
-    await runCommandOrThrow([...step.command], {
+    await runCommandOrThrow(bunRuntimeCmd([...step.command].slice(1)), {
       cwd: frontendDir,
       timeoutMs,
       label: step.label,

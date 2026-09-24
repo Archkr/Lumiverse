@@ -275,6 +275,28 @@ function Get-BunSemanticVersion {
     }
 }
 
+function Install-LumiverseBunRuntime {
+    $runtimeBase = if ($env:LOCALAPPDATA) {
+        Join-Path $env:LOCALAPPDATA "Lumiverse\runtimes"
+    } else {
+        Join-Path $BackendDir "data\.bun-runtime"
+    }
+    $runtimeRoot = Join-Path $runtimeBase "bun-$MinimumBunVersion"
+    $installer = Join-Path $BackendDir "scripts\install-bun-runtime.ps1"
+
+    & $installer -InstallRoot $runtimeRoot -MinimumVersion $MinimumBunVersion
+    $runtime = Join-Path (Join-Path $runtimeRoot "bin") "bun.exe"
+    if (-not (Test-Path $runtime -PathType Leaf)) {
+        throw "The fallback Bun runtime was not installed at $runtime"
+    }
+
+    # Force every later bare `bun` invocation in this launcher to use the
+    # validated side-by-side executable rather than an older PATH/npm shim.
+    $env:LUMIVERSE_BUN_EXECUTABLE = $runtime
+    $env:PATH = "$(Split-Path $runtime);$env:PATH"
+    Set-Alias -Name bun -Value $runtime -Scope Script -Force
+}
+
 function Ensure-MinimumBunVersion {
     $current = Get-BunSemanticVersion
     if ($current -and $current -ge $MinimumBunVersion) { return }
@@ -286,6 +308,23 @@ function Ensure-MinimumBunVersion {
         Invoke-BunUpgrade "stable"
     } catch {
         Write-Err "Automatic Bun upgrade failed: $_"
+    }
+
+    $current = Get-BunSemanticVersion
+    if ($current -and $current -ge $MinimumBunVersion) {
+        Write-Ok "Bun $current satisfies the minimum supported version"
+        return
+    }
+
+    # A running Bun process locks bun.exe on Windows, and npm-launched scripts
+    # may upgrade a temporary shim instead of the executable the next launch
+    # resolves. Install a versioned runtime beside it and select that exact path.
+    Write-Warn "The in-place Bun upgrade did not provide the required runtime."
+    Write-Info "Installing Lumiverse's side-by-side Bun $MinimumBunVersion runtime..."
+    try {
+        Install-LumiverseBunRuntime
+    } catch {
+        Write-Err "Fallback Bun installation failed: $_"
     }
 
     $current = Get-BunSemanticVersion
