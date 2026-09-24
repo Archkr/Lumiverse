@@ -692,6 +692,11 @@ describe('LandingPage character library', () => {
     listRecentGrouped.mockReturnValueOnce(refresh.promise)
 
     await click(buttonMatching(firstHost, /Ava/)!)
+    const leavingSurface = firstHost.querySelector<HTMLElement>('[data-entry-mode="fresh"]')
+    const leavingChats = firstHost.querySelector<HTMLElement>('[data-component="LandingPageChats"]')
+    expect(leavingSurface?.classList.contains('routeLeaving')).toBe(true)
+    expect(leavingSurface?.getAttribute('data-motion-animate')).toBe('{"opacity":0,"y":10,"scale":0.985}')
+    expect(leavingChats?.getAttribute('data-motion-animate')).toBe('visible')
     const storedSnapshot = JSON.parse(domWindow.sessionStorage.getItem('__lumiverse_landing_page_snapshot_v1') || '{}')
     expect(storedSnapshot.snapshot?.imageUrls).toEqual(['/avatar.png'])
 

@@ -523,12 +523,6 @@ function EmptyState({ filtered = false }: { filtered?: boolean }) {
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1 },
-  leaving: {
-    opacity: 0,
-    y: 10,
-    scale: 0.985,
-    transition: { duration: 0.22, ease: 'easeOut' },
-  },
   exit: { opacity: 0 },
 }
 
@@ -934,7 +928,6 @@ interface VirtualizedChatRowsProps {
   initialPageSize: number
   animateInitialEntries: boolean
   eagerImages: boolean
-  navigatingToChat: boolean
   shiftPressed: boolean
   onContainerChange: (node: HTMLDivElement | null) => void
   onChatClick: (item: GroupedRecentChat) => void
@@ -960,7 +953,6 @@ function VirtualizedChatRows({
   initialPageSize,
   animateInitialEntries,
   eagerImages,
-  navigatingToChat,
   shiftPressed,
   onContainerChange,
   onChatClick,
@@ -1036,7 +1028,7 @@ function VirtualizedChatRows({
 
   return (
     <motion.div
-      className={clsx(styles.virtualChats, navigatingToChat && styles.chatsLeaving)}
+      className={styles.virtualChats}
       data-component="LandingPageChats"
       data-layout-columns={virtualColumns}
       data-spindle-mount="landing_recent_chats"
@@ -1045,7 +1037,7 @@ function VirtualizedChatRows({
       style={{ height: chatVirtualizer.getTotalSize() }}
       variants={containerVariants}
       initial={animateInitialEntries ? 'hidden' : false}
-      animate={navigatingToChat ? 'leaving' : 'visible'}
+      animate="visible"
       exit="exit"
     >
       {virtualItems.map((virtualRow) => {
@@ -2025,12 +2017,17 @@ function LandingPageNative() {
           styles.content,
           isExpandedGallery && styles.contentExpanded,
           landingEntryAnimating && styles.routeEntering,
+          navigatingToChat && styles.routeLeaving,
         )}
         data-component="LandingPageCharacters"
         data-entry-mode={landingEntryMode}
         initial={hasRestoredChatReturn ? chatReturnInitial : freshLandingInitial}
-        animate={hasRestoredChatReturn ? chatReturnAnimate : freshLandingAnimate}
-        transition={hasRestoredChatReturn
+        animate={navigatingToChat
+          ? chatReturnInitial
+          : hasRestoredChatReturn
+            ? chatReturnAnimate
+            : freshLandingAnimate}
+        transition={navigatingToChat || hasRestoredChatReturn
           ? chatReturnTransition
           : freshLandingTransition}
         onAnimationComplete={() => {
@@ -2277,7 +2274,6 @@ function LandingPageNative() {
                 initialPageSize={chatPageSizeRef.current}
                 animateInitialEntries={animateInitialEntries}
                 eagerImages={hasRestoredChatReturn}
-                navigatingToChat={navigatingToChat}
                 shiftPressed={shiftPressed}
                 onContainerChange={handleVirtualContainerChange}
                 onChatClick={handleChatClick}
