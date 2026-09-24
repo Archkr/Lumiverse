@@ -15,6 +15,10 @@
   --app-viewport-height: 100dvh;
   --app-viewport-offset-top: 0px;
   --app-viewport-offset-left: 0px;
+  --app-visual-viewport-width: 100vw;
+  --app-visual-viewport-height: 100dvh;
+  --app-visual-viewport-offset-top: 0px;
+  --app-visual-viewport-offset-left: 0px;
   --app-keyboard-inset-bottom: 0px;
   --app-desktop-titlebar-height: 36px;
   /* Keep native-style window chrome above application and extension-owned
@@ -122,10 +126,8 @@ body {
   color: var(--lumiverse-text);
   background: var(--lumiverse-bg-deep);
   line-height: 1.5;
-  /* Prevent double-tap zoom and pinch zoom; still allows pan/scroll.
-     pan-x pan-y (instead of manipulation) explicitly excludes pinch-zoom
-     on real touchscreens, complementing the JS gesture/wheel handlers. */
-  touch-action: pan-x pan-y;
+  /* Allow native scrolling and pinch zoom without double-tap zoom. */
+  touch-action: manipulation;
 }
 
 /* The native frontend host is transparent. A theme can opt into a translucent

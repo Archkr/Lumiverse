@@ -581,7 +581,8 @@ export function useThemeApplicator() {
 
       if (!root.hasAttribute('data-pwa')) {
         const us = parseFloat(vars['--lumiverse-ui-scale'] ?? '1') || 1
-        const vh = window.visualViewport?.height ?? window.innerHeight
+        const viewport = window.visualViewport
+        const vh = viewport ? viewport.height * viewport.scale : window.innerHeight
         root.style.setProperty('--app-shell-height', `${Math.round(vh / us)}px`)
       }
       window.dispatchEvent(new Event('resize'))

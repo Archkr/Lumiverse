@@ -191,8 +191,8 @@ select:focus-visible,
        in some Chromium PWA renderers (particularly Android WebAPK). */
     -webkit-transform: translateZ(0);
     transform: translateZ(0);
-    /* Prevent all touch-based viewport manipulation in PWA shell */
-    touch-action: pan-x pan-y;
+    /* Allow native pinch zoom in the installed app too. */
+    touch-action: manipulation;
   }
 
 }
