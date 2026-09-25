@@ -146,8 +146,22 @@ rebuild_bun_termux_wrapper() {
 }
 
 upgrade_bun_termux() {
-  info "Updating the Bun runtime and bun-termux wrapper..."
-  update_bun_termux_components all
+  local before="$1"
+
+  info "Updating the Bun runtime..."
+  update_bun_termux_components bun || return 1
+
+  _resolve_bun || true
+  local after
+  after="$(_bun --version 2>/dev/null || echo unknown)"
+
+  if [[ "$after" == "$before" ]]; then
+    info "Termux wrapper unchanged because the Bun version did not change"
+    return 0
+  fi
+
+  info "Bun changed: $before -> $after; rebuilding bun-termux wrapper..."
+  update_bun_termux_components wrapper
 }
 
 verify_termux_bun_install_path() {
@@ -568,9 +582,11 @@ ensure_bun() {
 # at $BUN_INSTALL/bin/bun. On native Termux we cannot use `bun upgrade` —
 # Bun's built-in updater probes for `ld` and aborts ("unsupported on systems
 # without ld") because Termux uses bionic, not glibc. Instead we use the
-# bun-termux manager, which atomically replaces both the underlying `buno`
-# runtime and its wrapper. Atomic replacement is required because Android will
-# not allow `cp` to truncate an executable that is currently mapped.
+# bun-termux manager, which atomically replaces the underlying `buno` runtime.
+# The wrapper is rebuilt only when that update changes the Bun version; a no-op
+# stable update leaves the already-working wrapper alone. Atomic replacement is
+# required because Android will not allow `cp` to truncate an executable that is
+# currently mapped.
 upgrade_bun_channel() {
   local channel="$1"
   local before
@@ -589,8 +605,8 @@ upgrade_bun_channel() {
     fi
 
     info "Updating Bun to latest Termux stable (current: $before)..."
-    if ! upgrade_bun_termux; then
-      err "bun-termux upgrade failed. Continuing with the existing $before binary."
+    if ! upgrade_bun_termux "$before"; then
+      err "bun-termux upgrade failed. Continuing with the available Bun runtime."
       return 0
     fi
 
@@ -599,7 +615,11 @@ upgrade_bun_channel() {
 
     local after
     after="$(_bun --version 2>/dev/null || echo unknown)"
-    ok "Bun upgraded via bun-termux: $before -> $after"
+    if [[ "$after" == "$before" ]]; then
+      ok "Bun $after is already up to date"
+    else
+      ok "Bun upgraded via bun-termux: $before -> $after"
+    fi
     return 0
   fi
 

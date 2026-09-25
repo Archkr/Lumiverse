@@ -85,23 +85,37 @@ describe("Bun runtime version policy", () => {
     expect(canTrustCurrentBunRuntime("1.4.2", "1.4.2", "win32")).toBe(false);
   });
 
-  test("upgrades native Termux through bun-termux before enforcing the floor", async () => {
+  test("updates native Termux Bun and rebuilds its wrapper only when the version changes", async () => {
     const launcher = await read("start.sh");
     const upgradeStart = launcher.indexOf("upgrade_bun_channel() {");
     const upgradeEnd = launcher.indexOf("\nupgrade_bun_if_requested()", upgradeStart);
     const upgradeFunction = launcher.slice(upgradeStart, upgradeEnd);
     const standardPath = upgradeFunction.indexOf("# ── Standard path");
     const nativeTermuxPath = upgradeFunction.slice(0, standardPath);
+    const helperStart = launcher.indexOf("upgrade_bun_termux() {");
+    const helperEnd = launcher.indexOf("\nverify_termux_bun_install_path()", helperStart);
+    const termuxUpgradeHelper = launcher.slice(helperStart, helperEnd);
+    const runtimeUpdate = termuxUpgradeHelper.indexOf("update_bun_termux_components bun");
+    const unchangedGate = termuxUpgradeHelper.indexOf('if [[ "$after" == "$before" ]]');
+    const wrapperUpdate = termuxUpgradeHelper.indexOf("update_bun_termux_components wrapper");
 
     expect(upgradeStart).toBeGreaterThanOrEqual(0);
     expect(upgradeEnd).toBeGreaterThan(upgradeStart);
     expect(standardPath).toBeGreaterThanOrEqual(0);
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(helperEnd).toBeGreaterThan(helperStart);
     expect(nativeTermuxPath).toContain('if [[ "$IS_TERMUX" == true ]]');
-    expect(nativeTermuxPath).toContain("upgrade_bun_termux");
+    expect(nativeTermuxPath).toContain('upgrade_bun_termux "$before"');
     expect(nativeTermuxPath).toContain("_resolve_bun");
     expect(nativeTermuxPath).toContain("verify_termux_bun_install_path");
     expect(nativeTermuxPath).not.toContain("_bun upgrade");
-    expect(launcher).toContain('bash "$manager" update all --source "$repo"');
+    expect(runtimeUpdate).toBeGreaterThanOrEqual(0);
+    expect(unchangedGate).toBeGreaterThan(runtimeUpdate);
+    expect(wrapperUpdate).toBeGreaterThan(unchangedGate);
+    expect(termuxUpgradeHelper).toContain("Termux wrapper unchanged because the Bun version did not change");
+    expect(termuxUpgradeHelper).not.toContain("update_bun_termux_components all");
+    expect(nativeTermuxPath).toContain('ok "Bun $after is already up to date"');
+    expect(nativeTermuxPath).toContain('ok "Bun upgraded via bun-termux: $before -> $after"');
     expect(launcher).toContain(
       "ensure_bun\nupgrade_bun_if_requested\nensure_minimum_bun_version\nexport_termux_bun_env",
     );
