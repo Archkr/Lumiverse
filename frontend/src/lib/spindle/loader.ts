@@ -129,6 +129,7 @@ import { legacyCtxPermission } from './legacy-ctx-members'
 import type { SpindleSettingsTabHandle, SpindleSettingsTabOptions } from './settings-tab-bridge'
 import type { DesktopFloatingWidgetTarget } from '@/lib/desktop-floating-widget'
 import { selectFrontendBundle } from './frontend-bundle-selection'
+import { resolveCurrentSpindleModalGeometry } from './modal-geometry'
 
 export { createFrontendExtensionContext } from './frontend-context'
 import { CORE_SETTING_KEYS } from './core-setting-keys'
@@ -1738,10 +1739,9 @@ async function doLoadFrontendExtension(
           })
 
           const container = document.createElement('div')
-          const w = Math.min(options?.width || 420, window.innerWidth - 40)
-          const mh = Math.min(options?.maxHeight || 520, window.innerHeight - 40)
+          const geometry = resolveCurrentSpindleModalGeometry(options)
           Object.assign(container.style, {
-            width: `${w}px`, maxHeight: `${mh}px`,
+            width: `${geometry.width}px`, maxHeight: `${geometry.maxHeight}px`,
             background: 'var(--lumiverse-bg)', borderRadius: '12px',
             border: '1px solid var(--lumiverse-border)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
