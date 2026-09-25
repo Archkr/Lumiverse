@@ -1062,6 +1062,7 @@ export interface ControlledLoomBlockEditorProps {
   onDraftChange?: (blockId: string, updates: Partial<PromptBlock> | null) => void
   selectedBlockId?: string | null
   onSelectedBlockChange?: (blockId: string | null) => void
+  onMoveVariable?: (sourceBlockId: string, variable: PromptVariableDef, targetBlockId: string) => boolean
   availableMacros: MacroGroup[]
   refreshMacros?: () => void
   readOnly?: boolean
@@ -1081,6 +1082,7 @@ export function ControlledLoomBlockEditor({
   onDraftChange,
   selectedBlockId,
   onSelectedBlockChange,
+  onMoveVariable,
   availableMacros,
   refreshMacros,
   readOnly = false,
@@ -1168,6 +1170,7 @@ export function ControlledLoomBlockEditor({
           explicitlyClearedDraftBlockIdRef.current = null
           onDraftChange?.(editingBlock.id, updates)
         }}
+        onMoveVariable={onMoveVariable}
         availableMacros={availableMacros}
         refreshMacros={refreshMacros}
         compact={compact}
@@ -2481,10 +2484,12 @@ function LoomBuilderNative({
   const activePresetEditorTabRef = useRef(activePresetEditorTab)
   const updatePresetDraftRef = useRef(updatePresetDraft)
   const flushPresetDraftRef = useRef(flushPresetDraft)
+  const movePromptVariableRef = useRef(movePromptVariable)
 
   useEffect(() => { activePresetEditorTabRef.current = activePresetEditorTab }, [activePresetEditorTab])
   useEffect(() => { updatePresetDraftRef.current = updatePresetDraft }, [updatePresetDraft])
   useEffect(() => { flushPresetDraftRef.current = flushPresetDraft }, [flushPresetDraft])
+  useEffect(() => { movePromptVariableRef.current = movePromptVariable }, [movePromptVariable])
 
   useEffect(() => {
     setPresetEditorController({
@@ -2521,6 +2526,9 @@ function LoomBuilderNative({
           applyPresetEditorDraft(current, mutator(toPresetEditorDraft(current)))
         ), immediate)
       },
+      movePromptVariable: (sourceBlockId, variable, targetBlockId) => (
+        movePromptVariableRef.current(sourceBlockId, variable, targetBlockId)
+      ),
       flush: () => flushPresetDraftRef.current(),
     })
     return () => { setPresetEditorController(null) }
