@@ -1036,6 +1036,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
       // explicit field in the pack remains authoritative.
       const theme = {
         ...packTheme,
+        name: pack.name?.trim() || packTheme.name,
         desktopBackground: packTheme.desktopBackground ?? get().theme?.desktopBackground,
         renderingMode: pack.theme?.renderingMode ?? get().theme?.renderingMode,
       }
@@ -1077,13 +1078,42 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
   },
 
   renameSavedTheme: (id, name) => {
-    const trimmed = name.trim()
+    const trimmed = name.trim().slice(0, 200)
     if (!trimmed) return
-    const savedThemes = get().savedThemes.map((entry) =>
-      entry.id === id ? { ...entry, name: trimmed.slice(0, 200) } : entry
-    )
+    const existing = get().savedThemes.find((entry) => entry.id === id)
+    if (!existing) return
+    const savedThemes = get().savedThemes.map((entry) => {
+      if (entry.id !== id) return entry
+      if (entry.kind === 'config') {
+        return { ...entry, name: trimmed, theme: { ...entry.theme, name: trimmed } }
+      }
+      return {
+        ...entry,
+        name: trimmed,
+        pack: {
+          ...entry.pack,
+          name: trimmed,
+          theme: entry.pack.theme ? { ...entry.pack.theme, name: trimmed } : null,
+        },
+      }
+    })
     set({ savedThemes })
     persistKey('savedThemes', savedThemes)
+
+    // Keep the live ThemeConfig aligned when the renamed bundle is active.
+    // This also repairs packs created before saved-theme names were canonical.
+    if (
+      existing.kind === 'pack'
+      && existing.pack.bundleId
+      && existing.pack.bundleId === get().customCSS.bundleId
+      && get().theme
+    ) {
+      get().setTheme({ ...get().theme!, name: trimmed })
+    } else if (existing.kind === 'config' && get().theme === existing.theme) {
+      // Newly saved config themes retain object identity until hydration, so
+      // the inline rename can immediately become the live theme name too.
+      get().setTheme({ ...existing.theme, name: trimmed })
+    }
   },
 
   deleteSavedTheme: async (id) => {
@@ -1114,12 +1144,17 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     if (entry.kind === 'config') {
       const theme = {
         ...entry.theme,
+        name: entry.name,
         desktopBackground: entry.theme.desktopBackground ?? get().theme?.desktopBackground,
         renderingMode: entry.theme.renderingMode ?? get().theme?.renderingMode,
       }
       get().setTheme(theme)
     } else {
-      get().applyThemePack(entry.pack)
+      get().applyThemePack({
+        ...entry.pack,
+        name: entry.name,
+        theme: entry.pack.theme ? { ...entry.pack.theme, name: entry.name } : null,
+      })
     }
   },
 
@@ -1129,7 +1164,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     const savedThemes = state.savedThemes.map((entry) => {
       if (entry.id !== id) return entry
       if (entry.kind === 'config') {
-        return { ...entry, theme: currentTheme } as typeof entry
+        return { ...entry, theme: { ...currentTheme, name: entry.name } } as typeof entry
       }
 
       // A pack owns all three theme layers. Saving only its ThemeConfig made
@@ -1148,7 +1183,8 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         ...entry,
         pack: {
           ...entry.pack,
-          theme: currentTheme,
+          name: entry.name,
+          theme: { ...currentTheme, name: entry.name },
           globalCSS: state.customCSS.css || '',
           components,
         },
