@@ -67,7 +67,7 @@ import FolderDropdown from '@/components/shared/FolderDropdown'
 import ModelCombobox from '@/components/panels/connection-manager/ModelCombobox'
 import { ControlledLoomBlockEditor } from '@/components/panels/LoomBuilder'
 import { getAvailableMacros, normalizeCategoryBlockState, reconcilePromptVariableValues } from '@/lib/loom/service'
-import type { MacroGroup, PromptBlock, PromptVariableValues } from '@/lib/loom/types'
+import type { MacroGroup, PromptBlock, PromptVariableDef, PromptVariableValues } from '@/lib/loom/types'
 import {
   cloneLoomOptions,
   cloneLoomValue,
@@ -104,6 +104,7 @@ import {
 } from './host-surface-registry'
 import { scheduleMicrotask } from '@/lib/schedule-microtask'
 import { RouterContextBridge } from '@/lib/router-bridge'
+import { canMovePresetEditorPromptVariables, movePresetEditorPromptVariable } from './preset-editor-helper'
 
 // Spindle bridge components expose imperative handles by mutating the bridge
 // object passed from the extension runtime. This is an intentional escape hatch
@@ -1315,20 +1316,50 @@ function CollapsibleSectionBridge({
   )
 }
 
+const loomEditorCounts = new Map<string, number>()
+const loomEditorCountListeners = new Map<string, Set<(count: number) => void>>()
+
+function publishLoomEditorCount(extensionIdentifier: string, count: number): void {
+  if (count > 0) loomEditorCounts.set(extensionIdentifier, count)
+  else loomEditorCounts.delete(extensionIdentifier)
+  for (const listener of loomEditorCountListeners.get(extensionIdentifier) ?? []) listener(count)
+}
+
+function useExtensionLoomEditorCount(extensionIdentifier: string): number {
+  const [count, setCount] = useState(() => loomEditorCounts.get(extensionIdentifier) ?? 0)
+  useLayoutEffect(() => {
+    const listeners = loomEditorCountListeners.get(extensionIdentifier) ?? new Set<(count: number) => void>()
+    listeners.add(setCount)
+    loomEditorCountListeners.set(extensionIdentifier, listeners)
+    publishLoomEditorCount(extensionIdentifier, (loomEditorCounts.get(extensionIdentifier) ?? 0) + 1)
+    return () => {
+      listeners.delete(setCount)
+      if (listeners.size === 0) loomEditorCountListeners.delete(extensionIdentifier)
+      publishLoomEditorCount(extensionIdentifier, Math.max(0, (loomEditorCounts.get(extensionIdentifier) ?? 1) - 1))
+    }
+  }, [extensionIdentifier])
+  return count
+}
+
 function LoomBlockEditorBridge({
   initial,
   bridge,
   getMacroCatalogForExtension,
   extensionIdentifier,
+  extensionInstanceId,
+  hasPresetPermission,
 }: {
   initial: NormalizedLoomOptions
   bridge: BridgeAPI<NormalizedLoomOptions, SpindleLoomBlockEditorValue>
   getMacroCatalogForExtension: () => Promise<unknown>
   extensionIdentifier: string
+  extensionInstanceId: string
+  hasPresetPermission: () => boolean
 }) {
   const [props, setProps] = useState<NormalizedLoomOptions>(initial)
   const [valueState, setValueState] = useState<SpindleLoomBlockEditorValue>(initial.value)
   const [availableMacros, setAvailableMacros] = useState<MacroGroup[]>(() => getAvailableMacros())
+  const mountedEditorCount = useExtensionLoomEditorCount(extensionInstanceId)
   const propsRef = useRef(initial)
   const valueRef = useRef(initial.value)
   const aliveRef = useRef(true)
@@ -1460,6 +1491,21 @@ function LoomBlockEditorBridge({
     notifyComponentOnChange('Loom selection', propsRef.current.onSelectedBlockChange, blockId)
   }
 
+  // Variable moves mutate both source and target blocks. Keep the native move
+  // affordance off when the extension owns multiple Loom editors: another
+  // editor may be holding an unsaved target draft that would later overwrite
+  // the moved definition. A single preset-bound editor is safe and matches the
+  // first-party Loom move lifecycle.
+  const canMoveVariables = mountedEditorCount === 1
+    && hasPresetPermission()
+    && canMovePresetEditorPromptVariables(valueState.blocks)
+  const handleMoveVariable = canMoveVariables
+    ? (sourceBlockId: string, variable: PromptVariableDef, targetBlockId: string): boolean => (
+      hasPresetPermission()
+      && movePresetEditorPromptVariable(valueRef.current.blocks, sourceBlockId, variable, targetBlockId)
+    )
+    : undefined
+
   useLayoutEffect(() => {
     bridge.update = (patch) => {
       const nextProps = patchLoomOptions(propsRef.current, patch)
@@ -1489,6 +1535,7 @@ function LoomBlockEditorBridge({
       onDraftChange={handleDraftChange}
       selectedBlockId={props.selectedBlockId}
       onSelectedBlockChange={handleSelectedBlockChange}
+      onMoveVariable={handleMoveVariable}
       availableMacros={availableMacros}
       refreshMacros={() => { void refreshMacros().catch(() => {}) }}
       readOnly={props.readOnly}
@@ -1815,6 +1862,8 @@ export function createComponentsHelper(
         bridge={b}
         getMacroCatalogForExtension={getMacroCatalogForExtension}
         extensionIdentifier={identifier}
+        extensionInstanceId={extensionId}
+        hasPresetPermission={() => options.hasPermission?.('presets') ?? false}
       />
     ))
     const handle = buildHandle(extensionId, id, el, result, componentPermissionForTarget(extensionId, el, generation)) as SpindleLoomBlockEditorHandle
