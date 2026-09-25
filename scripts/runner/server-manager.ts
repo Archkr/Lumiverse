@@ -9,6 +9,7 @@ import {
 } from "./server-process-launcher.js";
 import type { ServerOutputStream } from "./server-process-output.js";
 import { configuredBunExecutable, ensureBunRuntime } from "../../src/runtime/bun-runtime.js";
+import { bunCmdForEnv } from "../../src/utils/bun-cmd.js";
 
 export type ServerState = "starting" | "running" | "stopping" | "stopped" | "crashed";
 export interface ServerLogSession {
@@ -73,6 +74,21 @@ function handleServerMessage(message: any): void {
  */
 export function serverLaunchTransport(platform: string = process.platform): ServerLaunchTransport {
   return platform === "win32" ? "socket" : "ipc";
+}
+
+/**
+ * Build the backend launch command without dropping the compatibility wrapper
+ * that started the runner. Desktop/ordinary hosts still use the validated Bun
+ * executable directly; native Termux reuses start.sh's direct/grun/proot chain.
+ */
+export function backendBunCommand(
+  args: string[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  if (env.LUMIVERSE_BUN_METHOD && env.LUMIVERSE_BUN_PATH) {
+    return bunCmdForEnv(env, ...args);
+  }
+  return [configuredBunExecutable(env), ...args];
 }
 
 /**
@@ -154,12 +170,11 @@ export async function startServer(isDev: boolean): Promise<void> {
   await ensureBunRuntime(PROJECT_ROOT);
 
   const smol = smolEnabled() ? ["--smol"] : [];
-  // process.execPath, not bare "bun": under a GUI supervisor (desktop
-  // tray) the environment's PATH may not contain bun at all.
-  const bunBin = configuredBunExecutable();
-  const args = isDev
-    ? [bunBin, ...smol, "--watch", ENTRY]
-    : [bunBin, ...smol, ENTRY];
+  // Keep the validated executable for desktop/ordinary hosts, but preserve
+  // start.sh's compatibility wrapper on native Termux.
+  const args = backendBunCommand(
+    isDev ? [...smol, "--watch", ENTRY] : [...smol, ENTRY],
+  );
 
   const restartCount = instance ? instance.restartCount : 0;
   const frontend = isDev ? "" : frontendDir() ?? "";

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { meetsVersion, MIN_BUN_VERSION } from "../scripts/desktop-toolchain";
 import {
   MINIMUM_BUN_VERSION,
+  canTrustCurrentBunRuntime,
   meetsBunVersion,
   requiredBunVersion,
   windowsRuntimeRoot,
@@ -11,7 +12,7 @@ import {
 const root = join(import.meta.dir, "..");
 
 async function read(path: string): Promise<string> {
-  return Bun.file(join(root, path)).text();
+  return (await Bun.file(join(root, path)).text()).replace(/\r\n/g, "\n");
 }
 
 describe("Bun runtime version policy", () => {
@@ -74,6 +75,14 @@ describe("Bun runtime version policy", () => {
     expect(windowsRuntimeRoot("1.4.2", {
       LOCALAPPDATA: "C:\\Users\\Alice\\AppData\\Local",
     }, root)).toBe("C:\\Users\\Alice\\AppData\\Local\\Lumiverse\\runtimes\\bun-1.4.2");
+  });
+
+  test("trusts an already-running non-Windows Bun without probing its raw executable", () => {
+    expect(canTrustCurrentBunRuntime("1.4.2", "1.4.2", "linux")).toBe(true);
+    expect(canTrustCurrentBunRuntime("1.5.0", "1.4.2", "darwin")).toBe(true);
+    expect(canTrustCurrentBunRuntime("1.4.1", "1.4.2", "linux")).toBe(false);
+    // Keep Windows on the side-by-side runtime selection/probe path.
+    expect(canTrustCurrentBunRuntime("1.4.2", "1.4.2", "win32")).toBe(false);
   });
 
   test("upgrades native Termux through bun-termux before enforcing the floor", async () => {

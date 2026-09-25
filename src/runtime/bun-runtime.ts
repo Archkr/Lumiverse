@@ -61,6 +61,20 @@ export function configuredBunExecutable(env: RuntimeEnvironment = process.env): 
   return env[BUN_EXECUTABLE_ENV] || process.execPath;
 }
 
+/**
+ * Non-Windows launchers may have reached the current Bun through an external
+ * compatibility wrapper (for example Termux `grun`). If this process already
+ * satisfies the floor, it is authoritative: respawning `process.execPath` just
+ * to probe it can discard that wrapper even though the current runtime works.
+ */
+export function canTrustCurrentBunRuntime(
+  value: string,
+  minimum: string,
+  target: NodeJS.Platform = process.platform,
+): boolean {
+  return target !== "win32" && meetsBunVersion(value, minimum);
+}
+
 function runtimePath(root: string, target: NodeJS.Platform): string {
   return target === "win32" ? win32.join(root, "bin", "bun.exe") : join(root, "bin", "bun");
 }
@@ -135,6 +149,15 @@ export async function ensureBunRuntime(
   env: RuntimeEnvironment = process.env,
 ): Promise<string> {
   const minimum = requiredBunVersion(projectRoot);
+
+  // On native Termux, start.sh may have launched this exact Bun binary through
+  // grun/proot. The raw process.execPath is not executable by Android itself,
+  // so probing it would incorrectly report a working Bun as too old.
+  if (canTrustCurrentBunRuntime(Bun.version, minimum, target)) {
+    process.env[BUN_EXECUTABLE_ENV] = process.execPath;
+    return process.execPath;
+  }
+
   const configured = env[BUN_EXECUTABLE_ENV];
   const localRoot = windowsRuntimeRoot(minimum, env, projectRoot);
   const localRuntime = runtimePath(localRoot, target);
