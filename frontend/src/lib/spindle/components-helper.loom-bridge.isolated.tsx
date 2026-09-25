@@ -243,15 +243,33 @@ describe('Loom component bridge state transitions', () => {
     expect(controlledProps?.onMoveVariable).toBeUndefined()
     noPermission.destroy()
 
-    mount(
+    const dormantSecond = mount(
       'loom-native-move',
       value({ blocks }),
       undefined,
-      { selectedBlockId: 'two' },
+      { selectedBlockId: null },
       true,
     )
     await act(async () => {})
     expect(controlledProps?.onMoveVariable).toBeUndefined()
+
+    handle.update({ selectedBlockId: 'one' })
+    await act(async () => {})
+    expect(typeof controlledProps?.onMoveVariable).toBe('function')
+
+    dormantSecond.update({ selectedBlockId: 'two' })
+    await act(async () => {})
+    expect(controlledProps?.onMoveVariable).toBeUndefined()
+
+    handle.update({ selectedBlockId: 'one' })
+    await act(async () => {})
+    expect(controlledProps?.onMoveVariable).toBeUndefined()
+
+    dormantSecond.update({ selectedBlockId: null })
+    await act(async () => {})
+    handle.update({ selectedBlockId: 'one' })
+    await act(async () => {})
+    expect(typeof controlledProps?.onMoveVariable).toBe('function')
   })
 
   test('normalizes radio edits before committing and emitting the value', () => {
