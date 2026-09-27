@@ -6,6 +6,7 @@ import { LazyMotion, MotionConfig, domAnimation } from 'motion/react'
 import { useWebSocket } from '@/ws/useWebSocket'
 import { useStore } from '@/store'
 import { useThemeApplicator } from '@/hooks/useThemeApplicator'
+import { installDesktopViewportZoom } from '@/lib/desktopViewportZoom'
 import { useCharacterTheme } from '@/hooks/useCharacterTheme'
 import { useCustomCSSApplicator } from '@/hooks/useCustomCSSApplicator'
 import { useAppInit } from '@/hooks/useAppInit'
@@ -72,6 +73,8 @@ function Application() {
   const safeTheme = getSafeThemeState()
   useWebSocket()
   useThemeApplicator()
+  const desktopPinchZoomEnabled = useStore((s) => s.desktopPinchZoomEnabled)
+  useEffect(() => desktopPinchZoomEnabled ? installDesktopViewportZoom() : undefined, [desktopPinchZoomEnabled])
   useCharacterTheme()
   useCustomCSSApplicator()
   useAppInit()

@@ -122,6 +122,7 @@
     "saving": "保存..."
   },
   "display": {
+    "zoom": { "title": "ズーム", "desktopPinchZoom": "デスクトップでピンチズーム" },
     "longMessages": {
       "title": "長いメッセージ",
       "helper": "長いメッセージを、展開するまで読みやすい高さに制限します。",

@@ -776,6 +776,8 @@ export interface SettingsSlice {
   modalWidthMode: 'full' | 'comfortable' | 'compact' | 'custom'
   modalMaxWidth: number
   portraitPanelSide: 'left' | 'right' | 'none'
+  /** Explicit opt-in for temporary desktop viewport magnification. */
+  desktopPinchZoomEnabled: boolean
   theme: ThemeConfig | null
   characterThemeOverlay: CharacterThemeOverlay | null
   drawerSettings: DrawerSettings
