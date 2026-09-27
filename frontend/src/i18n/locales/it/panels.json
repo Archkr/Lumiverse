@@ -2627,8 +2627,6 @@
     "cornerRadius": "Raggio angoli",
     "fontScale": "Scala font",
     "uiScale": "Scala UI",
-    "desktopPinchZoom": "Pizzica per ingrandire su desktop",
-    "desktopPinchZoomHint": "Ingrandisce attorno al puntatore. Scorri per spostarti; pizzica per tornare indietro o premi Ctrl/Cmd+0.",
     "glassEffects": "Effetti vetro",
     "renderingMode": {
       "label": "Rendering",

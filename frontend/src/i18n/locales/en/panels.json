@@ -2879,8 +2879,6 @@
     "cornerRadius": "Corner Radius",
     "fontScale": "Font Scale",
     "uiScale": "UI Scale",
-    "desktopPinchZoom": "Pinch to zoom on desktop",
-    "desktopPinchZoomHint": "Magnify around the pointer. Scroll to pan; pinch back or press Ctrl/Cmd+0 to reset.",
     "glassEffects": "Glass effects",
     "renderingMode": {
       "label": "Rendering",

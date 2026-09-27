@@ -122,6 +122,7 @@
     "saving": "保存中…"
   },
   "display": {
+    "zoom": { "title": "縮放", "desktopPinchZoom": "在桌面端使用雙指縮放" },
     "longMessages": {
       "title": "長訊息",
       "helper": "將較長的訊息限制在舒適的高度，直到你將其展開。",

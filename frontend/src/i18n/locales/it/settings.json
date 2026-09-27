@@ -38,6 +38,7 @@
     "saving": "Salvataggio..."
   },
   "display": {
+    "zoom": { "title": "Zoom", "desktopPinchZoom": "Pizzica per ingrandire su desktop" },
     "longMessages": {
       "title": "Messaggi lunghi",
       "helper": "Limita i messaggi lunghi a un’altezza comoda finché non vengono espansi.",

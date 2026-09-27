@@ -2619,8 +2619,6 @@
     "cornerRadius": "圆角",
     "fontScale": "字体缩放",
     "uiScale": "界面缩放",
-    "desktopPinchZoom": "在桌面端使用双指缩放",
-    "desktopPinchZoomHint": "以指针为中心放大。滚动可平移；反向缩放或按 Ctrl/Cmd+0 可重置。",
     "glassEffects": "玻璃效果",
     "renderingMode": {
       "label": "渲染",

@@ -76,8 +76,9 @@ export const SETTINGS_TABS: SettingsTabEntry[] = [
     tabName: 'Display & Layout',
     tabDescription: 'Panel width, sidebar position, and layout options',
     tabIcon: PanelRight,
-    keywords: ['display', 'layout', 'sidebar', 'drawer', 'width', 'panel', 'position', 'modal', 'chat heads', 'long messages', 'read more'],
+    keywords: ['display', 'layout', 'sidebar', 'drawer', 'width', 'panel', 'position', 'modal', 'chat heads', 'long messages', 'read more', 'pinch', 'zoom'],
     sections: [
+      { key: 'zoom', titleKey: 'display.zoom.title', titleFallback: 'Zoom', keywords: ['pinch', 'zoom', 'desktop', 'trackpad'] },
       { key: 'longMessages', titleKey: 'display.longMessages.title', titleFallback: 'Long Messages', keywords: ['long messages', 'assistant messages', 'collapse', 'read more', 'show less', 'message height'] },
       { key: 'modalWidth', titleKey: 'display.modalWidth.title', titleFallback: 'Modal Width', keywords: ['modal width', 'width', 'max width', 'full', 'comfortable', 'compact', 'custom'] },
       { key: 'drawer', titleKey: 'display.drawer.title', titleFallback: 'Drawer', keywords: ['drawer', 'sidebar', 'side', 'panel width', 'tab position', 'tab size', 'tab labels'] },

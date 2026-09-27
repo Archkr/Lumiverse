@@ -38,6 +38,7 @@
     "saving": "保存中…"
   },
   "display": {
+    "zoom": { "title": "缩放", "desktopPinchZoom": "在桌面端使用双指缩放" },
     "longMessages": {
       "title": "长消息",
       "helper": "将较长的消息限制在舒适的高度，直到你将其展开。",

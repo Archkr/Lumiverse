@@ -2619,8 +2619,6 @@
     "cornerRadius": "圓角",
     "fontScale": "字體縮放",
     "uiScale": "界面縮放",
-    "desktopPinchZoom": "在桌面端使用雙指縮放",
-    "desktopPinchZoomHint": "以游標為中心放大。捲動可平移；反向縮放或按 Ctrl/Cmd+0 可重設。",
     "glassEffects": "玻璃效果",
     "renderingMode": {
       "label": "算繪",

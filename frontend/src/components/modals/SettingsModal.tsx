@@ -29,6 +29,7 @@ import { Toggle } from '@/components/shared/Toggle'
 import { spinClass } from '@/components/shared/Spinner'
 import { ExpandableTextarea } from '@/components/shared/ExpandedTextEditor'
 import { useStore } from '@/store'
+import { isDesktopViewportZoomAvailable } from '@/lib/desktopViewportZoom'
 import { readProductivityFeature } from '@/lib/spindle/productivity-feature-toggles'
 import { spindleApi } from '@/api/spindle'
 import { connectionsApi } from '@/api/connections'
@@ -370,6 +371,7 @@ function DisplaySettings() {
   const { t } = useTranslation('settings')
   const { t: tc } = useTranslation('common')
   const drawerSettings = useStore((s) => s.drawerSettings)
+  const desktopPinchZoomEnabled = useStore((s) => s.desktopPinchZoomEnabled)
   const modalWidthMode = useStore((s) => s.modalWidthMode)
   const modalMaxWidth = useStore((s) => s.modalMaxWidth)
   const longMessageCollapseEnabled = useStore((s) => s.longMessageCollapseEnabled)
@@ -398,6 +400,17 @@ function DisplaySettings() {
   return (
     <div className={styles.settingsSection}>
       <LanguageSwitcher />
+
+      {isDesktopViewportZoomAvailable() && (
+        <>
+          <h3 id={sectionAnchorId('display', 'zoom')} className={styles.sectionTitle} style={{ marginTop: 16 }}>{t('display.zoom.title')}</h3>
+          <Toggle.Checkbox
+            checked={desktopPinchZoomEnabled}
+            onChange={(checked) => setSetting('desktopPinchZoomEnabled', checked)}
+            label={t('display.zoom.desktopPinchZoom')}
+          />
+        </>
+      )}
 
       <h3 id={sectionAnchorId('display', 'longMessages')} className={styles.sectionTitle} style={{ marginTop: 16 }}>{t('display.longMessages.title')}</h3>
       <p className={styles.helperText}>

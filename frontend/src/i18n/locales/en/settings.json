@@ -133,6 +133,7 @@
     "saving": "Saving..."
   },
   "display": {
+    "zoom": { "title": "Zoom", "desktopPinchZoom": "Pinch to zoom on desktop" },
     "longMessages": {
       "title": "Long Messages",
       "helper": "Limit long messages to a comfortable height until you expand them.",

@@ -122,6 +122,7 @@
     "saving": "Enregistrement..."
   },
   "display": {
+    "zoom": { "title": "Zoom", "desktopPinchZoom": "Pincer pour zoomer sur ordinateur" },
     "longMessages": {
       "title": "Messages longs",
       "helper": "Limitez la hauteur des messages longs jusqu’à leur développement.",
