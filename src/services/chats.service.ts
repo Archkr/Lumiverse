@@ -1269,18 +1269,18 @@ export function convertSoloChatToGroup(userId: string, chatId: string): Chat | n
 }
 
 export function deleteChat(userId: string, id: string): boolean {
-  // Snapshot any audio attachments before the cascade DELETE wipes the
-  // messages rows — we lose access to extras the moment the rows are gone.
-  let audioAttachments: any[] = [];
+  // Snapshot attachments before the cascade DELETE wipes the messages rows —
+  // we lose access to extras the moment the rows are gone.
+  const attachments: any[] = [];
   try {
     const messageRows = getDb()
       .query("SELECT extra FROM messages WHERE chat_id = ?")
       .all(id) as any[];
     for (const row of messageRows) {
-      audioAttachments.push(...collectMessageAttachments(row));
+      attachments.push(...collectMessageAttachments(row));
     }
   } catch (err) {
-    console.warn(`[chats] Failed to scan messages for audio cleanup in chat ${id}:`, err);
+    console.warn(`[chats] Failed to scan messages for attachment cleanup in chat ${id}:`, err);
   }
 
   const db = getDb();
@@ -1290,7 +1290,7 @@ export function deleteChat(userId: string, id: string): boolean {
     return deleted;
   })();
   if (result.changes > 0) {
-    cleanupAudioAttachments(userId, audioAttachments);
+    cleanupMessageAttachments(userId, attachments);
     invalidateChatMemoryCache(id);
     removePoolEntriesForChat(userId, id);
 
@@ -2587,21 +2587,50 @@ export function appendMessageAttachment(
 }
 
 /**
- * Best-effort cleanup of audio_files rows referenced by message attachments.
- * Tolerates missing audio table (test schemas) and missing rows. Caller passes
- * the attachment list to clean up (either being-removed entries or the full
- * extras of a message about to be deleted).
+ * Best-effort cleanup of files referenced by message attachments. Audio files
+ * are message-owned and can be deleted directly. Images and videos use the
+ * shared image store, so they are deleted only after the message mutation and
+ * only when no other persisted reference remains.
  */
-function cleanupAudioAttachments(userId: string, attachments: any[]): void {
+function cleanupMessageAttachments(userId: string, attachments: any[]): void {
+  const audioIds = new Set<string>();
+  const imageIds = new Set<string>();
+
   for (const att of attachments) {
     if (!att || typeof att !== "object") continue;
-    if (att.type !== "audio") continue;
     const id = typeof att.image_id === "string" ? att.image_id : null;
     if (!id) continue;
+
+    if (att.type === "audio") audioIds.add(id);
+    if (att.type === "image" || att.type === "video") imageIds.add(id);
+  }
+
+  for (const id of audioIds) {
     try {
       audioSvc.deleteAudio(userId, id);
     } catch (err) {
       console.warn(`[chats] Failed to delete audio file ${id} on cleanup:`, err);
+    }
+  }
+
+  if (imageIds.size === 0) return;
+
+  // images.service imports chats.service for wallpaper reference cleanup, so
+  // resolve it lazily here rather than introducing a module-initialization
+  // cycle between the two services.
+  let deleteImageIfUnreferenced: typeof import("./images.service")["deleteImageIfUnreferenced"];
+  try {
+    ({ deleteImageIfUnreferenced } = require("./images.service") as typeof import("./images.service"));
+  } catch (err) {
+    console.warn("[chats] Failed to load image attachment cleanup:", err);
+    return;
+  }
+
+  for (const id of imageIds) {
+    try {
+      deleteImageIfUnreferenced(userId, id);
+    } catch (err) {
+      console.warn(`[chats] Failed to delete unreferenced image file ${id} on cleanup:`, err);
     }
   }
 }
@@ -2621,9 +2650,8 @@ function collectMessageAttachments(messageRow: any): any[] {
  * array. Returns the updated Message if the attachment was found and removed,
  * null if the message doesn't exist, or the unchanged Message if the
  * attachment wasn't present. Emits MESSAGE_EDITED so chat clients re-render.
- * When the removed attachment is an audio file, the underlying audio_files
- * row + on-disk blob are also deleted (audio is single-ref per message; no
- * orphan-tracking needed like images have).
+ * The underlying media is cleaned up after the message update. Shared images
+ * and videos are retained while any other persisted reference remains.
  */
 export function removeMessageAttachment(
   userId: string,
@@ -2653,11 +2681,9 @@ export function removeMessageAttachment(
     .query("UPDATE messages SET extra = ? WHERE id = ? AND chat_id = ?")
     .run(JSON.stringify(normalizedExtra), messageId, existing.chat_id);
 
-  // Free any audio_files blob backing a removed audio attachment so the
-  // on-disk file doesn't outlive the message reference. Safe to call after
-  // the UPDATE — if cleanup throws, the attachment is already gone from the
-  // message and the orphan can be GC'd manually.
-  cleanupAudioAttachments(userId, removed);
+  // Safe to call after the UPDATE: image cleanup can now determine whether a
+  // different persisted reference still owns the media.
+  cleanupMessageAttachments(userId, removed);
 
   const updated: Message = { ...existing, extra: projectActiveSwipeExtra(normalizedExtra, existing.swipe_id) };
   eventBus.emit(EventType.MESSAGE_EDITED, { chatId: updated.chat_id, message: updated }, userId);
@@ -3008,7 +3034,7 @@ export function bulkDeleteMessages(userId: string, chatId: string, messageIds: s
     });
   }
 
-  cleanupAudioAttachments(userId, attachmentsToCleanup);
+  cleanupMessageAttachments(userId, attachmentsToCleanup);
 
   for (const msgId of deletedIds) {
     eventBus.emit(EventType.MESSAGE_DELETED, { chatId, messageId: msgId }, userId);
@@ -3056,7 +3082,7 @@ export function deleteMessage(userId: string, id: string): boolean {
         context_history_anchor_message_id: undefined,
       });
     }
-    cleanupAudioAttachments(userId, attachmentsToCleanup);
+    cleanupMessageAttachments(userId, attachmentsToCleanup);
     eventBus.emit(EventType.MESSAGE_DELETED, { chatId: msg.chat_id, messageId: id }, userId);
     invalidateChatMemoryCache(msg.chat_id);
 
