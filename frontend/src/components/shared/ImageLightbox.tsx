@@ -394,6 +394,7 @@ export default function ImageLightbox({
         {src && (
           <motion.div
             ref={backdropRef}
+            data-viewport-zoom-exempt=""
             className={styles.backdrop}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

@@ -14,6 +14,9 @@ interface DepthControlsProps {
   onGlassToggle: (v: boolean) => void
   onFontScaleChange: (v: number) => void
   onUiScaleChange: (v: number) => void
+  showDesktopPinchZoom?: boolean
+  desktopPinchZoomEnabled?: boolean
+  onDesktopPinchZoomChange?: (enabled: boolean) => void
   showDesktopBackgroundControls?: boolean
   desktopBackground?: DesktopBackground
   onDesktopBackgroundChange?: (value?: DesktopBackground) => void
@@ -121,6 +124,9 @@ export default function DepthControls({
   onGlassToggle,
   onFontScaleChange,
   onUiScaleChange,
+  showDesktopPinchZoom = false,
+  desktopPinchZoomEnabled = false,
+  onDesktopPinchZoomChange,
   showDesktopBackgroundControls = false,
   desktopBackground,
   onDesktopBackgroundChange,
@@ -193,6 +199,15 @@ export default function DepthControls({
       </label>
 
       {/* Glass toggle */}
+      {showDesktopPinchZoom && onDesktopPinchZoomChange && (
+        <Toggle.Checkbox
+          checked={desktopPinchZoomEnabled}
+          onChange={onDesktopPinchZoomChange}
+          label={t('desktopPinchZoom')}
+          hint={t('desktopPinchZoomHint')}
+        />
+      )}
+
       <Toggle.Checkbox
         checked={enableGlass}
         onChange={onGlassToggle}

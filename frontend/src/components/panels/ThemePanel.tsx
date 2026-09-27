@@ -4,6 +4,7 @@ import { Bookmark, Download, Upload, Code2 } from 'lucide-react'
 import { useStore } from '@/store'
 import { useThemePackActions } from '@/hooks/useThemePackActions'
 import { DEFAULT_THEME, normalizeTheme } from '@/theme/presets'
+import { isDesktopViewportZoomAvailable } from '@/lib/desktopViewportZoom'
 import { resolveMode } from '@/hooks/useThemeApplicator'
 import type { ThemeConfig, ThemeMode, BaseColors, RenderingMode } from '@/types/theme'
 import ModeSelector from './theme-panel/ModeSelector'
@@ -19,6 +20,8 @@ export default function ThemePanel() {
   const { t } = useTranslation('panels')
   const theme = useStore((s) => s.theme) as ThemeConfig | null
   const setTheme = useStore((s) => s.setTheme)
+  const desktopPinchZoomEnabled = useStore((s) => s.desktopPinchZoomEnabled)
+  const setSetting = useStore((s) => s.setSetting)
   const hasExtensionOverrides = useStore((s) =>
     Object.keys(s.extensionThemeOverrides).some((id) => !s.mutedExtensionThemes[id])
   )
@@ -178,6 +181,9 @@ export default function ThemePanel() {
           onGlassToggle={handleGlassToggle}
           onFontScaleChange={handleFontScaleChange}
           onUiScaleChange={handleUiScaleChange}
+          showDesktopPinchZoom={isDesktopViewportZoomAvailable()}
+          desktopPinchZoomEnabled={desktopPinchZoomEnabled}
+          onDesktopPinchZoomChange={(enabled) => setSetting('desktopPinchZoomEnabled', enabled)}
           showDesktopBackgroundControls={isTauriDesktop}
           desktopBackground={current.desktopBackground}
           onDesktopBackgroundChange={handleDesktopBackgroundChange}

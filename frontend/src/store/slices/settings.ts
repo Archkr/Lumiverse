@@ -55,6 +55,7 @@ export const DATA_KEYS: ReadonlySet<string> = new Set([
   'modalWidthMode',
   'modalMaxWidth',
   'portraitPanelSide',
+  'desktopPinchZoomEnabled',
   'theme',
   'drawerSettings',
   'oocEnabled',
@@ -705,6 +706,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
   modalWidthMode: 'full',
   modalMaxWidth: 900,
   portraitPanelSide: 'right',
+  desktopPinchZoomEnabled: false,
   theme: null,
   characterThemeOverlay: null,
   drawerSettings: {
@@ -1330,6 +1332,9 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
       // generateThemeVariables / ThemePanel and white-screen the app on load.
       if (patch.theme) {
         patch.theme = normalizeTheme(patch.theme)
+      }
+      if ('desktopPinchZoomEnabled' in patch) {
+        patch.desktopPinchZoomEnabled = patch.desktopPinchZoomEnabled === true
       }
       if (patch.filterTab === 'all') {
         patch.filterTab = 'characters'

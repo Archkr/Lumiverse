@@ -2619,6 +2619,8 @@
     "cornerRadius": "コーナー半径",
     "fontScale": "フォントスケール",
     "uiScale": "UIスケール",
+    "desktopPinchZoom": "デスクトップでピンチズーム",
+    "desktopPinchZoomHint": "ポインターを中心に拡大します。スクロールで移動し、ピンチで戻すか Ctrl/Cmd+0 でリセットします。",
     "glassEffects": "ガラス効果",
     "renderingMode": {
       "label": "描画",

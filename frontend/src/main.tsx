@@ -315,17 +315,16 @@ if (!isWebKit) {
   }
 }
 
+// Always suppress the browser's page zoom. The optional desktop controller
+// handles these same events when enabled; native page zoom breaks app layout.
 document.addEventListener('gesturestart', (event) => event.preventDefault(), { passive: false })
 document.addEventListener('gesturechange', (event) => event.preventDefault(), { passive: false })
 document.addEventListener('touchmove', (event) => {
   if (event.touches.length > 1) event.preventDefault()
 }, { passive: false })
 
-// Prevent desktop trackpad/touchpad pinch-to-zoom. On Windows and macOS,
-// Chrome/Edge/Firefox translate trackpad pinch gestures into wheel events
-// with ctrlKey=true. Preserve the desktop behavior to avoid
-// layout issues — the input area grows disproportionately while the chat
-// shrinks, and absolute-positioned elements can drift out of place.
+// Keep native desktop page zoom suppressed, including when the optional
+// viewport zoom setting is off. The controller handles ctrl-wheel when on.
 document.addEventListener('wheel', (e) => {
   if (e.ctrlKey) e.preventDefault()
 }, { passive: false })
