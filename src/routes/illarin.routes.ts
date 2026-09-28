@@ -22,9 +22,8 @@ import { createDeviceRequest } from "../illarin/api";
 import { DeviceLinkSession, runDeviceLinkUntilTerminal } from "../illarin/link-device";
 import { readBackendVersion } from "../illarin/warmup";
 import { handleTerminalUnauthorized, refreshAccessToken } from "../illarin/tokens";
-import { startDeliveryWorker, stopDeliveryWorker } from "../illarin/delivery-worker";
+import { getDeliveryWorkerStatus, startDeliveryWorker, stopDeliveryWorker } from "../illarin/delivery-worker";
 import { clearPermissionError, getPermissionError } from "../illarin/permission-state";
-import { reportLibrary } from "../illarin/extensions";
 import type { BrowserLinkOutcome } from "../illarin/link-browser";
 
 interface PendingBrowserLink {
@@ -217,6 +216,7 @@ illarinRoutes.post("/link/browser", async (c) => {
 illarinRoutes.get("/status", async (c) => {
   const userId = c.get("userId");
   const instance = await svc.getIllarinInstance(userId);
+  const missingReceivePermission = instance !== null && !instance.scopes.includes("work:receive");
 
   const active = activeLinkFor(userId);
   return c.json({
@@ -225,7 +225,14 @@ illarinRoutes.get("/status", async (c) => {
     instance_name: instance?.instanceName,
     instance_id: instance?.instanceId,
     scopes: instance?.scopes ?? [],
-    permission_error: getPermissionError(userId),
+    permission_error: getPermissionError(userId) ?? (missingReceivePermission ? "work:receive" : null),
+    pickup: instance === null ? null : getDeliveryWorkerStatus(userId) ?? {
+      state: missingReceivePermission ? "missing_permission" : "stopped",
+      lastCollectAt: null,
+      lastInstallAt: null,
+      lastError: missingReceivePermission ? "work:receive is not granted" : "Pickup worker has not started",
+      lastErrorAt: null,
+    },
     linked_at: instance?.linkedAt,
     last_refresh_at: instance?.lastRefreshAt,
     declaration_version: typeof instance?.lastDeclaration?.appVersion === "string"
@@ -262,8 +269,7 @@ illarinRoutes.post("/permissions/refresh", async (c) => {
     if (!await refreshAccessToken(userId)) return c.json({ error: "Connection expired" }, 401);
     const instance = await svc.getIllarinInstance(userId);
     clearPermissionError(userId);
-    if (instance?.scopes.includes("work:receive")) startDeliveryWorker(userId);
-    else if (instance?.scopes.includes("library:sync")) void reportLibrary(userId);
+    if (instance) startDeliveryWorker(userId);
     return c.json({ scopes: instance?.scopes ?? [] });
   } catch {
     return c.json({ error: "Could not refresh permissions; try again later" }, 502);

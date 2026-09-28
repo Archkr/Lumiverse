@@ -97,6 +97,22 @@ describe("Illarin delivery pickup", () => {
     expect(calls).toBe(2);
   });
 
+  test("reports a missing receive permission without attempting collection", async () => {
+    const base = dependencies();
+    const instance = await base.deps.getInstance("user-1");
+    const harness = dependencies({
+      getInstance: async () => ({
+        ...instance!,
+        scopes: [],
+      }),
+    });
+
+    const result = await runDeliveryCycle("user-1", harness.deps);
+
+    expect(result).toEqual({ status: "missing_permission", installed: 0, failed: 0 });
+    expect(harness.calls.collectedWith).toEqual([]);
+  });
+
   test("does not retry or rotate credentials after a missing-permission 403", async () => {
     let collects = 0;
     let refreshes = 0;
@@ -132,7 +148,7 @@ describe("Illarin delivery pickup", () => {
     const harness = dependencies({ install: async () => { throw new Error("disk full"); } });
     const result = await runDeliveryCycle("user-1", harness.deps);
 
-    expect(result).toEqual({ status: "continue", installed: 0, failed: 1 });
+    expect(result).toEqual({ status: "continue", installed: 0, failed: 1, lastInstallError: "disk full" });
     expect(harness.calls.recorded).toEqual([]);
   });
 

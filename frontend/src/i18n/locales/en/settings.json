@@ -690,6 +690,16 @@
     "scopesLabel": "Granted permissions",
     "noPermissions": "None yet — grant permissions in Illarin account settings to use sends or library sync.",
     "permissionOff": "{{permission}} is off in Illarin. Enable it in your account settings, then refresh permissions here.",
+    "pickupLabel": "Send pickup",
+    "pickupState": {
+      "starting": "Starting…",
+      "running": "Running",
+      "retrying": "Retrying after an error",
+      "missing_permission": "Disabled — work:receive is not granted",
+      "stopped": "Stopped"
+    },
+    "lastCollect": "Last successful check: {{time}}",
+    "lastPickupError": "Last pickup error: {{error}}",
     "refreshPermissions": "Refresh permissions",
     "errRefreshPermissions": "Could not refresh Illarin permissions",
     "versionLabel": "Declared version",

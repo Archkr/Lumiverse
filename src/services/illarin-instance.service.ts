@@ -164,7 +164,19 @@ export async function getIllarinInstance(userId: string): Promise<IllarinInstanc
 /** Get every configured instance for startup warmup. */
 export async function listIllarinInstances(): Promise<IllarinInstance[]> {
   const rows = getDb().query("SELECT * FROM illarin_instance WHERE user_id IS NOT NULL").all() as InstanceRow[];
-  return Promise.all(rows.map(rowToInstance));
+  const settled = await Promise.allSettled(rows.map(rowToInstance));
+  const instances: IllarinInstance[] = [];
+  let failed = 0;
+  for (const result of settled) {
+    if (result.status === "fulfilled") instances.push(result.value);
+    else failed++;
+  }
+  if (failed > 0) {
+    console.warn(
+      `[Illarin] Skipped ${failed} saved connection${failed === 1 ? "" : "s"} because its credentials could not be read.`,
+    );
+  }
+  return instances;
 }
 
 /** Persist a completed link, replacing only that user's row. */

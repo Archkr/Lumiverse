@@ -158,4 +158,15 @@ describe("illarin protocol conformance checklist", () => {
       .all() as Array<{ user_id: string }>;
     expect(rows).toEqual([{ user_id: USER_A }, { user_id: USER_B }]);
   });
+
+  test("one unreadable saved connection does not prevent other users from starting", async () => {
+    await seed(USER_A, "https://hub-a.example", pair("ia1.a", "ir1.a"));
+    await seed(USER_B, "https://hub-b.example", pair("ia1.b", "ir1.b"));
+    getDb().query("UPDATE illarin_instance SET access_token_tag = ? WHERE user_id = ?")
+      .run(Buffer.alloc(16, 255).toString("base64"), USER_A);
+
+    const instances = await svc.listIllarinInstances();
+
+    expect(instances.map((instance) => instance.userId)).toEqual([USER_B]);
+  });
 });

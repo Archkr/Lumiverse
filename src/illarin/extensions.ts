@@ -6,7 +6,7 @@ import * as svc from "../services/illarin-instance.service";
 import { eventBus } from "../ws/bus";
 import { EventType } from "../ws/events";
 import { IllarinApiError, syncLibrary } from "./api";
-import { clearPermissionError, getPermissionError, setPermissionError } from "./permission-state";
+import { clearPermissionError, hasPermissionError, setPermissionError } from "./permission-state";
 import { withAccessToken } from "./tokens";
 import { readBackendVersion } from "./warmup";
 import type { IllarinDelivery, LibrarySyncEntry, TakedownNotice } from "./types";
@@ -186,7 +186,7 @@ async function sendReport(userId: string, entries: LibrarySyncEntry[] | null, re
   const result = await withAccessToken(userId, (accessToken) =>
     syncLibrary(instance.illarinUrl, accessToken, { snapshot, appVersion, entries: currentEntries, ...(snapshot ? {} : { removed }) }));
   if (result) {
-    if (getPermissionError(userId) === "library:sync") clearPermissionError(userId);
+    clearPermissionError(userId, "library:sync");
     await recordWithheld(userId, result.takedowns);
   }
 }
@@ -202,7 +202,7 @@ function warnReportFailed(err: unknown, userId: string): void {
 const reports = new Map<string, Promise<void>>();
 
 function queueReport(userId: string, entries: LibrarySyncEntry[] | null, removed: string[] = []): Promise<void> {
-  if (getPermissionError(userId) === "library:sync") return Promise.resolve();
+  if (hasPermissionError(userId, "library:sync")) return Promise.resolve();
   const task = (reports.get(userId) ?? Promise.resolve())
     .then(() => sendReport(userId, entries, removed))
     .catch((err) => warnReportFailed(err, userId))

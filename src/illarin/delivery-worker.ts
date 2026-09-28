@@ -56,9 +56,48 @@ const productionDependencies: DeliveryCycleDependencies = {
 };
 
 export interface DeliveryCycleResult {
-  status: "continue" | "stop";
+  status: "continue" | "stop" | "missing_permission";
   installed: number;
   failed: number;
+  lastInstallError?: string;
+}
+
+export type DeliveryWorkerState =
+  | "starting"
+  | "running"
+  | "retrying"
+  | "missing_permission"
+  | "stopped";
+
+export interface DeliveryWorkerStatus {
+  state: DeliveryWorkerState;
+  lastCollectAt: string | null;
+  lastInstallAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+}
+
+const workerStatuses = new Map<string, DeliveryWorkerStatus>();
+
+function errorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.slice(0, 500);
+}
+
+function updateWorkerStatus(userId: string, patch: Partial<DeliveryWorkerStatus>): void {
+  const current = workerStatuses.get(userId) ?? {
+    state: "stopped" as const,
+    lastCollectAt: null,
+    lastInstallAt: null,
+    lastError: null,
+    lastErrorAt: null,
+  };
+  workerStatuses.set(userId, { ...current, ...patch });
+}
+
+export function getDeliveryWorkerStatus(userId: string): DeliveryWorkerStatus | null {
+  const status = workerStatuses.get(userId);
+  return status ? { ...status } : null;
 }
 
 async function collectWithOneRefresh(
@@ -98,8 +137,11 @@ export async function runDeliveryCycle(
   signal?: AbortSignal,
 ): Promise<DeliveryCycleResult> {
   const instance = await dependencies.getInstance(userId);
-  if (!instance || !instance.scopes.includes("work:receive")) {
+  if (!instance) {
     return { status: "stop", installed: 0, failed: 0 };
+  }
+  if (!instance.scopes.includes("work:receive")) {
+    return { status: "missing_permission", installed: 0, failed: 0 };
   }
   const acknowledge = dependencies.pendingAcknowledgements(userId, instance.instanceId);
   const work = await collectWithOneRefresh(userId, instance, acknowledge, dependencies);
@@ -112,6 +154,7 @@ export async function runDeliveryCycle(
 
   let installed = 0;
   let failed = 0;
+  let lastInstallError: string | undefined;
   for (const delivery of work.sends) {
     if (signal?.aborted) return { status: "stop", installed, failed };
     if (dependencies.hasReceipt(userId, instance.instanceId, delivery.id)) {
@@ -131,13 +174,14 @@ export async function runDeliveryCycle(
       if (signal?.aborted) return { status: "stop", installed, failed };
     } catch (err) {
       failed++;
+      lastInstallError = errorMessage(err);
       console.warn(
         `[Illarin] Send ${delivery.id} (${delivery.type}) was not installed:`,
-        err instanceof Error ? err.message : err,
+        lastInstallError,
       );
     }
   }
-  return { status: "continue", installed, failed };
+  return { status: "continue", installed, failed, ...(lastInstallError ? { lastInstallError } : {}) };
 }
 
 function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -161,12 +205,38 @@ async function runWorker(userId: string, controller: AbortController): Promise<v
   while (!controller.signal.aborted && workers.get(userId) === controller) {
     try {
       const result = await runDeliveryCycle(userId, productionDependencies, controller.signal);
-      if (result.status === "stop") break;
+      if (result.status === "missing_permission") {
+        setPermissionError(userId, "work:receive");
+        updateWorkerStatus(userId, {
+          state: "missing_permission",
+          lastError: "work:receive is not granted",
+          lastErrorAt: new Date().toISOString(),
+        });
+        break;
+      }
+      if (result.status === "stop") {
+        if (!controller.signal.aborted) updateWorkerStatus(userId, { state: "stopped" });
+        break;
+      }
       failures = 0;
+      const now = new Date().toISOString();
+      updateWorkerStatus(userId, {
+        state: "running",
+        lastCollectAt: now,
+        ...(result.installed > 0 ? { lastInstallAt: now } : {}),
+        ...(result.lastInstallError
+          ? { lastError: result.lastInstallError, lastErrorAt: now }
+          : {}),
+      });
     } catch (err) {
       if (controller.signal.aborted || workers.get(userId) !== controller) break;
       if (err instanceof IllarinApiError && err.status === 403) {
         setPermissionError(userId, "work:receive");
+        updateWorkerStatus(userId, {
+          state: "missing_permission",
+          lastError: "Illarin rejected send collection because work:receive is not granted",
+          lastErrorAt: new Date().toISOString(),
+        });
         console.warn("[Illarin] Send collection disabled by missing work:receive permission. Enable it in Illarin account settings.");
         break;
       }
@@ -177,7 +247,13 @@ async function runWorker(userId: string, controller: AbortController): Promise<v
         : 0;
       const exponentialMs = Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** Math.min(failures, 6));
       const delayMs = Math.max(retryAfterMs, exponentialMs) + Math.floor(Math.random() * 1_000);
-      console.warn("[Illarin] Delivery pickup failed; retrying:", err instanceof Error ? err.message : err);
+      const message = errorMessage(err);
+      updateWorkerStatus(userId, {
+        state: "retrying",
+        lastError: message,
+        lastErrorAt: new Date().toISOString(),
+      });
+      console.warn("[Illarin] Delivery pickup failed; retrying:", message);
       await abortableDelay(delayMs, controller.signal);
     }
   }
@@ -186,7 +262,12 @@ async function runWorker(userId: string, controller: AbortController): Promise<v
 
 export function startDeliveryWorker(userId: string): void {
   stopDeliveryWorker(userId);
-  clearPermissionError(userId);
+  clearPermissionError(userId, "work:receive");
+  updateWorkerStatus(userId, {
+    state: "starting",
+    lastError: null,
+    lastErrorAt: null,
+  });
   const controller = new AbortController();
   const previous = workerTasks.get(userId);
   workers.set(userId, controller);
@@ -201,13 +282,16 @@ export function startDeliveryWorker(userId: string): void {
 export function stopDeliveryWorker(userId: string): void {
   workers.get(userId)?.abort();
   workers.delete(userId);
+  if (workerStatuses.has(userId)) updateWorkerStatus(userId, { state: "stopped" });
 }
 
 export async function startAllDeliveryWorkers(): Promise<void> {
   const instances = await svc.listIllarinInstances();
   for (const instance of instances) {
-    if (instance.scopes.includes("work:receive")) startDeliveryWorker(instance.userId);
-    else if (instance.scopes.includes("library:sync")) void reportLibrary(instance.userId);
+    // Start every linked installation once. The worker records an explicit
+    // missing-permission state instead of silently disappearing when
+    // work:receive was left unchecked during approval.
+    startDeliveryWorker(instance.userId);
   }
   if (!librarySnapshotTimer) {
     librarySnapshotTimer = setInterval(() => {
@@ -219,7 +303,10 @@ export async function startAllDeliveryWorkers(): Promise<void> {
 }
 
 export function stopAllDeliveryWorkers(): void {
-  for (const controller of workers.values()) controller.abort();
+  for (const [userId, controller] of workers) {
+    controller.abort();
+    updateWorkerStatus(userId, { state: "stopped" });
+  }
   workers.clear();
   if (librarySnapshotTimer) clearInterval(librarySnapshotTimer);
   librarySnapshotTimer = null;

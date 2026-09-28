@@ -4205,6 +4205,13 @@ function IllarinSettings() {
     instance_id?: string
     scopes?: string[]
     permission_error?: string | null
+    pickup?: {
+      state: 'starting' | 'running' | 'retrying' | 'missing_permission' | 'stopped'
+      lastCollectAt: string | null
+      lastInstallAt: string | null
+      lastError: string | null
+      lastErrorAt: string | null
+    } | null
     linked_at?: string | null
     declaration_version?: string | null
     pending_link?: { status: 'pending' | 'linked' | 'failed'; reason?: string | null } | null
@@ -4425,6 +4432,10 @@ function IllarinSettings() {
     }
   }
 
+  const pickupStateLabel = status?.pickup
+    ? t(`illarin.pickupState.${status.pickup.state}`)
+    : t('illarin.pickupState.stopped')
+
   if (loading) {
     return (
       <div className={styles.settingsSection}>
@@ -4462,6 +4473,23 @@ function IllarinSettings() {
             <span className={styles.fieldLabel}>{t('illarin.scopesLabel')}</span>
             <span className={styles.lumihubMeta}>{(status.scopes ?? []).join(', ') || t('illarin.noPermissions')}</span>
           </div>
+
+          <div className={styles.field}>
+            <span className={styles.fieldLabel}>{t('illarin.pickupLabel')}</span>
+            <span className={styles.lumihubMeta}>{pickupStateLabel}</span>
+          </div>
+
+          {status.pickup?.lastCollectAt && (
+            <span className={styles.lumihubMeta}>
+              {t('illarin.lastCollect', { time: new Date(status.pickup.lastCollectAt).toLocaleString() })}
+            </span>
+          )}
+
+          {status.pickup?.lastError && status.pickup.state !== 'missing_permission' && (
+            <span className={styles.helperText}>
+              {t('illarin.lastPickupError', { error: status.pickup.lastError })}
+            </span>
+          )}
 
           {status.permission_error && (
             <span className={styles.helperText}>{t('illarin.permissionOff', { permission: status.permission_error })}</span>
