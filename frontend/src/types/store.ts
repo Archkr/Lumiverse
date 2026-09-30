@@ -882,6 +882,23 @@ export type { ThemeConfig } from './theme'
 import type { CharacterThemeOverlay } from './theme'
 export type { CharacterThemeOverlay } from './theme'
 
+export type DrawerLayoutItem =
+  | {
+      type: 'tab'
+      tabId: string
+    }
+  | {
+      type: 'divider'
+      id: string
+      label?: string
+    }
+  | {
+      type: 'folder'
+      id: string
+      name: string
+      children: string[]
+    }
+
 export interface DrawerSettings {
   side: 'left' | 'right'
   verticalPosition: number
@@ -890,8 +907,10 @@ export interface DrawerSettings {
   customPanelWidth: number
   showTabLabels: boolean
   hiddenTabIds: string[]
-  /** User-defined order of tab IDs. Unknown IDs are ignored; new tabs append in registry order. */
+  /** Legacy flat tab order retained for downgrade compatibility and migration. */
   tabOrder: string[]
+  /** Ordered sidebar layout. Tabs may live at root or inside one-level folders. */
+  layout: DrawerLayoutItem[]
 }
 
 export interface SpindleSettings {

@@ -563,3 +563,187 @@
     margin: 0 4px;
   }
 }
+
+/* ── Sidebar organization ── */
+
+.folderSlot {
+  display: contents;
+}
+
+.folderTabBtn {
+  position: relative;
+}
+
+.folderBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--lumiverse-primary-020);
+  color: var(--lumiverse-primary);
+  font-size: calc(9px * var(--lumiverse-font-scale, 1));
+  font-weight: 750;
+  line-height: 14px;
+  text-align: center;
+}
+
+/* Keep canonical drawer_tab mount anchors alive for foldered tabs. Extensions
+   may decorate their own sidebar button; organization must not turn that into
+   a registration-order race just because the visible button became a folder. */
+.organizedTabAnchors,
+.organizedTabAnchor {
+  display: none !important;
+}
+
+.folderPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+
+.folderPanelIntro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lumiverse-primary) 6%, var(--lumiverse-bg-panel, transparent));
+}
+
+.folderPanelEyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--lumiverse-primary);
+  font-size: calc(9px * var(--lumiverse-font-scale, 1));
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.folderPanelIntro p {
+  margin: 0;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  line-height: 1.45;
+}
+
+.folderManageButton {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 8px;
+  background: var(--lumiverse-fill-subtle);
+  color: var(--lumiverse-text-secondary);
+  font: inherit;
+  font-size: calc(10px * var(--lumiverse-font-scale, 1));
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.folderManageButton:hover {
+  border-color: var(--lumiverse-border-hover);
+  color: var(--lumiverse-text);
+  background: var(--lumiverse-primary-015);
+}
+
+.folderGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.folderTile {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  min-height: 68px;
+  padding: 9px 10px;
+  border: 1px solid var(--lumiverse-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lumiverse-bg-panel, var(--lumiverse-bg)) 94%, white 6%);
+  color: var(--lumiverse-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderTile:hover {
+  border-color: var(--lumiverse-border-hover);
+  background: var(--lumiverse-primary-008, rgba(255, 255, 255, 0.03));
+}
+
+.folderTileIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--lumiverse-primary-015);
+  color: var(--lumiverse-primary);
+}
+
+.folderTileCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.folderTileCopy strong {
+  overflow: hidden;
+  color: var(--lumiverse-text);
+  font-size: calc(12px * var(--lumiverse-font-scale, 1));
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folderTileCopy span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(10px * var(--lumiverse-font-scale, 1));
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.folderTileChevron {
+  color: var(--lumiverse-text-dim);
+}
+
+.folderPanelEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+  padding: 20px;
+  border: 1px dashed var(--lumiverse-border);
+  border-radius: 12px;
+  color: var(--lumiverse-text-dim);
+  font-size: calc(11px * var(--lumiverse-font-scale, 1));
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .folderGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .folderPanelIntro {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .folderManageButton {
+    align-self: flex-start;
+  }
+}

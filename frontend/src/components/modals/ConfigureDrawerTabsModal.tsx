@@ -1,19 +1,20 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 import clsx from 'clsx'
-import { GripVertical } from 'lucide-react'
+import { Folder, FolderPlus, GripVertical, Minus, Plus, Puzzle, Trash2 } from 'lucide-react'
 import {
   closestCenter,
   MouseSensor,
   TouchSensor,
   KeyboardSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core'
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
@@ -27,28 +28,45 @@ import { CloseButton } from '@/components/shared/CloseButton'
 import {
   DRAWER_TABS,
   adaptExtensionTabs,
-  applyDrawerTabOrder,
   isDrawerTabCore,
-  sanitizeDrawerTabOrder,
   sanitizeHiddenDrawerTabIds,
   type DrawerTabEntry,
 } from '@/lib/drawer-tab-registry'
+import {
+  createDrawerLayoutContainerId,
+  DRAWER_LAYOUT_ROOT_END_ID,
+  drawerLayoutItemKey,
+  drawerLayoutTabKey,
+  findDrawerLayoutLocation,
+  flattenDrawerLayoutTabIds,
+  moveDrawerLayoutItem,
+  reconcileDrawerLayout,
+  removeDrawerLayoutContainer,
+  sanitizeDrawerLayout,
+  updateDrawerLayoutContainer,
+} from '@/lib/drawer-layout'
+import type { DrawerLayoutItem } from '@/types/store'
 import styles from './ConfigureDrawerTabsModal.module.css'
 import { filterEnabledFrontendContributions } from '@/lib/spindle/frontend-extension-availability'
 
 interface SortableTabRowProps {
-  tab: DrawerTabEntry
+  tabId: string
+  tab?: DrawerTabEntry
   hidden: boolean
+  extension: boolean
+  unavailable: boolean
+  nested?: boolean
   onToggle: (tabId: string, enabled: boolean) => void
-  variant: 'builtin' | 'extension'
 }
 
-function SortableTabRow({ tab, hidden, onToggle, variant }: SortableTabRowProps) {
-  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: tab.id })
+function SortableTabRow({ tabId, tab, hidden, extension, unavailable, nested = false, onToggle }: SortableTabRowProps) {
+  const sortableId = drawerLayoutTabKey(tabId)
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: sortableId })
   const { setNodeRef, style } = useScaledSortableStyle({ setNodeRef: setSortableRef, transform, transition, isDragging })
-  const Icon = tab.tabIcon
-  const locked = variant === 'builtin' && isDrawerTabCore(tab.id)
+  const Icon = tab?.tabIcon ?? Puzzle
+  const locked = isDrawerTabCore(tabId)
   const enabled = !hidden
+  const title = tab?.tabName ?? tabId
 
   return (
     <div
@@ -56,16 +74,18 @@ function SortableTabRow({ tab, hidden, onToggle, variant }: SortableTabRowProps)
       style={style}
       className={clsx(
         styles.row,
+        nested && styles.rowNested,
         locked && styles.rowLocked,
         isDragging && styles.rowDragging,
         !enabled && styles.rowHidden,
+        unavailable && styles.rowUnavailable,
       )}
     >
       <button
         type="button"
         className={styles.dragHandle}
         title={i18n.t('configureDrawerTabs.dragToReorder', { ns: 'modals' })}
-        aria-label={i18n.t('configureDrawerTabs.dragTab', { ns: 'modals', name: tab.tabName })}
+        aria-label={i18n.t('configureDrawerTabs.dragTab', { ns: 'modals', name: title })}
         {...attributes}
         {...listeners}
       >
@@ -78,84 +98,164 @@ function SortableTabRow({ tab, hidden, onToggle, variant }: SortableTabRowProps)
         </span>
         <div className={styles.copy}>
           <div className={styles.rowTitleWrap}>
-            <span className={styles.rowTitle}>{tab.tabName}</span>
+            <span className={styles.rowTitle}>{title}</span>
             {locked && <span className={styles.badge}>{i18n.t('configureDrawerTabs.coreBadge', { ns: 'modals' })}</span>}
-            {variant === 'extension' && (
+            {extension && (
               <span className={clsx(styles.badge, styles.badgeMuted)}>
                 {i18n.t('configureDrawerTabs.extensionBadge', { ns: 'modals' })}
+              </span>
+            )}
+            {unavailable && (
+              <span className={clsx(styles.badge, styles.badgeWarning)}>
+                {i18n.t('configureDrawerTabs.unavailableBadge', { ns: 'modals', defaultValue: 'Unavailable' })}
               </span>
             )}
           </div>
           <p className={styles.rowDescription}>
             {locked
               ? i18n.t('configureDrawerTabs.coreLockedHint', { ns: 'modals' })
-              : tab.tabDescription}
+              : unavailable
+                ? i18n.t('configureDrawerTabs.unavailableHint', {
+                    ns: 'modals',
+                    defaultValue: 'This tab is not registered right now. Its saved position is preserved.',
+                  })
+                : tab?.tabDescription}
           </p>
         </div>
       </div>
 
       <Toggle.Switch
         checked={enabled}
-        onChange={(next) => onToggle(tab.id, next)}
-        disabled={locked}
+        onChange={(next) => onToggle(tabId, next)}
+        disabled={locked || unavailable}
       />
     </div>
   )
 }
 
-interface SortableSectionProps {
-  title: string
-  description: string
-  tabs: DrawerTabEntry[]
-  hiddenTabIds: Set<string>
-  onToggle: (tabId: string, enabled: boolean) => void
-  onReorder: (orderedIds: string[]) => void
-  variant: 'builtin' | 'extension'
+interface SortableDividerRowProps {
+  item: Extract<DrawerLayoutItem, { type: 'divider' }>
+  onRename: (itemKey: string, value: string) => void
+  onDelete: (itemKey: string) => void
 }
 
-function SortableSection({ title, description, tabs, hiddenTabIds, onToggle, onReorder, variant }: SortableSectionProps) {
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
-
-  if (tabs.length === 0) return null
-
-  const ids = tabs.map((tab) => tab.id)
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const oldIndex = ids.indexOf(String(active.id))
-    const newIndex = ids.indexOf(String(over.id))
-    if (oldIndex < 0 || newIndex < 0) return
-    onReorder(arrayMove(ids, oldIndex, newIndex))
-  }
+function SortableDividerRow({ item, onRename, onDelete }: SortableDividerRowProps) {
+  const itemKey = drawerLayoutItemKey(item)
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: itemKey })
+  const { setNodeRef, style } = useScaledSortableStyle({ setNodeRef: setSortableRef, transform, transition, isDragging })
 
   return (
-    <section className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h3 className={styles.sectionTitle}>{title}</h3>
-        <p className={styles.sectionDescription}>{description}</p>
+    <div ref={setNodeRef} style={style} className={clsx(styles.dividerRow, isDragging && styles.rowDragging)}>
+      <button type="button" className={styles.dragHandle} {...attributes} {...listeners}>
+        <GripVertical size={16} />
+      </button>
+      <Minus size={18} className={styles.dividerIcon} />
+      <input
+        className={styles.nameInput}
+        value={item.label ?? ''}
+        onChange={(event) => onRename(itemKey, event.target.value)}
+        placeholder={i18n.t('configureDrawerTabs.dividerPlaceholder', { ns: 'modals', defaultValue: 'Divider label (optional)' })}
+        aria-label={i18n.t('configureDrawerTabs.dividerLabel', { ns: 'modals', defaultValue: 'Divider label' })}
+      />
+      <button
+        type="button"
+        className={styles.deleteButton}
+        onClick={() => onDelete(itemKey)}
+        title={i18n.t('configureDrawerTabs.deleteDivider', { ns: 'modals', defaultValue: 'Delete divider' })}
+      >
+        <Trash2 size={15} />
+      </button>
+    </div>
+  )
+}
+
+interface SortableFolderRowProps {
+  item: Extract<DrawerLayoutItem, { type: 'folder' }>
+  entryMap: Map<string, DrawerTabEntry>
+  extensionIds: Set<string>
+  hiddenTabIds: Set<string>
+  onToggle: (tabId: string, enabled: boolean) => void
+  onRename: (itemKey: string, value: string) => void
+  onDelete: (itemKey: string) => void
+}
+
+function SortableFolderRow({
+  item,
+  entryMap,
+  extensionIds,
+  hiddenTabIds,
+  onToggle,
+  onRename,
+  onDelete,
+}: SortableFolderRowProps) {
+  const itemKey = drawerLayoutItemKey(item)
+  const { attributes, listeners, setNodeRef: setSortableRef, transform, transition, isDragging } = useSortable({ id: itemKey })
+  const { setNodeRef, style } = useScaledSortableStyle({ setNodeRef: setSortableRef, transform, transition, isDragging })
+  const childIds = item.children.map(drawerLayoutTabKey)
+
+  return (
+    <div ref={setNodeRef} style={style} className={clsx(styles.folder, isDragging && styles.rowDragging)}>
+      <div className={styles.folderHeader}>
+        <button type="button" className={styles.dragHandle} {...attributes} {...listeners}>
+          <GripVertical size={16} />
+        </button>
+        <span className={styles.folderIcon}><Folder size={18} /></span>
+        <input
+          className={styles.nameInput}
+          value={item.name}
+          onChange={(event) => onRename(itemKey, event.target.value)}
+          onBlur={(event) => {
+            if (!event.target.value.trim()) onRename(itemKey, 'Folder')
+          }}
+          aria-label={i18n.t('configureDrawerTabs.folderName', { ns: 'modals', defaultValue: 'Folder name' })}
+        />
+        <span className={styles.folderCount}>{item.children.length}</span>
+        <button
+          type="button"
+          className={styles.deleteButton}
+          onClick={() => onDelete(itemKey)}
+          title={i18n.t('configureDrawerTabs.deleteFolder', { ns: 'modals', defaultValue: 'Delete folder and return its tabs to the sidebar' })}
+        >
+          <Trash2 size={15} />
+        </button>
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-          <div className={styles.list}>
-            {tabs.map((tab) => (
+      <SortableContext items={childIds} strategy={verticalListSortingStrategy}>
+        <div className={styles.folderChildren}>
+          {item.children.length === 0 ? (
+            <div className={styles.folderEmpty}>
+              {i18n.t('configureDrawerTabs.folderEmpty', { ns: 'modals', defaultValue: 'Drop tabs here' })}
+            </div>
+          ) : item.children.map((tabId) => {
+            const tab = entryMap.get(tabId)
+            return (
               <SortableTabRow
-                key={tab.id}
+                key={tabId}
+                tabId={tabId}
                 tab={tab}
-                hidden={hiddenTabIds.has(tab.id)}
+                hidden={hiddenTabIds.has(tabId)}
+                extension={extensionIds.has(tabId)}
+                unavailable={!tab}
+                nested
                 onToggle={onToggle}
-                variant={variant}
               />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
-    </section>
+            )
+          })}
+        </div>
+      </SortableContext>
+    </div>
+  )
+}
+
+function RootDropZone({ active }: { active: boolean }) {
+  const { isOver, setNodeRef } = useDroppable({ id: DRAWER_LAYOUT_ROOT_END_ID })
+  return (
+    <div
+      ref={setNodeRef}
+      className={clsx(styles.rootDropZone, active && styles.rootDropZoneVisible, isOver && styles.rootDropZoneOver)}
+    >
+      {i18n.t('configureDrawerTabs.rootDropZone', { ns: 'modals', defaultValue: 'Drop here to move to sidebar root' })}
+    </div>
   )
 }
 
@@ -167,26 +267,40 @@ export default function ConfigureDrawerTabsModal() {
   const drawerTabs = useStore((s) => s.drawerTabs)
   const extensions = useStore((s) => s.extensions)
   const enabledDrawerTabs = filterEnabledFrontendContributions(drawerTabs, extensions)
+  const extensionEntries = useMemo(() => adaptExtensionTabs(enabledDrawerTabs), [enabledDrawerTabs])
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
 
   const hiddenTabIds = useMemo(
     () => new Set(sanitizeHiddenDrawerTabIds(drawerSettings.hiddenTabIds)),
     [drawerSettings.hiddenTabIds],
   )
 
-  const tabOrder = useMemo(
-    () => sanitizeDrawerTabOrder(drawerSettings.tabOrder),
-    [drawerSettings.tabOrder],
+  const entryMap = useMemo(() => new Map(
+    [...DRAWER_TABS, ...extensionEntries].map((tab) => [tab.id, tab] as const),
+  ), [extensionEntries])
+  const extensionIds = useMemo(() => new Set(extensionEntries.map((tab) => tab.id)), [extensionEntries])
+
+  const layout = useMemo(() => reconcileDrawerLayout({
+    layout: drawerSettings.layout,
+    builtInIds: DRAWER_TABS.map((tab) => tab.id),
+    extensionIds: extensionEntries.map((tab) => tab.id),
+    legacyTabOrder: drawerSettings.tabOrder,
+  }), [drawerSettings.layout, drawerSettings.tabOrder, extensionEntries])
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const orderedBuiltInTabs = useMemo(
-    () => applyDrawerTabOrder(DRAWER_TABS, tabOrder),
-    [tabOrder],
-  )
-
-  const orderedExtensionTabs = useMemo(
-    () => applyDrawerTabOrder(adaptExtensionTabs(enabledDrawerTabs), tabOrder),
-    [enabledDrawerTabs, tabOrder],
-  )
+  const persistLayout = (next: DrawerLayoutItem[]) => {
+    const normalized = sanitizeDrawerLayout(next)
+    setSetting('drawerSettings', {
+      ...drawerSettings,
+      layout: normalized,
+      tabOrder: flattenDrawerLayoutTabIds(normalized),
+    })
+  }
 
   const handleToggle = (tabId: string, enabled: boolean) => {
     if (isDrawerTabCore(tabId)) return
@@ -199,54 +313,124 @@ export default function ConfigureDrawerTabsModal() {
     })
   }
 
-  const persistOrder = (builtInIds: string[], extensionIds: string[]) => {
-    setSetting('drawerSettings', {
-      ...drawerSettings,
-      tabOrder: [...builtInIds, ...extensionIds],
-    })
+  const handleDragStart = (event: DragStartEvent) => setActiveDragId(String(event.active.id))
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDragId(null)
+    const { active, over } = event
+    if (!over) return
+    const next = moveDrawerLayoutItem(layout, String(active.id), String(over.id))
+    persistLayout(next)
   }
 
-  const handleBuiltInReorder = (orderedIds: string[]) => {
-    const extensionIds = orderedExtensionTabs.map((tab) => tab.id)
-    persistOrder(orderedIds, extensionIds)
+  const addFolder = () => {
+    persistLayout([
+      ...layout,
+      {
+        type: 'folder',
+        id: createDrawerLayoutContainerId('folder'),
+        name: t('configureDrawerTabs.newFolder', { defaultValue: 'New Folder' }),
+        children: [],
+      },
+    ])
   }
 
-  const handleExtensionReorder = (orderedIds: string[]) => {
-    const builtInIds = orderedBuiltInTabs.map((tab) => tab.id)
-    persistOrder(builtInIds, orderedIds)
+  const addDivider = () => {
+    persistLayout([
+      ...layout,
+      { type: 'divider', id: createDrawerLayoutContainerId('divider') },
+    ])
   }
+
+  const activeLocation = activeDragId ? findDrawerLayoutLocation(layout, activeDragId) : null
+  const rootIds = layout.map(drawerLayoutItemKey)
 
   return (
-    <ModalShell isOpen onClose={closeModal} maxWidth={720} className={styles.modal}>
+    <ModalShell isOpen onClose={closeModal} maxWidth={760} className={styles.modal}>
       <CloseButton onClick={closeModal} variant="solid" position="absolute" />
 
       <div className={styles.header}>
         <div>
           <h3 className={styles.title}>{t('configureDrawerTabs.title')}</h3>
-          <p className={styles.subtitle}>{t('configureDrawerTabs.subtitle')}</p>
+          <p className={styles.subtitle}>
+            {t('configureDrawerTabs.organizerSubtitle', {
+              defaultValue: 'Organize the sidebar with tabs, folders, and movable dividers. Core tabs stay accessible even when tucked into folders.',
+            })}
+          </p>
+        </div>
+        <div className={styles.headerActions}>
+          <button type="button" className={styles.addButton} onClick={addFolder}>
+            <FolderPlus size={16} />
+            {t('configureDrawerTabs.addFolder', { defaultValue: 'Add Folder' })}
+          </button>
+          <button type="button" className={styles.addButton} onClick={addDivider}>
+            <Plus size={16} />
+            {t('configureDrawerTabs.addDivider', { defaultValue: 'Add Divider' })}
+          </button>
         </div>
       </div>
 
       <div className={styles.body}>
-        <SortableSection
-          title={t('configureDrawerTabs.sidebarTitle')}
-          description={t('configureDrawerTabs.sidebarDescription')}
-          tabs={orderedBuiltInTabs}
-          hiddenTabIds={hiddenTabIds}
-          onToggle={handleToggle}
-          onReorder={handleBuiltInReorder}
-          variant="builtin"
-        />
+        <div className={styles.organizerHint}>
+          {t('configureDrawerTabs.organizerHint', {
+            defaultValue: 'Drop a tab onto a folder to tuck it inside. Drop a foldered tab onto a root tab/divider, or the root target below, to pull it back out.',
+          })}
+        </div>
 
-        <SortableSection
-          title={t('configureDrawerTabs.extensionTitle')}
-          description={t('configureDrawerTabs.extensionDescription')}
-          tabs={orderedExtensionTabs}
-          hiddenTabIds={hiddenTabIds}
-          onToggle={handleToggle}
-          onReorder={handleExtensionReorder}
-          variant="extension"
-        />
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragCancel={() => setActiveDragId(null)}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
+            <div className={styles.list}>
+              {layout.map((item) => {
+                if (item.type === 'divider') {
+                  return (
+                    <SortableDividerRow
+                      key={drawerLayoutItemKey(item)}
+                      item={item}
+                      onRename={(itemKey, value) => persistLayout(updateDrawerLayoutContainer(layout, itemKey, value))}
+                      onDelete={(itemKey) => persistLayout(removeDrawerLayoutContainer(layout, itemKey))}
+                    />
+                  )
+                }
+
+                if (item.type === 'folder') {
+                  return (
+                    <SortableFolderRow
+                      key={drawerLayoutItemKey(item)}
+                      item={item}
+                      entryMap={entryMap}
+                      extensionIds={extensionIds}
+                      hiddenTabIds={hiddenTabIds}
+                      onToggle={handleToggle}
+                      onRename={(itemKey, value) => persistLayout(updateDrawerLayoutContainer(layout, itemKey, value))}
+                      onDelete={(itemKey) => persistLayout(removeDrawerLayoutContainer(layout, itemKey))}
+                    />
+                  )
+                }
+
+                const tab = entryMap.get(item.tabId)
+                return (
+                  <SortableTabRow
+                    key={drawerLayoutItemKey(item)}
+                    tabId={item.tabId}
+                    tab={tab}
+                    hidden={hiddenTabIds.has(item.tabId)}
+                    extension={extensionIds.has(item.tabId)}
+                    unavailable={!tab}
+                    onToggle={handleToggle}
+                  />
+                )
+              })}
+            </div>
+          </SortableContext>
+
+          <RootDropZone active={activeLocation?.kind === 'folder-child'} />
+        </DndContext>
       </div>
     </ModalShell>
   )
