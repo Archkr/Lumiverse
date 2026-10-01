@@ -718,6 +718,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     showTabLabels: true,
     hiddenTabIds: [],
     tabOrder: [],
+    layout: [],
   },
   oocEnabled: true,
   lumiaOOCStyle: 'social',

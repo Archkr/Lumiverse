@@ -2833,7 +2833,10 @@
   "viewportDrawer": {
     "hideTabLabels": "Hide tab labels",
     "showTabLabels": "Show tab labels",
-    "configureTabs": "Configure Tabs"
+    "configureTabs": "Configure Tabs",
+    "folderView": "Folder view",
+    "listView": "List view",
+    "gridView": "Grid view"
   },
   "multiChipSelect": {
     "select": "Select...",
