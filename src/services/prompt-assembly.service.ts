@@ -51,7 +51,8 @@ import {
   withPromptBlockContext,
   restoreLiteralBraces,
 } from "../macros";
-import type { MacroEnv } from "../macros";
+import type { AstNode, MacroEnv } from "../macros/types";
+import { parse } from "../macros/MacroParser";
 import { coercePromptVariable } from "../utils/prompt-variable-values";
 import {
   isClaudeOpusAtLeast,
@@ -1588,6 +1589,45 @@ const PROMPT_BLOCK_POSITIONS = new Set<PromptBlock["position"]>([
   "post_history",
   "in_history",
 ]);
+const MEMORY_CONTENT_MACROS = new Set([
+  "memories",
+  "memoriesraw",
+  "entities",
+  "entityfacts",
+  "relationships",
+  "arc",
+  "memorysalience",
+  "charactercolors",
+]);
+const DATABANK_CONTENT_MACROS = new Set(["databank", "databankraw"]);
+
+function detectPromptContextMacros(
+  blocks: PromptBlock[],
+  generationType: GenerationType,
+  characterTags: string[],
+): { memory: boolean; databank: boolean } {
+  const usage = { memory: false, databank: false };
+  for (const block of blocks) {
+    if (!block.enabled || !block.content) continue;
+    if (block.injectionTrigger?.length && !block.injectionTrigger.includes(generationType)) continue;
+    if (!promptBlockMatchesCharacterTags(block.characterTagTrigger, characterTags)) continue;
+    if (block.marker && STRUCTURAL_MARKERS.has(block.marker)) continue;
+
+    const pendingNodes: AstNode[] = [...parse(block.content)];
+    while (pendingNodes.length > 0) {
+      const node = pendingNodes.pop()!;
+      if (node.type === "text" || node.flags.close) continue;
+      const name = (registry.getMacro(node.name)?.name ?? node.name).toLowerCase();
+      if (name === "escape" || name === "comment" || name === "//") continue;
+      if (MEMORY_CONTENT_MACROS.has(name)) usage.memory = true;
+      if (DATABANK_CONTENT_MACROS.has(name)) usage.databank = true;
+      for (const argument of node.args) pendingNodes.push(...argument);
+      if (node.type === "scoped_macro") pendingNodes.push(...node.body);
+    }
+    if (usage.memory && usage.databank) break;
+  }
+  return usage;
+}
 
 function isPromptBlockPlacement(value: unknown): value is Pick<PromptBlock, "role" | "position" | "depth"> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -2817,7 +2857,11 @@ export async function assemblePrompt(
     chatMemSettings?.injectionStrategy ??
     embeddingsSvc.DEFAULT_CHAT_MEMORY_SETTINGS.injectionStrategy;
   const effectiveMemoryEnabled =
-    memoryResult.enabled && memoryInjectionStrategy !== "disabled";
+    (memoryResult.enabled || !!linkedMemoryText) && memoryInjectionStrategy !== "disabled";
+  const memoryFallbackAllowed =
+    memoryInjectionStrategy === "fallback" ||
+    !!macroEnv.extra.cortex?.formatted ||
+    !!linkedMemoryText;
 
   macroEnv.extra.memory = {
     chunks: memoryResult.chunks,
@@ -2874,14 +2918,10 @@ export async function assemblePrompt(
   };
   profiler.addPhase("databank-retrieval", performance.now() - phaseStartedAt);
 
-  // Detect if any enabled block uses the {{memories}} macro
-  const macroHandlesMemory = effectiveBlocks.some(
-    (b) => b.enabled && b.content && /\{\{memories(\b|::|\}\})/.test(b.content),
-  );
-
-  // Detect if any enabled block uses the {{databank}} macro
-  const macroHandlesDatabank = effectiveBlocks.some(
-    (b) => b.enabled && b.content && /\{\{databank(\b|::|\}\})/.test(b.content),
+  const { memory: macroHandlesMemory, databank: macroHandlesDatabank } = detectPromptContextMacros(
+    effectiveBlocks,
+    ctx.generationType,
+    focusedCharacter.tags,
   );
 
   // ---- Resolve #mentions in user messages ----
@@ -3129,10 +3169,11 @@ export async function assemblePrompt(
       // the global injection strategy allows fallback injection.
       if (
         !macroHandlesMemory &&
-        memoryResult.count > 0 &&
-        memoryInjectionStrategy === "fallback"
+        effectiveMemoryEnabled &&
+        combinedFormatted &&
+        memoryFallbackAllowed
       ) {
-        const memoryContent = memoryResult.formatted;
+        const memoryContent = combinedFormatted;
         result.push({ role: "system", content: memoryContent });
         breakdown.push({
           type: "long_term_memory",
@@ -3657,12 +3698,12 @@ export async function assemblePrompt(
   // When memories are injected via {{memories}} macro, their content is embedded
   // inside a block. Add a separate breakdown entry so the prompt breakdown UI
   // shows memories as their own group.
-  if (macroHandlesMemory && memoryResult.count > 0 && memoryResult.formatted) {
+  if (macroHandlesMemory && effectiveMemoryEnabled && combinedFormatted) {
     breakdown.push({
       type: "long_term_memory",
       name: "Long-Term Memory",
       role: "system",
-      content: memoryResult.formatted,
+      content: combinedFormatted,
       excludeFromTotal: true, // tokens already counted in the block containing {{memories}}
     });
   }
@@ -4323,7 +4364,7 @@ export async function assemblePrompt(
       ? "disabled"
       : macroHandlesMemory
         ? "macro"
-        : memoryInjectionStrategy === "fallback"
+        : memoryFallbackAllowed
           ? "fallback"
           : "disabled",
     retrievedChunks: memoryResult.chunks.map((c) => ({
@@ -6163,6 +6204,11 @@ function formatCortexForAssembly(
         ? memResult.formatted + "\n\n" + contextText
         : contextText;
     }
+    if (colorMapText) {
+      memResult.formatted = memResult.formatted
+        ? memResult.formatted + "\n\n" + colorMapText
+        : colorMapText;
+    }
 
     return memResult;
   }
@@ -6177,7 +6223,7 @@ function formatCortexForAssembly(
         messageRange: m.messageRange,
       },
     })),
-    formatted: shadowResult.text,
+    formatted: macroEnv.extra.cortex.formatted,
     count: cortexResult.memories.length,
     enabled: true,
     queryPreview: "",
