@@ -60,6 +60,138 @@ All signed-in accounts can see the instance identity and their own role. Serving
 status remains restricted to Lumiverse administrators and owners. Local server,
 checkout, and update controls are disabled while a remote instance is selected.
 
+## Extension screen capture
+
+The capture device named **Lumiverse Desktop** represents this client, not a
+restriction to its own window. On macOS, requests open the system picker directly,
+initially in **Entire Display** mode, with both displays and windows allowed.
+The capture menu-bar icon also offers **Choose a Window…** and **Choose a Display…**.
+For Window, bring the other application's window into view and select it using the
+macOS overlay. Any explicitly opened capture controls and
+Lumiverse windows are excluded from window selection. Full-display capture can
+include visible Lumiverse windows and other sensitive content: use **Review Before
+Sending** when local inspection is needed. There is no always-on screen buffer.
+
+The macOS development executable embeds `src-tauri/Info.plist` to retain the
+packaged application's bundle identifier. Restart `bun run tauri dev` after
+changes to this metadata.
+
+On macOS 14+ or Windows 10 1903+/Windows 11, choose
+**Browser → Enable Extension Screen Capture…**. This signs
+the native client into the selected local or remote instance if necessary; it
+does not reuse browser cookies. An extension still needs explicitly granted
+`screen_capture`/`screen_recording` and `generation` permissions.
+
+Every request opens the OS source picker directly. On macOS there is no Lumiverse
+recording popup: a temporary camera/recording menu-bar item provides the request
+identity, destination, countdown and **Stop & Discard**, alongside macOS's sharing
+controls. **Capture Details & Permissions…** opens recovery controls only on an
+explicit owner action; optional review likewise opens a preview only when requested.
+Windows uses its system picker for either an application window or display, with
+a compact native identity/destination and stop HUD. Full Windows consent details
+live under **Details…**. Recording does not foreground the main app window. Selecting
+a source authorizes this one image or bounded clip and its release to the displayed
+instance/model. After capture and validation, the extension receives an opaque
+asset for processing automatically; no second Send click is needed. Every request
+still requires native source selection; no approval or target is remembered.
+**Review Before Sending** optionally pauses release for a compact local preview
+and **Share This Capture**, for this request only. **Stop & Discard** or closing
+an explicitly opened capture window before release uploads nothing. Capture stays disabled
+at launch, and must be re-enabled after transport failure. Instance changes and
+desktop OAuth sign-out stop it.
+
+Images stay in native memory. Both adapters record video-only H.264 MP4, at most
+1080p/30fps and 30 seconds; oversized output is discarded before sharing.
+
+- **macOS:** ScreenCaptureKit plus hardware-required VideoToolbox/AVAssetWriter
+  encoding. An owner-only temporary MP4 is removed after preview/share/discard.
+  If a hardware encoder is unavailable, only screenshots are advertised; software
+  fallback is forbidden. Building requires a macOS 15+ SDK; runtime requires macOS 14+.
+- **Windows:** Windows Graphics Capture's system picker and hardware D3D11
+  surfaces, with a two-frame pool. MediaTranscoder requests hardware acceleration
+  and stores the MP4 in memory, including native playback preview. Windows may
+  choose a software encoder; the consent panel discloses this rather than claiming
+  a verified hardware-only encoder. Source closure/resizing, screen lock/logoff,
+  session disconnect, sleep, and transport cancellation discard the request.
+- **Linux and rolling replay buffers:** not implemented or advertised. Windows
+  **Replay Clip** only replays the already-recorded local preview; it does not
+  arm an always-on capture buffer.
+
+Tokens, media, and capture paths never cross WebView IPC. See
+`developer-docs/docs/getting-started/desktop-capture.md` for the protocol,
+security boundaries, and on-device acceptance checks.
+
+### macOS permission recovery
+
+The system sharing picker remains the default; it authorizes the selected source
+without requiring app-wide Screen Recording access. If it only offers Lumiverse's
+window, use the capture menu-bar icon → **Capture Details & Permissions… → Grant
+Screen Recording Access…**. This
+is a local owner action, never an extension or frontend permission request.
+If needed, **Open Screen Recording Settings…** opens **System Settings → Privacy &
+Security → Screen & System Audio Recording**. Enable the requesting app, restart
+the desktop client if macOS asks, and start a new request; capture never resumes
+automatically. Despite the privacy pane's name, system audio and microphone capture
+remain disabled.
+
+With app-wide access granted, **Choose From Permissioned Source List…** offers
+entire displays and other applications' visible windows in a native dropdown.
+Nothing is selected automatically: choose a target and press **Capture Selected
+Source** to authorize that one capture and send. **Review Before Sending** is
+optional, not a mandatory release step. The permission is
+checked before capture, during the request, and before sharing; revocation discards
+the capture. Source names and IDs never reach the extension. **Use macOS Picker
+Instead** returns to scoped OS selection without using app-wide access.
+
+Tauri development runs a plain executable, not a `.app` bundle. Embedding the
+bundle identifier does not guarantee that macOS will list this executable as
+Lumiverse Desktop in its privacy pane; a development launcher can be attributed
+instead. Prefer testing a bundled debug app rather than granting broader access
+to Terminal or your editor:
+
+```bash
+cd desktop
+bun run tauri build --debug --bundles app -- --offline --locked
+```
+
+Quit the development client before opening
+`src-tauri/target/debug/bundle/macos/Lumiverse Desktop.app`, and explicitly re-enable
+extension capture there. Native diagnostic lines prefixed `[Lumiverse capture]`
+report app identity, permission state, selected source style, and error domain/code,
+not window names, screen contents, credentials, or model prompts.
+
+The extension's **Desktop device** dropdown lists native client registrations,
+not screens or windows. Target selection happens only in the native OS picker
+after **Share**. Rebuilding/restarting can briefly leave an old registration until
+its 45-second lease expires; refresh the extension's configuration after that.
+Two active clients can also have the same display name, so registrations must not
+be merged just because both are called Lumiverse Desktop.
+
+### Windows live testing
+
+From an x64 Visual Studio Developer PowerShell with the Windows SDK, Rust/MSVC,
+Bun, and WebView2 installed, run from the repository root:
+
+```powershell
+bun install --frozen-lockfile
+cd desktop
+bun install --frozen-lockfile
+bun run build
+cargo test --locked --lib --manifest-path src-tauri/Cargo.toml capture::
+bun run tauri dev
+```
+
+Enable capture in the tray, grant the test extension `screen_capture`,
+`screen_recording`, and `generation`, then request an image and 1–30-second clips
+against a model that supports the selected media type. Confirm picker selection,
+native preview/playback, explicit Share versus Discard, and cancellation on lock,
+permission revocation, and instance/transport changes. A Windows N edition may
+need the Media Feature Pack for recording/playback. Check GPU video-encode
+activity on the actual device; enabling hardware acceleration does not prove
+that Windows selected a hardware encoder. No recording file is written by this
+adapter; memory may still be paged by the OS. Full on-device acceptance remains
+required before release.
+
 ## Translucent frontend themes
 
 The Tauri frontend window is transparent, so a theme can tint the document

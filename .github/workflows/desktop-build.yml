@@ -11,6 +11,11 @@ on:
       - "desktop/src-tauri/Cargo.toml"
       - "desktop/src-tauri/Cargo.lock"
       - "desktop/src-tauri/tauri.conf.json"
+      - "desktop/src-tauri/src/capture/**"
+      - "desktop/src-tauri/capabilities/desktop-capture.json"
+      - "desktop/src-tauri/permissions/desktop-capture.toml"
+      - "desktop/src-tauri/permissions.test.ts"
+      - "desktop/src-tauri/build.rs"
       - "scripts/finalize-appimage.sh"
       - "scripts/smoke-test-appimage.sh"
       - "scripts/tauri-finalized.ts"
@@ -98,6 +103,7 @@ jobs:
           src/services/runner-control-transport.test.ts
           scripts/runner/server-manager.test.ts
           scripts/windows-msvc.test.ts
+          desktop/src-tauri/permissions.test.ts
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -120,6 +126,13 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: bun install --frozen-lockfile
+
+      - name: Test Windows native capture boundaries
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        working-directory: desktop
+        run: |
+          bun run build
+          cargo test --locked --lib --manifest-path src-tauri/Cargo.toml capture::
 
       - name: Build desktop installers
         uses: tauri-apps/tauri-action@v1

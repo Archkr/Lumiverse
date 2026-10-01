@@ -47,7 +47,8 @@ export interface ExtensionUpdateCandidate {
 }
 
 function isManagedPermission(permission: string): permission is SpindlePermission {
-  return isValidPermission(permission) || permission === "mcp_servers" || permission === "mcp_servers.create";
+  return isValidPermission(permission) || permission === "mcp_servers" || permission === "mcp_servers.create"
+    || permission === "screen_capture" || permission === "screen_recording";
 }
 
 type BackendSafetyCheck = {
@@ -836,6 +837,8 @@ function insertExtensionFromManifest(manifest: SpindleManifest): void {
 
 // Permissions that require explicit admin approval before granting
 export const PRIVILEGED_PERMISSIONS = new Set([
+  "screen_capture",
+  "screen_recording",
   "app_manipulation",
   "cors_proxy",
   "generation",

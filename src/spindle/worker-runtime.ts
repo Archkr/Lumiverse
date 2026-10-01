@@ -101,6 +101,7 @@ import type {
   MediaTransformResultDTO,
 } from "../services/media.service";
 import { initializeSandbox } from "./worker-runtime-sandbox";
+import type { DesktopCaptureWorkerMessage, SpindleDesktopAPI, DesktopCaptureDevice, CapturedMediaRef } from "./desktop-capture-contract";
 import { deserializeWorkerResponseError } from "./worker-response-error";
 import { deriveCharacterOverlay } from "../utils/color-engine";
 import {
@@ -298,6 +299,7 @@ type ChatAppendMessageOptions =
 type SpindleUserRole = "operator" | "admin" | "user";
 
 type RuntimeWorkerToHost =
+  | DesktopCaptureWorkerMessage
   | { type: 'context_handler_result'; requestId: string; context: unknown; error?: string }
   | { type: 'frontend_message'; payload: unknown; userId?: string; frontendSessionId?: string }
   | { type: 'runtime_state_read'; requestId: string; chatId: string; characterId: string; userId?: string }
@@ -710,7 +712,8 @@ type RuntimeWorldBooksAPI = Omit<SpindleAPI["world_books"], "entries"> & {
 // PromptBlock type also carries host-only sealed-block provenance. Keeping the
 // runtime CRUD surface on the native type avoids narrowing data returned by
 // newer hosts when the installed public type package lags a release.
-type RuntimeSpindleAPI = Omit<SpindleAPI, "presets" | "imageGen" | "world_books" | "runtimeState"> & {
+type RuntimeSpindleAPI = Omit<SpindleAPI, "presets" | "imageGen" | "world_books" | "runtimeState" | "desktop"> & {
+  desktop: SpindleDesktopAPI;
   runtimeState: {
     read(chatId: string, characterId: string, userId?: string): Promise<unknown>;
     write(chatId: string, command: import('./runtime-state').RuntimeStateCommand, userId?: string, mutationId?: string): Promise<unknown>;
@@ -1512,6 +1515,21 @@ function requestImageGenStream(input: ImageGenStreamInput): AsyncGenerator<Image
 // ─── Spindle API (exposed to extensions as globalThis.spindle) ───────────
 
 const spindleApi: RuntimeSpindleAPI = {
+  desktop: {
+    capture: {
+      async listDevices(options) {
+        return await request({ type: "desktop_capture_devices", requestId: crypto.randomUUID(), userId: options?.userId }) as DesktopCaptureDevice[];
+      },
+      async request(input) {
+        assertMutationAllowed("spindle.desktop.capture.request()");
+        return await request({ type: "desktop_capture_request", requestId: crypto.randomUUID(), input }) as CapturedMediaRef;
+      },
+      async release(assetId, options) {
+        assertMutationAllowed("spindle.desktop.capture.release()");
+        await request({ type: "desktop_capture_release", requestId: crypto.randomUUID(), assetId, userId: options?.userId });
+      },
+    },
+  },
   runtimeState: {
     read(chatId, characterId, userId) { return request({ type: 'runtime_state_read', requestId: crypto.randomUUID(), chatId, characterId, userId }); },
     write(chatId, command, userId, mutationId) {

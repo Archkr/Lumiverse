@@ -55,5 +55,32 @@ fn stamp_build_revision() {
 
 fn main() {
     stamp_build_revision();
-    tauri_build::build()
+    println!("cargo:rerun-if-changed=src/capture/macos.m");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        cc::Build::new()
+            .file("src/capture/macos.m")
+            .flag("-fobjc-arc")
+            .flag("-fblocks")
+            .compile("lumiverse_capture");
+        for framework in [
+            "Cocoa",
+            "CoreGraphics",
+            "AVFoundation",
+            "AVKit",
+            "VideoToolbox",
+            "CoreMedia",
+            "CoreVideo",
+        ] {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        }
+        println!("cargo:rustc-link-arg=-Wl,-weak_framework,ScreenCaptureKit");
+    }
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "desktop_capture_connect",
+            "desktop_capture_disconnect",
+            "desktop_capture_status",
+        ]),
+    ))
+    .expect("failed to build desktop permissions")
 }

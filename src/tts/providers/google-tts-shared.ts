@@ -2,9 +2,11 @@ import type { TtsRequest, TtsStreamChunk } from "../types";
 
 /** Gemini text-to-speech models. TTS-only list: no text/generation models. */
 export const GOOGLE_TTS_MODELS = [
-  { id: "gemini-3.1-flash-tts-preview", label: "Gemini 3.1 Flash TTS (latest)" },
+  { id: "gemini-3.1-flash-tts-preview", label: "Gemini 3.1 Flash TTS (legacy)" },
   { id: "gemini-2.5-pro-preview-tts", label: "Gemini 2.5 Pro TTS (high quality)" },
-  { id: "gemini-2.5-flash-preview-tts", label: "Gemini 2.5 Flash TTS (fast)" },
+  { id: "gemini-3.8-flash-lite-tts", label: "Gemini 3.8 Flash Lite TTS (fast)" },
+  { id: "gemini-3.8-flash-tts", label: "Gemini 3.8 Flash TTS (latest)"},
+  {}
 ];
 
 /** Keep a model ID only when it names a speech/TTS model. */

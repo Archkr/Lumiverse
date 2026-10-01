@@ -2266,6 +2266,7 @@ name = "lumiverse-tray"
 version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "futures-util",
  "gtk",
  "image",
@@ -2293,6 +2294,8 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "window-vibrancy",
+ "windows",
+ "windows-future",
  "windows-version",
 ]
 

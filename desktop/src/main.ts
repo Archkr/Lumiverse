@@ -98,7 +98,15 @@ let openDefaultBrowserItem: MenuItem;
 let reloadIntegratedBrowserItem: MenuItem;
 let remoteAuthItem: MenuItem;
 let remoteDisconnectItem: MenuItem;
+let desktopCaptureItem: MenuItem;
 let floatingWidgetsItem: Submenu;
+
+interface DesktopCaptureStatus {
+  enabled: boolean;
+  origin: string | null;
+  capabilities: { image: boolean; video: boolean; replay: boolean };
+  error: string | null;
+}
 
 interface DesktopWidgetCatalogEntry {
   id: string;
@@ -231,6 +239,12 @@ async function updateMenu(): Promise<void> {
   await remoteDisconnectItem.setEnabled(
     remote && remoteSnapshot !== null && remoteSnapshot.state !== "disconnected" && remoteSnapshot.state !== "authorizing",
   );
+
+  const capture = await invoke<DesktopCaptureStatus>("desktop_capture_status");
+  await desktopCaptureItem.setText(capture.enabled
+    ? "Disable Extension Screen Capture"
+    : "Enable Extension Screen Capture…");
+  await desktopCaptureItem.setEnabled(capture.capabilities.image && !transitioning);
 
   await statsPortItem.setText(`Port: ${remote ? (remoteSnapshot?.status?.port ?? "—") : port}`);
   await statsPidItem.setText(`PID: ${remote ? (remoteSnapshot?.status?.pid ?? "—") : (lastStatus?.pid ?? "—")}`);
@@ -590,6 +604,20 @@ async function disconnectRemoteInstance(): Promise<void> {
   await updateMenu();
 }
 
+async function toggleDesktopCapture(): Promise<void> {
+  const capture = await invoke<DesktopCaptureStatus>("desktop_capture_status");
+  if (capture.enabled) {
+    await invoke("desktop_capture_disconnect");
+  } else {
+    const origin = new URL(frontendUrl()).origin;
+    await invoke("desktop_capture_connect", { origin });
+    if (origin !== new URL(frontendUrl()).origin) {
+      await invoke("desktop_capture_disconnect");
+    }
+  }
+  await updateMenu();
+}
+
 // ─── Action wrapper ─────────────────────────────────────────────────────────
 
 function updateMenuInBackground(): void {
@@ -660,6 +688,12 @@ async function buildTray(): Promise<void> {
     action: action(disconnectRemoteInstance),
   });
 
+  desktopCaptureItem = await MenuItem.new({
+    text: "Enable Extension Screen Capture…",
+    enabled: false,
+    action: action(toggleDesktopCapture),
+  });
+
   const setFrontendUrlItem = await MenuItem.new({
     text: "Instance Connection…",
     action: action(async () => {
@@ -681,6 +715,7 @@ async function buildTray(): Promise<void> {
       openDefaultBrowserItem,
       remoteAuthItem,
       remoteDisconnectItem,
+      desktopCaptureItem,
       await PredefinedMenuItem.new({ item: "Separator" }),
       setFrontendUrlItem,
     ],
@@ -831,6 +866,7 @@ async function boot(): Promise<void> {
   instanceConnection = settings.instanceConnection;
 
   await listen<{ connection: InstanceConnection }>("instance-connection-changed", async ({ payload }) => {
+    await invoke("desktop_capture_disconnect");
     const previousOrigin = instanceConnection.mode === "remote" ? instanceConnection.origin : null;
     instanceConnection = payload.connection;
     remoteSnapshot = null;
