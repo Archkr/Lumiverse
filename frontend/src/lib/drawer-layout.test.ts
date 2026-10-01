@@ -1,15 +1,48 @@
 import { describe, expect, test } from 'bun:test'
 import type { DrawerLayoutItem } from '@/types/store'
 import {
+  canonicalDrawerLayoutTabId,
   createDefaultDrawerLayout,
   drawerLayoutItemKey,
   moveDrawerLayoutItem,
   reconcileDrawerLayout,
   removeDrawerLayoutContainer,
   sanitizeDrawerLayout,
+  updateDrawerLayoutFolderView,
 } from './drawer-layout'
 
 describe('drawer layout', () => {
+
+  test('canonicalizes Spindle drawer IDs across reload counters', () => {
+    expect(canonicalDrawerLayoutTabId('spindle:macro-lab:tab:main:17')).toBe('spindle:macro-lab:tab:main')
+    expect(canonicalDrawerLayoutTabId('spindle:macro-lab:tab:nested:tab:id:204')).toBe('spindle:macro-lab:tab:nested:tab:id')
+    expect(canonicalDrawerLayoutTabId('profile')).toBe('profile')
+  })
+
+  test('keeps an extension in its folder when the runtime registration counter changes', () => {
+    expect(reconcileDrawerLayout({
+      layout: [
+        {
+          type: 'folder',
+          id: 'gimmicks',
+          name: 'Gimmicks',
+          icon: 'game',
+          children: ['spindle:macro-lab:tab:main:17'],
+        },
+      ],
+      builtInIds: ['profile'],
+      extensionIds: ['spindle:macro-lab:tab:main:41'],
+    })).toEqual([
+      {
+        type: 'folder',
+        id: 'gimmicks',
+        name: 'Gimmicks',
+        icon: 'game',
+        children: ['spindle:macro-lab:tab:main'],
+      },
+      { type: 'tab', tabId: 'profile' },
+    ])
+  })
   test('migrates the legacy split order into tabs + the default extension divider', () => {
     expect(createDefaultDrawerLayout({
       builtInIds: ['profile', 'lorebook'],
@@ -54,6 +87,49 @@ describe('drawer layout', () => {
       { type: 'tab', tabId: 'profile' },
       { type: 'tab', tabId: 'lorebook' },
       { type: 'tab', tabId: 'new-tool' },
+    ])
+  })
+
+  test('preserves per-folder view and sanitizes structured custom SVG data', () => {
+    expect(sanitizeDrawerLayout([
+      {
+        type: 'folder',
+        id: 'memory',
+        name: 'Memory',
+        view: 'grid',
+        customIcon: {
+          viewBox: '0 0 24 24',
+          attrs: { fill: '#ffffff', onClick: 'nope' },
+          elements: [
+            { tag: 'path', attrs: { d: 'M2 2L22 22', stroke: '#ff00ff', onClick: 'nope' } },
+          ],
+        },
+        children: ['lorebook'],
+      },
+    ])).toEqual([
+      {
+        type: 'folder',
+        id: 'memory',
+        name: 'Memory',
+        customIcon: {
+          viewBox: '0 0 24 24',
+          attrs: { fill: 'currentColor', stroke: 'none' },
+          elements: [
+            { tag: 'path', attrs: { d: 'M2 2L22 22', stroke: 'currentColor' } },
+          ],
+        },
+        view: 'grid',
+        children: ['lorebook'],
+      },
+    ])
+  })
+
+  test('updates folder view without disturbing children or icon settings', () => {
+    const layout: DrawerLayoutItem[] = [
+      { type: 'folder', id: 'memory', name: 'Memory', icon: 'brain', children: ['lorebook'] },
+    ]
+    expect(updateDrawerLayoutFolderView(layout, 'folder:memory', 'grid')).toEqual([
+      { type: 'folder', id: 'memory', name: 'Memory', icon: 'brain', view: 'grid', children: ['lorebook'] },
     ])
   })
 

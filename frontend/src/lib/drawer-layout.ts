@@ -1,4 +1,5 @@
-import type { DrawerLayoutItem } from '@/types/store'
+import type { DrawerCustomIconData, DrawerLayoutItem } from '@/types/store'
+import { sanitizeDrawerCustomIconData } from '@/lib/drawer-custom-icon'
 export const DEFAULT_EXTENSION_DIVIDER_ID = 'extensions'
 export const DRAWER_LAYOUT_ROOT_END_ID = 'drawer-layout:root-end'
 
@@ -18,9 +19,26 @@ function cleanEditableString(value: unknown, fallback: string, maxLength = 80): 
   return value.slice(0, maxLength)
 }
 
+export function canonicalDrawerLayoutTabId(tabId: string): string {
+  // Spindle placement IDs end in a process-local registration counter. That
+  // counter changes on extension reloads, updates, and mobile/desktop remounts,
+  // while everything before it is the extension + declared drawer-tab ID.
+  const match = /^(spindle:.*:tab:.*):\d+$/.exec(tabId)
+  return match?.[1] ?? tabId
+}
+
 function sanitizeLegacyTabOrder(tabOrder?: string[] | null): string[] {
   if (!Array.isArray(tabOrder)) return []
-  return [...new Set(tabOrder.filter((tabId): tabId is string => typeof tabId === 'string' && tabId.length > 0))]
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const raw of tabOrder) {
+    if (typeof raw !== 'string' || raw.length === 0) continue
+    const tabId = canonicalDrawerLayoutTabId(raw)
+    if (seen.has(tabId)) continue
+    seen.add(tabId)
+    result.push(tabId)
+  }
+  return result
 }
 
 export function drawerLayoutItemKey(item: DrawerLayoutItem): string {
@@ -47,7 +65,8 @@ export function sanitizeDrawerLayout(layout?: unknown): DrawerLayoutItem[] {
     const candidate = raw as Record<string, unknown>
 
     if (candidate.type === 'tab') {
-      const tabId = cleanString(candidate.tabId)
+      const rawTabId = cleanString(candidate.tabId)
+      const tabId = rawTabId ? canonicalDrawerLayoutTabId(rawTabId) : null
       if (!tabId || claimedTabs.has(tabId)) continue
       claimedTabs.add(tabId)
       result.push({ type: 'tab', tabId })
@@ -70,16 +89,23 @@ export function sanitizeDrawerLayout(layout?: unknown): DrawerLayoutItem[] {
       const children: string[] = []
       if (Array.isArray(candidate.children)) {
         for (const rawChild of candidate.children) {
-          const tabId = cleanString(rawChild)
+          const rawTabId = cleanString(rawChild)
+          const tabId = rawTabId ? canonicalDrawerLayoutTabId(rawTabId) : null
           if (!tabId || claimedTabs.has(tabId)) continue
           claimedTabs.add(tabId)
           children.push(tabId)
         }
       }
+      const icon = cleanString(candidate.icon, 40)
+      const customIcon = sanitizeDrawerCustomIconData(candidate.customIcon)
+      const view = candidate.view === 'grid' ? 'grid' as const : candidate.view === 'list' ? 'list' as const : undefined
       result.push({
         type: 'folder',
         id,
         name: cleanEditableString(candidate.name, 'Folder', 80),
+        ...(icon ? { icon } : {}),
+        ...(customIcon ? { customIcon } : {}),
+        ...(view ? { view } : {}),
         children,
       })
     }
@@ -107,9 +133,9 @@ export function createDefaultDrawerLayout(options: {
   legacyTabOrder?: string[] | null
 }): DrawerLayoutItem[] {
   const legacyOrder = sanitizeLegacyTabOrder(options.legacyTabOrder)
-  const builtInIds = orderedIds([...new Set(options.builtInIds)], legacyOrder)
+  const builtInIds = orderedIds([...new Set(options.builtInIds.map(canonicalDrawerLayoutTabId))], legacyOrder)
   const builtInIdSet = new Set(builtInIds)
-  const knownExtensionIds = [...new Set(options.extensionIds)].filter((id) => !builtInIdSet.has(id))
+  const knownExtensionIds = [...new Set(options.extensionIds.map(canonicalDrawerLayoutTabId))].filter((id) => !builtInIdSet.has(id))
   // Legacy tabOrder was the only persistence available before folders/dividers.
   // Keep IDs that are temporarily unknown so an extension that misses this boot
   // does not lose its place during the first organization edit after upgrade.
@@ -153,7 +179,7 @@ export function reconcileDrawerLayout(options: {
       : { ...item }
   ))
   const present = new Set(flattenDrawerLayoutTabIds(result))
-  const current = [...new Set([...options.builtInIds, ...options.extensionIds])]
+  const current = [...new Set([...options.builtInIds, ...options.extensionIds].map(canonicalDrawerLayoutTabId))]
 
   for (const tabId of current) {
     if (present.has(tabId)) continue
@@ -301,6 +327,45 @@ export function updateDrawerLayoutContainer(
       return label ? { ...item, label } : { type: 'divider', id: item.id }
     }
     return item
+  })
+}
+
+
+export function updateDrawerLayoutFolderIcon(
+  layout: DrawerLayoutItem[],
+  itemKey: string,
+  icon: string,
+): DrawerLayoutItem[] {
+  const nextIcon = cleanString(icon, 40)
+  return sanitizeDrawerLayout(layout).map((item) => {
+    if (drawerLayoutItemKey(item) !== itemKey || item.type !== 'folder') return item
+    return nextIcon
+      ? { ...item, icon: nextIcon, customIcon: undefined }
+      : { ...item, icon: undefined, customIcon: undefined }
+  })
+}
+
+export function updateDrawerLayoutFolderCustomIcon(
+  layout: DrawerLayoutItem[],
+  itemKey: string,
+  customIcon: DrawerCustomIconData,
+): DrawerLayoutItem[] {
+  const safeIcon = sanitizeDrawerCustomIconData(customIcon)
+  if (!safeIcon) return sanitizeDrawerLayout(layout)
+  return sanitizeDrawerLayout(layout).map((item) => {
+    if (drawerLayoutItemKey(item) !== itemKey || item.type !== 'folder') return item
+    return { ...item, customIcon: safeIcon }
+  })
+}
+
+export function updateDrawerLayoutFolderView(
+  layout: DrawerLayoutItem[],
+  itemKey: string,
+  view: 'list' | 'grid',
+): DrawerLayoutItem[] {
+  return sanitizeDrawerLayout(layout).map((item) => {
+    if (drawerLayoutItemKey(item) !== itemKey || item.type !== 'folder') return item
+    return { ...item, view }
   })
 }
 

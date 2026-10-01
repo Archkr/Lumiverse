@@ -882,6 +882,20 @@ export type { ThemeConfig } from './theme'
 import type { CharacterThemeOverlay } from './theme'
 export type { CharacterThemeOverlay } from './theme'
 
+export type DrawerCustomIconTag = 'path' | 'circle' | 'rect' | 'line' | 'polyline' | 'polygon' | 'ellipse'
+
+export interface DrawerCustomIconElement {
+  tag: DrawerCustomIconTag
+  attrs: Record<string, string>
+}
+
+/** Sanitized, resource-free SVG data. Never stores raw SVG markup. */
+export interface DrawerCustomIconData {
+  viewBox: string
+  attrs: Record<string, string>
+  elements: DrawerCustomIconElement[]
+}
+
 export type DrawerLayoutItem =
   | {
       type: 'tab'
@@ -896,6 +910,9 @@ export type DrawerLayoutItem =
       type: 'folder'
       id: string
       name: string
+      icon?: string
+      customIcon?: DrawerCustomIconData
+      view?: 'list' | 'grid'
       children: string[]
     }
 

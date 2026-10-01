@@ -68,7 +68,8 @@
     "extensionBadge": "Extension",
     "coreLockedHint": "Always visible so you can still reach core app sections.",
     "organizerSubtitle": "Organize the sidebar with tabs, folders, and movable dividers. Core tabs stay accessible even when tucked into folders.",
-    "organizerHint": "Drop a tab onto a folder to tuck it inside. Drop a foldered tab onto a root tab/divider, or the root target below, to pull it back out.",
+    "organizerHint": "Drag folders and dividers by their handles. Drop a tab on a folder header to tuck it inside; drag a foldered tab onto a root item or the root target to pull it back out.",
+    "changeFolderIcon": "Change folder icon",
     "addFolder": "Add Folder",
     "addDivider": "Add Divider",
     "newFolder": "New Folder",
@@ -80,7 +81,14 @@
     "deleteDivider": "Delete divider",
     "rootDropZone": "Drop here to move to sidebar root",
     "unavailableBadge": "Unavailable",
-    "unavailableHint": "This tab is not registered right now. Its saved position is preserved."
+    "unavailableHint": "This tab is not registered right now. Its saved position is preserved.",
+    "customIcon": "Custom SVG icon",
+    "customIconSafety": "Sanitized locally · 32 KB max.",
+    "customIconTooLarge": "SVG is larger than the 32 KB icon limit.",
+    "uploadSvg": "Upload SVG",
+    "customIconPlaceholder": "Paste <svg>, <path>, or bare path data",
+    "customIconPaste": "Paste SVG or path data",
+    "useIcon": "Use Icon"
   },
   "bulkImport": {
     "complete": "Import Complete",

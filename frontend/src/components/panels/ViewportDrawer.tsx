@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { ChevronRight, CircleHelp, Folder, Settings, Sparkles } from 'lucide-react'
+import { ChevronRight, CircleHelp, LayoutGrid, List, Settings, Sparkles } from 'lucide-react'
 import { useStore } from '@/store'
 import useIsMobile from '@/hooks/useIsMobile'
 import { CloseButton } from '@/components/shared/CloseButton'
@@ -13,7 +13,14 @@ import {
   sanitizeHiddenDrawerTabIds,
   type DrawerTabEntry,
 } from '@/lib/drawer-tab-registry'
-import { reconcileDrawerLayout } from '@/lib/drawer-layout'
+import {
+  canonicalDrawerLayoutTabId,
+  drawerLayoutItemKey,
+  flattenDrawerLayoutTabIds,
+  reconcileDrawerLayout,
+  updateDrawerLayoutFolderView,
+} from '@/lib/drawer-layout'
+import { DrawerFolderIcon } from '@/lib/drawer-folder-icons'
 import { translateDrawerField } from '@/lib/i18n/resolveLabel'
 import { useTranslation } from 'react-i18next'
 import TabPanelContent from './TabPanelContent'
@@ -73,7 +80,10 @@ export default function ViewportDrawer() {
 
   const showTabLabels = drawerSettings.showTabLabels ?? true
   const hiddenTabIds = sanitizeHiddenDrawerTabIds(drawerSettings.hiddenTabIds)
-  const hiddenTabIdsSet = useMemo(() => new Set(hiddenTabIds), [hiddenTabIds])
+  const hiddenTabIdsSet = useMemo(
+    () => new Set(hiddenTabIds.map(canonicalDrawerLayoutTabId)),
+    [hiddenTabIds],
+  )
   const hiddenPlacementIdsSet = useMemo(() => new Set(hiddenPlacements), [hiddenPlacements])
 
   const updateDrawer = useCallback(
@@ -100,14 +110,18 @@ export default function ViewportDrawer() {
   const enabledDrawerTabs = filterEnabledFrontendContributions(drawerTabs, extensions)
   const extensionEntries = useMemo(() => adaptExtensionTabs(enabledDrawerTabs), [enabledDrawerTabs])
   const extensionStateById = useMemo(
-    () => new Map(enabledDrawerTabs.map((tab) => [tab.id, tab] as const)),
+    () => new Map(enabledDrawerTabs.map((tab) => [canonicalDrawerLayoutTabId(tab.id), tab] as const)),
     [enabledDrawerTabs],
   )
-  const tabEntryById = useMemo(
-    () => new Map([...DRAWER_TABS, ...extensionEntries].map((tab) => [tab.id, tab] as const)),
+  const tabEntryById = useMemo(() => {
+    const entries = new Map<string, DrawerTabEntry>(DRAWER_TABS.map((tab) => [tab.id, tab]))
+    for (const tab of extensionEntries) entries.set(canonicalDrawerLayoutTabId(tab.id), tab)
+    return entries
+  }, [extensionEntries])
+  const extensionIds = useMemo(
+    () => new Set(extensionEntries.map((tab) => canonicalDrawerLayoutTabId(tab.id))),
     [extensionEntries],
   )
-  const extensionIds = useMemo(() => new Set(extensionEntries.map((tab) => tab.id)), [extensionEntries])
 
   const layout = useMemo(() => reconcileDrawerLayout({
     layout: drawerSettings.layout,
@@ -116,29 +130,39 @@ export default function ViewportDrawer() {
     legacyTabOrder: drawerSettings.tabOrder,
   }), [drawerSettings.layout, drawerSettings.tabOrder, extensionEntries])
 
-  const isTabVisible = useCallback((tabId: string) => {
-    if (!tabEntryById.has(tabId)) return false
-    if (hiddenTabIdsSet.has(tabId)) return false
-    if (extensionIds.has(tabId) && hiddenPlacementIdsSet.has(tabId)) return false
+  const isTabVisible = useCallback((layoutTabId: string) => {
+    const entry = tabEntryById.get(layoutTabId)
+    if (!entry) return false
+    if (hiddenTabIdsSet.has(layoutTabId)) return false
+    if (extensionIds.has(layoutTabId) && hiddenPlacementIdsSet.has(entry.id)) return false
     return true
   }, [extensionIds, hiddenPlacementIdsSet, hiddenTabIdsSet, tabEntryById])
 
   const allTabs = useMemo(
-    () => [...tabEntryById.values()].filter((tab) => isTabVisible(tab.id)),
+    () => [...tabEntryById.entries()]
+      .filter(([layoutTabId]) => isTabVisible(layoutTabId))
+      .map(([, tab]) => tab),
     [isTabVisible, tabEntryById],
   )
   const requestedActiveTab = drawerTab || 'profile'
-  const activeTab = allTabs.some((tab) => tab.id === requestedActiveTab) ? requestedActiveTab : 'profile'
-  const activeTabConfig = tabEntryById.get(activeTab) ?? DRAWER_TABS[0]
+  const requestedLayoutTabId = canonicalDrawerLayoutTabId(requestedActiveTab)
+  const requestedEntry = isTabVisible(requestedLayoutTabId) ? tabEntryById.get(requestedLayoutTabId) : undefined
+  const activeTabConfig = requestedEntry ?? tabEntryById.get('profile') ?? DRAWER_TABS[0]
+  const activeTab = activeTabConfig.id
+  const activeLayoutTabId = canonicalDrawerLayoutTabId(activeTab)
   const activeFolder = activeFolderId
     ? layout.find((item) => item.type === 'folder' && item.id === activeFolderId)
     : undefined
   const activeFolderTabs = activeFolder?.type === 'folder'
     ? activeFolder.children
         .filter(isTabVisible)
-        .map((tabId) => tabEntryById.get(tabId))
-        .filter((entry): entry is DrawerTabEntry => Boolean(entry))
+        .map((layoutTabId) => {
+          const entry = tabEntryById.get(layoutTabId)
+          return entry ? { layoutTabId, entry } : null
+        })
+        .filter((value): value is { layoutTabId: string; entry: DrawerTabEntry } => Boolean(value))
     : []
+  const activeFolderView = activeFolder?.type === 'folder' ? activeFolder.view ?? 'list' : 'list'
 
   const activeTabTitle =
     activeTab === 'profile' && isGroupChat
@@ -177,18 +201,28 @@ export default function ViewportDrawer() {
   }, [pendingActiveTabReset, allTabs, setDrawerTab, clearPendingReset])
 
   const handleTabClick = useCallback(
-    (tabId: string) => {
+    (layoutTabId: string) => {
+      const runtimeTabId = tabEntryById.get(layoutTabId)?.id ?? layoutTabId
       setActiveFolderId(null)
-      setDrawerTab(tabId)
-      openDrawer(tabId)
+      setDrawerTab(runtimeTabId)
+      openDrawer(runtimeTabId)
     },
-    [setDrawerTab, openDrawer],
+    [openDrawer, setDrawerTab, tabEntryById],
   )
 
   const handleFolderClick = useCallback((folderId: string) => {
     setActiveFolderId(folderId)
     openDrawer()
   }, [openDrawer])
+
+  const setFolderView = useCallback((view: 'list' | 'grid') => {
+    if (activeFolder?.type !== 'folder') return
+    const nextLayout = updateDrawerLayoutFolderView(layout, drawerLayoutItemKey(activeFolder), view)
+    updateDrawer({
+      layout: nextLayout,
+      tabOrder: flattenDrawerLayoutTabIds(nextLayout),
+    })
+  }, [activeFolder, layout, updateDrawer])
 
   const tabQuickMenu = useLongPress({
     onLongPress: (pos) => setContextMenu(pos),
@@ -232,28 +266,28 @@ export default function ViewportDrawer() {
     }
   })()
 
-  const renderTabButton = (tabId: string, options?: { organizedAnchor?: boolean }) => {
-    const entry = tabEntryById.get(tabId)
-    if (!entry || !isTabVisible(tabId)) return null
+  const renderTabButton = (layoutTabId: string, options?: { organizedAnchor?: boolean }) => {
+    const entry = tabEntryById.get(layoutTabId)
+    if (!entry || !isTabVisible(layoutTabId)) return null
     const Icon = entry.tabIcon
-    const extensionState = extensionStateById.get(tabId)
+    const extensionState = extensionStateById.get(layoutTabId)
     const title = translateDrawerField(entry.id, 'tabName', entry.tabName)
     const shortName = translateDrawerField(entry.id, 'shortName', entry.shortName)
     const organizedAnchor = options?.organizedAnchor ?? false
 
     return (
       <button
-        key={`${organizedAnchor ? 'organized-anchor' : 'tab'}:${tabId}`}
+        key={`${organizedAnchor ? 'organized-anchor' : 'tab'}:${layoutTabId}`}
         type="button"
         className={clsx(
           styles.tabBtn,
-          extensionIds.has(tabId) && styles.tabBtnExtension,
+          extensionIds.has(layoutTabId) && styles.tabBtnExtension,
           showTabLabels && styles.tabBtnLabeled,
-          !organizedAnchor && !activeFolder && activeTab === tabId && styles.tabBtnActive,
+          !organizedAnchor && !activeFolder && activeLayoutTabId === layoutTabId && styles.tabBtnActive,
           organizedAnchor && styles.organizedTabAnchor,
         )}
-        data-tab-id={tabId}
-        onClick={organizedAnchor ? undefined : () => handleTabClick(tabId)}
+        data-tab-id={entry.id}
+        onClick={organizedAnchor ? undefined : () => handleTabClick(layoutTabId)}
         onContextMenu={organizedAnchor ? undefined : handleTabContextMenu}
         onTouchStart={organizedAnchor ? undefined : tabQuickMenu.onTouchStart}
         onTouchMove={organizedAnchor ? undefined : tabQuickMenu.onTouchMove}
@@ -266,7 +300,7 @@ export default function ViewportDrawer() {
         <Icon size={20} strokeWidth={1.5} />
         {showTabLabels && <span className={styles.tabLabel}>{shortName}</span>}
         {extensionState?.badge && <span className={styles.tabBadge}>{extensionState.badge}</span>}
-        <span data-spindle-mount="drawer_tab" data-spindle-scope={`drawer-tab:${tabId}`} style={{ display: 'contents' }} />
+        <span data-spindle-mount="drawer_tab" data-spindle-scope={`drawer-tab:${entry.id}`} style={{ display: 'contents' }} />
       </button>
     )
   }
@@ -343,7 +377,7 @@ export default function ViewportDrawer() {
                   const visibleChildren = item.children.filter(isTabVisible)
                   if (!visibleChildren.length) return null
                   const folderName = item.name.trim() || t('viewportDrawer.folder', { defaultValue: 'Folder' })
-                  const folderActive = activeFolderId === item.id || (!activeFolder && item.children.includes(activeTab))
+                  const folderActive = activeFolderId === item.id || (!activeFolder && item.children.includes(activeLayoutTabId))
 
                   return (
                     <div key={`folder:${item.id}`} className={styles.folderSlot}>
@@ -361,11 +395,10 @@ export default function ViewportDrawer() {
                         onTouchMove={tabQuickMenu.onTouchMove}
                         onTouchEnd={tabQuickMenu.onTouchEnd}
                         onTouchCancel={tabQuickMenu.onTouchCancel}
-                        title={`${folderName} · ${visibleChildren.length}`}
+                        title={`${folderName} · ${visibleChildren.length} ${visibleChildren.length === 1 ? 'tab' : 'tabs'}`}
                       >
-                        <Folder size={20} strokeWidth={1.5} />
+                        <DrawerFolderIcon icon={item.icon} customIcon={item.customIcon} size={20} strokeWidth={1.5} />
                         {showTabLabels && <span className={styles.tabLabel}>{folderName}</span>}
-                        <span className={styles.folderBadge}>{visibleChildren.length}</span>
                       </button>
                       <div className={styles.organizedTabAnchors} aria-hidden="true">
                         {visibleChildren.map((tabId) => renderTabButton(tabId, { organizedAnchor: true }))}
@@ -421,33 +454,54 @@ export default function ViewportDrawer() {
             >
               {activeFolder?.type === 'folder' ? (
                 <div className={styles.folderPanel}>
-                  <div className={styles.folderPanelIntro}>
-                    <div>
-                      <span className={styles.folderPanelEyebrow}>{t('viewportDrawer.sidebarFolder', { defaultValue: 'Sidebar folder' })}</span>
-                      <p>{t('viewportDrawer.folderHint', { defaultValue: 'Choose a tab, or reorganize this folder from Configure Tabs.' })}</p>
+                  <div className={styles.folderToolbar}>
+                    <span>{activeFolderTabs.length} {activeFolderTabs.length === 1 ? 'tab' : 'tabs'}</span>
+                    <div className={styles.folderToolbarActions}>
+                      <div className={styles.folderViewToggle} role="group" aria-label={t('viewportDrawer.folderView', { defaultValue: 'Folder view' })}>
+                        <button
+                          type="button"
+                          className={clsx(styles.folderViewButton, activeFolderView === 'list' && styles.folderViewButtonActive)}
+                          onClick={() => setFolderView('list')}
+                          title={t('viewportDrawer.listView', { defaultValue: 'List view' })}
+                          aria-label={t('viewportDrawer.listView', { defaultValue: 'List view' })}
+                          aria-pressed={activeFolderView === 'list'}
+                        >
+                          <List size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className={clsx(styles.folderViewButton, activeFolderView === 'grid' && styles.folderViewButtonActive)}
+                          onClick={() => setFolderView('grid')}
+                          title={t('viewportDrawer.gridView', { defaultValue: 'Grid view' })}
+                          aria-label={t('viewportDrawer.gridView', { defaultValue: 'Grid view' })}
+                          aria-pressed={activeFolderView === 'grid'}
+                        >
+                          <LayoutGrid size={14} />
+                        </button>
+                      </div>
+                      <button type="button" className={styles.folderManageButton} onClick={() => openModal('configureTabs')}>
+                        {t('viewportDrawer.configureTabs')}
+                      </button>
                     </div>
-                    <button type="button" className={styles.folderManageButton} onClick={() => openModal('configureTabs')}>
-                      {t('viewportDrawer.configureTabs')}
-                    </button>
                   </div>
 
                   {activeFolderTabs.length ? (
-                    <div className={styles.folderGrid}>
-                      {activeFolderTabs.map((entry) => {
+                    <div className={clsx(styles.folderList, activeFolderView === 'grid' && styles.folderGrid)}>
+                      {activeFolderTabs.map(({ layoutTabId, entry }) => {
                         const Icon = entry.tabIcon
                         return (
                           <button
-                            key={entry.id}
+                            key={layoutTabId}
                             type="button"
                             className={styles.folderTile}
-                            onClick={() => handleTabClick(entry.id)}
+                            onClick={() => handleTabClick(layoutTabId)}
                           >
-                            <span className={styles.folderTileIcon}><Icon size={21} strokeWidth={1.6} /></span>
+                            <span className={styles.folderTileIcon}><Icon size={19} strokeWidth={1.6} /></span>
                             <span className={styles.folderTileCopy}>
                               <strong>{translateDrawerField(entry.id, 'tabName', entry.tabName)}</strong>
                               <span>{entry.tabDescription}</span>
                             </span>
-                            <ChevronRight size={16} className={styles.folderTileChevron} />
+                            <ChevronRight size={15} className={styles.folderTileChevron} />
                           </button>
                         )
                       })}
