@@ -241,10 +241,10 @@ describe("worker-host Decision permission enforcement", () => {
     handle(host, { type: "decisions_providers", requestId: "expired", rpcPermissionScopeId: "missing" });
     handle(host, { type: "decisions_providers", requestId: "delegated", rpcPermissionScopeId: "delegated" });
     await Promise.resolve();
-    expect(posted.find((m) => m.requestId === "allowed")?.result).toHaveLength(2);
+    expect(posted.find((m) => m.requestId === "allowed")?.result).toHaveLength(3);
     expect(posted.find((m) => m.requestId === "limited")?.error).toContain("decisions");
     expect(posted.find((m) => m.requestId === "expired")?.error).toContain("decisions");
-    expect(posted.find((m) => m.requestId === "delegated")?.result).toHaveLength(2);
+    expect(posted.find((m) => m.requestId === "delegated")?.result).toHaveLength(3);
     getDb().run("DELETE FROM extension_grants");
     handle(host, { type: "decisions_providers", requestId: "revoked", rpcPermissionScopeId: "delegated" });
     await Promise.resolve();
@@ -259,6 +259,6 @@ describe("worker-host Decision permission enforcement", () => {
     handle(host, { type: "decisions_providers", requestId: "with-user", userId: "alice" });
     await Promise.resolve();
     expect(posted.find((m) => m.requestId === "missing-user")?.error).toContain("userId is required");
-    expect(posted.find((m) => m.requestId === "with-user")?.result).toHaveLength(2);
+    expect(posted.find((m) => m.requestId === "with-user")?.result).toHaveLength(3);
   });
 });

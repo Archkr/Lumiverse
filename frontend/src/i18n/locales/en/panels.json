@@ -3952,7 +3952,7 @@
   "decisionConnectionManager": {
     "loading": "Loading Decision connections...",
     "newConnection": "New Decision connection",
-    "empty": "No Decision connections yet. Add OpenRouter or TypeSafe to get started.",
+    "empty": "No Decision connections yet. Add OpenRouter, NanoGPT, or TypeSafe to get started.",
     "deleteTitle": "Delete Decision Connection",
     "deleteMessage": "Delete \"{{name}}\"? This cannot be undone.",
     "deleteConfirm": "Delete"

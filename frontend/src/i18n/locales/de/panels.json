@@ -2986,6 +2986,7 @@
     "renderingMode": {
       "label": "Darstellung",
       "hint": "Effizienz entfernt Unschärfe; Qualität aktiviert Rendering mit hoher Bildwiederholrate auf unterstützten macOS-Displays, nachdem das Desktop-Fenster neu gestartet wurde.",
+      "restartRequired": "Starte die Desktop-App neu, um die Änderung der Fenstertransparenz anzuwenden.",
       "efficiency": "Effizienz",
       "balanced": "Ausgewogen",
       "quality": "Qualität"
@@ -3951,7 +3952,7 @@
   "decisionConnectionManager": {
     "loading": "Decision-Verbindungen werden geladen...",
     "newConnection": "Neue Decision-Verbindung",
-    "empty": "Noch keine Decision-Verbindungen. Füge OpenRouter oder TypeSafe hinzu, um zu starten.",
+    "empty": "Noch keine Decision-Verbindungen. Füge OpenRouter, NanoGPT oder TypeSafe hinzu, um zu starten.",
     "deleteTitle": "Decision-Verbindung löschen",
     "deleteMessage": "„{{name}}“ löschen? Dies kann nicht rückgängig gemacht werden.",
     "deleteConfirm": "Löschen"

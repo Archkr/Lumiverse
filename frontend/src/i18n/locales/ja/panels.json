@@ -3609,5 +3609,13 @@
     "skipTitle": "Skip",
     "kickTitle": "Kick",
     "banTitle": "Ban"
+  },
+  "decisionConnectionManager": {
+    "loading": "Decision接続を読み込み中...",
+    "newConnection": "新しいDecision接続",
+    "empty": "Decision接続はまだありません。開始するにはOpenRouter、NanoGPT、またはTypeSafeを追加してください。",
+    "deleteTitle": "Decision接続を削除",
+    "deleteMessage": "「{{name}}」を削除しますか？この操作は元に戻せません。",
+    "deleteConfirm": "削除"
   }
 }

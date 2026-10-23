@@ -136,6 +136,31 @@ test("REST uses the authenticated account and preserves the resolved model", asy
   expect((await res.json() as any).model).toBe("jev-resolved");
   expect(svc.getDefaultConnection("alice")?.id).toBe(profile.id);
 });
+test("NanoGPT connections discover Decision models and evaluate through the native route", async () => {
+  const profile = await connection("alice", { provider: "nanogpt", model: "typesafe/jev-1.13", is_default: true });
+  const calls: string[] = [];
+  globalThis.fetch = (async (url: any, options: any) => {
+    calls.push(String(url));
+    if (String(url).endsWith("/models?detailed=true")) {
+      return Response.json({ data: [
+        { id: "typesafe/jev-1.13", name: "Jev 1.13", architecture: { output_modalities: ["decisions"] } },
+        { id: "chat/model", architecture: { output_modalities: ["text"] } },
+      ] });
+    }
+    expect(options.headers.Authorization).toBe("Bearer secret-for-test");
+    return Response.json({ model: "typesafe/jev-1.13", answers: { check: { type: "noul", noul: 0.9 } } });
+  }) as unknown as typeof fetch;
+  const tested = await svc.testConnection("alice", profile.id);
+  expect(tested.success).toBe(true);
+  expect(tested.message).toContain("Run a sample decision");
+  expect((await svc.listConnectionModels("alice", profile.id)).models.map((model) => model.id)).toEqual(["typesafe/jev-1.13"]);
+  expect((await evaluateDecision("alice", input)).model).toBe("typesafe/jev-1.13");
+  expect(calls).toEqual([
+    "https://nano-gpt.com/api/v1/models?detailed=true",
+    "https://nano-gpt.com/api/v1/models?detailed=true",
+    "https://nano-gpt.com/api/v1/decisions",
+  ]);
+});
 test("evaluation deadlines abort provider work and return HTTP 504", async () => {
   const profile = await connection();
   const originalTimeout = AbortSignal.timeout;
@@ -155,7 +180,7 @@ test("worker bridge enforces live permission and account scope on every call", a
   await api.handle({ type: "decisions_providers", requestId: "1" });
   expect(responses.pop().error).toContain("decisions");
   allowed = true; await api.handle({ type: "decisions_providers", requestId: "2" });
-  expect(responses.pop().result).toHaveLength(2);
+  expect(responses.pop().result).toHaveLength(3);
   await api.handle({ type: "decisions_connections_list", requestId: "3", userId: "bob" });
   expect(responses.pop().error).toContain("scope denied");
   allowed = false; await api.handle({ type: "decisions_connections_list", requestId: "4" });

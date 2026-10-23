@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { decisionEvaluationUrl, fetchDecisionModels, evaluateProviderDecision, validateDecisionParameters } from "./providers";
+import { decisionEvaluationUrl, fetchDecisionModels, evaluateProviderDecision, listProviders, validateDecisionParameters } from "./providers";
 import type { DecisionEvaluationInput } from "./contract";
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -8,7 +8,15 @@ describe("Decision provider adapters", () => {
     expect(decisionEvaluationUrl({ provider: "typesafe" })).toBe("https://api.typesafe.ai/v1/systemone");
     expect(decisionEvaluationUrl({ provider: "openrouter" })).toBe("https://openrouter.ai/api/alpha/decisions");
     expect(decisionEvaluationUrl({ provider: "openrouter", api_url: "https://proxy.test/root/v1/" })).toBe("https://proxy.test/root/alpha/decisions");
+    expect(decisionEvaluationUrl({ provider: "nanogpt" })).toBe("https://nano-gpt.com/api/v1/decisions");
+    expect(decisionEvaluationUrl({ provider: "nanogpt", api_url: "https://proxy.test/root/v1/" })).toBe("https://proxy.test/root/v1/decisions");
     expect(() => decisionEvaluationUrl({ provider: "typesafe", api_url: "https://key@provider.test/v1" })).toThrow();
+  });
+  test("lists the built-in Decision providers", () => {
+    expect(listProviders().map((provider) => provider.id)).toEqual(["openrouter", "typesafe", "nanogpt"]);
+    expect(listProviders().find((provider) => provider.id === "nanogpt")?.capabilities).toEqual({
+      apiKeyRequired: true, defaultUrl: "https://nano-gpt.com/api/v1", suggestedModel: "typesafe/jev-latest", modelListStyle: "dynamic",
+    });
   });
   test("normalizes TypeSafe model names without synthesizing versioned IDs", async () => {
     globalThis.fetch = (async (url: any, init: any) => {
@@ -37,6 +45,26 @@ describe("Decision provider adapters", () => {
     expect(models.find((m) => m.id === "new/decision")?.protocol).toBe("unverified");
     expect(models.find((m) => m.id === "new/decision")?.output_modalities).toEqual(["decisions"]);
   });
+  test("discovers NanoGPT decision models from the detailed catalog", async () => {
+    globalThis.fetch = (async (url: any, init: any) => {
+      expect(String(url)).toBe("https://nano-gpt.com/api/v1/models?detailed=true");
+      expect(init.headers.Authorization).toBe("Bearer nano-key");
+      return Response.json({ object: "list", data: [
+        { id: "typesafe/jev-latest", name: "Jev Latest", architecture: { input_modalities: ["text"], output_modalities: ["decisions"] } },
+        { id: "cloudflare/clef", name: "Clef", description: "Cloudflare's decision model", context_length: 1800, architecture: { input_modalities: ["text", "image"], output_modalities: ["decisions"] }, pricing: { prompt: 0.05, completion: 0, currency: "USD" } },
+        { id: "llmtech/decider-2b-fp8", name: "Decider 2B", architecture: { output_modalities: ["decisions"] } },
+        { id: "openai/gpt-6.1-sol", name: "GPT 6.1 Sol", architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] } },
+        { id: "no-architecture-model", name: "No Architecture" },
+      ] });
+    }) as unknown as typeof fetch;
+    const models = await fetchDecisionModels({ provider: "nanogpt" }, "nano-key");
+    expect(models.map((m) => m.id)).toEqual(["cloudflare/clef", "llmtech/decider-2b-fp8", "typesafe/jev-latest"]);
+    expect(models.every((m) => m.protocol === "supported")).toBe(true);
+    expect(models.find((m) => m.id === "cloudflare/clef")).toMatchObject({
+      label: "Clef", description: "Cloudflare's decision model", context_length: 1800,
+      input_modalities: ["text", "image"], output_modalities: ["decisions"], pricing: { prompt: "0.05", completion: "0", currency: "USD" },
+    });
+  });
   test("posts native JSON and preserves usage, IDs and resolved model", async () => {
     const input: DecisionEvaluationInput = { state: "Lumiverse", questions: { yes: { type: "noul", instructions: "Mentioned?" } }, userId: "must-not-forward" };
     globalThis.fetch = (async (url: any, init: any) => {
@@ -50,6 +78,28 @@ describe("Decision provider adapters", () => {
     expect(result.usage).toEqual({ input_tokens: null, cost: 0.00001 });
     expect(result.id).toBe("request-id");
     expect(result).not.toHaveProperty("secret_extra");
+  });
+  test("evaluates NanoGPT decisions through the native endpoint", async () => {
+    const input: DecisionEvaluationInput = {
+      state: { ticket: "I was charged twice." },
+      questions: { route: { type: "choice", instructions: "Which team?", criteria: { billing: null, technical: null } } },
+    };
+    globalThis.fetch = (async (url: any, init: any) => {
+      expect(String(url)).toBe("https://nano-gpt.com/api/v1/decisions");
+      expect(init.headers.Authorization).toBe("Bearer nano-key");
+      expect(init.headers).not.toHaveProperty("HTTP-Referer");
+      expect(init.headers).not.toHaveProperty("TypeSafe-Danger-Zone-Images");
+      expect(JSON.parse(init.body)).toEqual({ model: "typesafe/jev-1.13", state: input.state, questions: input.questions });
+      return Response.json({
+        id: "decision_1", model: "typesafe/jev-1.13",
+        answers: { route: { type: "choice", choice: "billing", confidence: 0.9, probabilities: { billing: 0.9, technical: 0.1 } } },
+        usage: { input_tokens: 126, output_tokens: 1, estimated_cost: 0.000005292 },
+      });
+    }) as unknown as typeof fetch;
+    const result = await evaluateProviderDecision({ provider: "nanogpt", model: "typesafe/jev-1.13", default_parameters: {} }, "nano-key", input);
+    expect(result.answers).toEqual({ route: { type: "choice", choice: "billing", confidence: 0.9, probabilities: { billing: 0.9, technical: 0.1 } } });
+    expect(result.usage).toEqual({ input_tokens: 126, output_tokens: 1, estimated_cost: 0.000005292 });
+    expect(result.id).toBe("decision_1");
   });
   test("sends TypeSafe image assets and Box questions with the images header", async () => {
     const input: DecisionEvaluationInput = {
@@ -67,11 +117,13 @@ describe("Decision provider adapters", () => {
     let calls = 0;
     globalThis.fetch = (async () => { calls++; return Response.json({}); }) as unknown as typeof fetch;
     await expect(evaluateProviderDecision({ provider: "openrouter", model: "~typesafe/jev-latest", default_parameters: {} }, "key", input)).rejects.toThrow("TypeSafe Decision connection");
+    await expect(evaluateProviderDecision({ provider: "nanogpt", model: "cloudflare/clef", default_parameters: {} }, "key", input)).rejects.toThrow("TypeSafe Decision connection");
     expect(calls).toBe(0);
   });
   test("rejects arbitrary defaults and preserves permitted routing", () => {
     expect(() => validateDecisionParameters("openrouter", { model: "override" })).toThrow();
     expect(() => validateDecisionParameters("typesafe", { temperature: 0 })).toThrow();
+    expect(() => validateDecisionParameters("nanogpt", { provider: { only: ["cloudflare"] } })).toThrow("OpenRouter");
     expect(validateDecisionParameters("openrouter", { provider: { only: ["TypeSafe"], allow_fallbacks: false } })).toEqual({ provider: { only: ["TypeSafe"], allow_fallbacks: false } });
   });
   test("invalid provider answers are errors, never fabricated decisions", async () => {

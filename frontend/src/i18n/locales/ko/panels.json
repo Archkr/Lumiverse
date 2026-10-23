@@ -2986,6 +2986,7 @@
     "renderingMode": {
       "label": "렌더링",
       "hint": "효율 모드는 흐림 효과를 제거하며, 품질 모드는 데스크톱 창을 다시 시작한 후 지원되는 macOS 디스플레이에서 고주사율 렌더링을 활성화합니다.",
+      "restartRequired": "창 투명도 변경을 적용하려면 데스크톱 앱을 다시 시작하세요.",
       "efficiency": "효율",
       "balanced": "균형",
       "quality": "품질"
@@ -3951,7 +3952,7 @@
   "decisionConnectionManager": {
     "loading": "의사결정 연결 불러오는 중...",
     "newConnection": "새 의사결정 연결",
-    "empty": "아직 의사결정 연결이 없습니다. 시작하려면 OpenRouter 또는 TypeSafe를 추가하십시오.",
+    "empty": "아직 의사결정 연결이 없습니다. 시작하려면 OpenRouter, NanoGPT 또는 TypeSafe를 추가하십시오.",
     "deleteTitle": "의사결정 연결 삭제",
     "deleteMessage": "\"{{name}}\"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
     "deleteConfirm": "삭제"

@@ -64,7 +64,7 @@ All routes below are account-scoped and require authentication. Credentials are 
 | `POST` | `/api/v1/decision-connections/:id/sample` | Run a small decision using provider credits |
 | `POST` | `/api/v1/decisions/evaluate` | Evaluate `{ connection_id?, model?, state, questions }` |
 
-Create requires `name` and `provider` (`openrouter` or `typesafe`). Optional fields are `api_url`, `model`, `api_key`, `is_default`, `default_parameters`, and `metadata`. An empty `api_key` on update removes the key; omission preserves it unless the provider or normalized endpoint changes. Preview only reuses a saved key for the same provider and endpoint. Setting a default atomically replaces the previous default.
+Create requires `name` and `provider` (`openrouter`, `typesafe`, or `nanogpt`). Optional fields are `api_url`, `model`, `api_key`, `is_default`, `default_parameters`, and `metadata`. An empty `api_key` on update removes the key; omission preserves it unless the provider or normalized endpoint changes. Preview only reuses a saved key for the same provider and endpoint. Setting a default atomically replaces the previous default.
 
 Changing `provider` resets the previous URL, model, and routing defaults unless replacements are supplied in the same update.
 

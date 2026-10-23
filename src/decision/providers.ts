@@ -6,6 +6,7 @@ import { redactRequestValue } from "../utils/redact-request";
 const PROVIDERS: DecisionProviderDTO[] = [
   { id: "openrouter", name: "OpenRouter", capabilities: { apiKeyRequired: true, defaultUrl: "https://openrouter.ai/api/v1", suggestedModel: "~typesafe/jev-latest", modelListStyle: "dynamic" } },
   { id: "typesafe", name: "TypeSafe", capabilities: { apiKeyRequired: true, defaultUrl: "https://api.typesafe.ai/v1", suggestedModel: "jev-latest", modelListStyle: "dynamic" } },
+  { id: "nanogpt", name: "NanoGPT", capabilities: { apiKeyRequired: true, defaultUrl: "https://nano-gpt.com/api/v1", suggestedModel: "typesafe/jev-latest", modelListStyle: "dynamic" } },
 ];
 export function listProviders(): DecisionProviderDTO[] { return structuredClone(PROVIDERS); }
 export function getProvider(id: string): DecisionProviderDTO {
@@ -27,7 +28,9 @@ export function decisionEvaluationUrl(profile: { provider: string; api_url?: str
   const url = new URL(resolveDecisionApiUrl(profile));
   url.pathname = profile.provider === "openrouter"
     ? `${url.pathname.slice(0, -3)}/alpha/decisions`
-    : `${url.pathname}/systemone`;
+    : profile.provider === "nanogpt"
+      ? `${url.pathname}/decisions`
+      : `${url.pathname}/systemone`;
   return url.toString();
 }
 export function isUnsupportedDecisionModel(provider: string, model: string): boolean {
@@ -37,10 +40,21 @@ export function isUnsupportedDecisionModel(provider: string, model: string): boo
 export function redactDecisionError(error: unknown, apiKey = ""): string {
   return clampErrorMessage(String(redactRequestValue(describeProviderError(error), apiKey ? [apiKey] : [])));
 }
+function decisionModelPricing(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const pricing: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    // OpenRouter reports strings; NanoGPT reports USD per million tokens as numbers.
+    if (typeof raw === "string") pricing[key] = raw;
+    else if (typeof raw === "number" && Number.isFinite(raw)) pricing[key] = String(raw);
+  }
+  return Object.keys(pricing).length ? pricing : undefined;
+}
 export async function fetchDecisionModels(profile: { provider: string; api_url?: string }, apiKey: string, signal?: AbortSignal): Promise<DecisionModelDTO[]> {
   const provider = getProvider(profile.provider);
   const url = new URL(`${resolveDecisionApiUrl(profile)}/models`);
   if (profile.provider === "openrouter") url.searchParams.set("output_modalities", "decisions");
+  else if (profile.provider === "nanogpt") url.searchParams.set("detailed", "true");
   const data = await fetchProviderJson<unknown>(provider.name, "model listing", url, {
     headers: { Authorization: `Bearer ${apiKey}` }, redirect: "error",
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
@@ -53,15 +67,20 @@ export async function fetchDecisionModels(profile: { provider: string; api_url?:
     const id = profile.provider === "typesafe" ? item.name : item.id;
     if (typeof id !== "string" || !id.trim()) continue;
     const architecture = isRecord(item.architecture) ? item.architecture : {};
+    const inputModalities = Array.isArray(architecture.input_modalities) ? architecture.input_modalities.filter((v): v is string => typeof v === "string") : [];
+    const outputModalities = Array.isArray(architecture.output_modalities) ? architecture.output_modalities.filter((v): v is string => typeof v === "string") : [];
     if (profile.provider === "openrouter" && Array.isArray(architecture.output_modalities) && !architecture.output_modalities.includes("decisions")) continue;
-    const supported = profile.provider === "typesafe" || /^~?typesafe\/jev-|^(cloudflare\/clef|perplexity\/pplx-decider|upstage\/solar-decide|inception\/mercury-decide|liquid\/d1|openai\/gpt-6-luna-decisions)/.test(id);
+    // NanoGPT mixes chat and decision models in one detailed catalog; keep only Decision models.
+    if (profile.provider === "nanogpt" && !outputModalities.includes("decisions")) continue;
+    const supported = profile.provider === "typesafe" || profile.provider === "nanogpt" || /^~?typesafe\/jev-|^(cloudflare\/clef|perplexity\/pplx-decider|upstage\/solar-decide|inception\/mercury-decide|liquid\/d1|openai\/gpt-6-luna-decisions)/.test(id);
+    const pricing = decisionModelPricing(item.pricing);
     models.set(id, {
-      id, label: profile.provider === "openrouter" && typeof item.name === "string" ? item.name : id,
+      id, label: (profile.provider === "openrouter" || profile.provider === "nanogpt") && typeof item.name === "string" ? item.name : id,
       ...(typeof item.description === "string" ? { description: item.description } : {}),
-      ...(profile.provider === "typesafe" ? { input_modalities: ["text", "image"] } : Array.isArray(architecture.input_modalities) ? { input_modalities: architecture.input_modalities.filter((v): v is string => typeof v === "string") } : {}),
-      ...(Array.isArray(architecture.output_modalities) ? { output_modalities: architecture.output_modalities.filter((v): v is string => typeof v === "string") } : {}),
+      ...(profile.provider === "typesafe" ? { input_modalities: ["text", "image"] } : inputModalities.length ? { input_modalities: inputModalities } : {}),
+      ...(outputModalities.length ? { output_modalities: outputModalities } : {}),
       ...(typeof item.context_length === "number" ? { context_length: item.context_length } : {}),
-      ...(isRecord(item.pricing) ? { pricing: Object.fromEntries(Object.entries(item.pricing).filter((entry): entry is [string, string] => typeof entry[1] === "string")) } : {}),
+      ...(pricing ? { pricing } : {}),
       protocol: isUnsupportedDecisionModel(profile.provider, id) ? "unsupported" : supported ? "supported" : "unverified",
     });
   }

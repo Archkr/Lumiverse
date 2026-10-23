@@ -3613,5 +3613,13 @@
     "skipTitle": "Skip",
     "kickTitle": "Kick",
     "banTitle": "Ban"
+  },
+  "decisionConnectionManager": {
+    "loading": "Chargement des connexions Decision...",
+    "newConnection": "Nouvelle connexion Decision",
+    "empty": "Aucune connexion Decision pour l'instant. Ajoutez OpenRouter, NanoGPT ou TypeSafe pour commencer.",
+    "deleteTitle": "Supprimer la connexion Decision",
+    "deleteMessage": "Supprimer « {{name}} » ? Cette action est irréversible.",
+    "deleteConfirm": "Supprimer"
   }
 }
