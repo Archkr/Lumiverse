@@ -142,12 +142,10 @@ export async function listConnectionModels(userId: string, id: string): Promise<
 }
 export async function testConnection(userId: string, id: string): Promise<{ success: boolean; message: string; provider: string }> {
   const result = await listConnectionModels(userId, id);
-  // NanoGPT serves its model catalog without validating the key, so only catalog access is proven here.
+  // Some catalogs (NanoGPT) are public, so this only proves catalog access, not the credential.
   return {
     success: !result.error,
-    message: result.error || (result.provider === "nanogpt"
-      ? "NanoGPT model catalog access verified. Run a sample decision to verify the API key."
-      : "API key and model catalog access verified. No decision was run."),
+    message: result.error || "Model catalog access verified. No decision was run.",
     provider: result.provider,
   };
 }

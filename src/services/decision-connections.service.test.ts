@@ -152,7 +152,7 @@ test("NanoGPT connections discover Decision models and evaluate through the nati
   }) as unknown as typeof fetch;
   const tested = await svc.testConnection("alice", profile.id);
   expect(tested.success).toBe(true);
-  expect(tested.message).toContain("Run a sample decision");
+  expect(tested.message).toBe("Model catalog access verified. No decision was run.");
   expect((await svc.listConnectionModels("alice", profile.id)).models.map((model) => model.id)).toEqual(["typesafe/jev-1.13"]);
   expect((await evaluateDecision("alice", input)).model).toBe("typesafe/jev-1.13");
   expect(calls).toEqual([
